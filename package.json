@@ -1,0 +1,31 @@
+{
+  "name": "asistente-financiero",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Asistente financiero por voz",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\"",
+    "web": "node scripts/construir-web.js"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.0",
+    "@fontsource-variable/bricolage-grotesque": "^5.3.0"
+  },
+  "dependencies": {
+    "@capacitor-community/speech-recognition": "^7.0.1",
+    "@capacitor-community/text-to-speech": "^8.0.2",
+    "@capacitor-mlkit/text-recognition": "^8.2.2",
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/local-notifications": "^8.3.1",
+    "@capacitor/preferences": "^8.0.1",
+    "@capacitor/share": "^8.0.3",
+    "@capgo/capacitor-native-biometric": "^8.9.1",
+    "@capgo/capacitor-share-target": "^8.0.65",
+    "@capgo/capacitor-social-login": "^8.7.7",
+    "@capgo/native-purchases": "^8.9.6"
+  }
+}

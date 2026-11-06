@@ -1,0 +1,30 @@
+name: Publicar servidor de IA
+
+# Publica el Worker de Cloudflare (la IA de Pro). Manual: pestaña "Actions" → "Publicar servidor de IA" → "Run workflow".
+# El modelo y el tope diario salen de www/js/plan.js (PLAN.ia), no se escriben aquí.
+on:
+  workflow_dispatch:
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Leer la configuración
+        run: |
+          node -e "const P=require('./www/js/plan.js'); console.log('MODELO_IA='+P.ia.modelo); console.log('LIMITE_IA='+P.ia.limiteDiarioApp)" >> "$GITHUB_ENV"
+      - name: Publicar
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          command: deploy --var MODELO:${{ env.MODELO_IA }} --var LIMITE_DIARIO:${{ env.LIMITE_IA }}
+          secrets: |
+            ANTHROPIC_API_KEY
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

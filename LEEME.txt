@@ -1,0 +1,30 @@
+LOGOS DE LOS BANCOS Y COOPERATIVAS
+Cada archivo se llama como el id de la entidad en www/js/bancos-datos.js (png, svg o webp). La app los busca solo por ese nombre.
+Si falta el archivo, la app muestra el nombre en letras.
+
+  ec-amazonas        Banco Amazonas  (ec-amazonas.png)
+  ec-andalucia       Cooperativa Andalucía  (ec-andalucia.png)
+  ec-atlantida       Banco Atlántida  (ec-atlantida.png)
+  ec-austro          Banco del Austro  (ec-austro.png)
+  ec-bgr             Banco General Rumiñahui  (ec-bgr.png)
+  ec-bolivariano     Banco Bolivariano  (ec-bolivariano.png)
+  ec-cooprogreso     Cooperativa Cooprogreso  (ec-cooprogreso.png)
+  ec-cpn             Cooperativa Policía Nacional (CPN)  (ec-cpn.png)
+  ec-diners          Diners Club del Ecuador  (ec-diners.png)
+  ec-guayaquil       Banco de Guayaquil  (ec-guayaquil.png)
+  ec-internacional   Banco Internacional  (ec-internacional.png)
+  ec-jep             Cooperativa JEP (Juventud Ecuatoriana Progresista)  (ec-jep.png)
+  ec-loja            Banco de Loja  (ec-loja.png)
+  ec-machala         Banco de Machala  (ec-machala.png)
+  ec-manabi          Banco Comercial de Manabí  (ec-manabi.png)
+  ec-mushucruna      Cooperativa Mushuc Runa  (ec-mushucruna.png)
+  ec-oscus           Cooperativa OSCUS  (ec-oscus.png)
+  ec-pacifico        Banco del Pacífico  (ec-pacifico.png)
+  ec-pichincha       Banco Pichincha  (ec-pichincha.svg)
+  ec-pmv             Cooperativa Pablo Muñoz Vega  (ec-pmv.png)
+  ec-produbanco      Produbanco  (ec-produbanco.png)
+  ec-solidario       Banco Solidario  (ec-solidario.png)
+
+Para agregar uno: guarda el logo como www/img/bancos/<id>.png con fondo transparente o blanco, mejor horizontal.
+Los logos son marca de cada entidad: se usan solo para que la persona reconozca su banco o cooperativa, sin dar a entender que la entidad avala la app.
+Los logos con letras blancas (Internacional, Machala, Loja, Solidario, Guayaquil) llevan la marca logoFondo en el catálogo para dibujarlos sobre su color.

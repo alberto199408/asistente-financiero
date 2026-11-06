@@ -1,0 +1,88 @@
+name: Compilar Android
+
+# Se ejecuta solo cuando subes cambios a la rama principal, o a mano desde la pestaña "Actions" → "Compilar Android" → "Run workflow".
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  compilar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # true solo si pusiste la llave de firma en "Secrets" (ver GUIA_PASO_A_PASO.md). Sin llave se genera solo un APK de prueba.
+      TIENE_LLAVE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar librerías
+        run: npm ci
+
+      - name: Pruebas automáticas (si alguna falla, no se compila)
+        run: npm test
+
+      - name: Preparar el proyecto Android (nombre, versión, permisos, ícono)
+        run: |
+          python -m pip install --quiet pillow
+          node scripts/preparar-android.js
+          chmod +x android/gradlew
+
+      - name: Preparar la llave de firma
+        if: env.TIENE_LLAVE == 'true'
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/llave.jks"
+          echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/llave.jks" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+
+      - name: Huella SHA-1 de la llave (para registrarla en Google Cloud)
+        if: env.TIENE_LLAVE == 'true'
+        run: |
+          keytool -list -v -keystore "$ANDROID_KEYSTORE_FILE" -alias "$ANDROID_KEY_ALIAS" -storepass "$ANDROID_KEYSTORE_PASSWORD" | grep -E "SHA1|SHA256" || true
+          echo "Hash para Facebook:"
+          keytool -exportcert -alias "$ANDROID_KEY_ALIAS" -keystore "$ANDROID_KEYSTORE_FILE" -storepass "$ANDROID_KEYSTORE_PASSWORD" | openssl sha1 -binary | openssl base64 || true
+
+      - name: APK firmado + paquete para Google Play (.aab)
+        if: env.TIENE_LLAVE == 'true'
+        working-directory: android
+        run: ./gradlew assembleRelease bundleRelease --no-daemon
+
+      - name: "APK de prueba (sin llave; con este Google no dejará iniciar sesión)"
+        if: env.TIENE_LLAVE != 'true'
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Guardar el APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+
+      - name: Guardar el paquete para Google Play
+        if: env.TIENE_LLAVE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: paquete-google-play
+          path: android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error

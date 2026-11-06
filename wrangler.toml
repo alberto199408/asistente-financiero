@@ -1,0 +1,13 @@
+# Cloudflare Worker de la IA. Pasos completos en GUIA_PASO_A_PASO.md.
+name = "asistente-financiero-ia"
+main = "index.mjs"
+compatibility_date = "2026-01-01"
+
+# El modelo y el tope diario NO se escriben aquí: salen de www/js/plan.js (PLAN.ia) cuando se publica con el workflow "Publicar servidor de IA".
+# Para que el tope diario funcione crea un KV llamado CONTADOR y quita el # de abajo.
+
+# [[kv_namespaces]]
+# binding = "CONTADOR"
+# id = "PEGA_AQUI_EL_ID_DEL_KV"
+
+# La clave de Anthropic NO se escribe aquí. Se guarda con:  npx wrangler secret put ANTHROPIC_API_KEY

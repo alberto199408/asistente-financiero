@@ -1,0 +1,41 @@
+name: Crear llave de firma (una sola vez)
+
+# Crea la llave con la que se firma la app. Se ejecuta UNA vez a mano: pestaña "Actions" → "Crear llave de firma" → "Run workflow".
+# Entrega un archivo con la llave y sus datos (se borra solo en 1 día). Guárdalos en un lugar seguro: sin esta llave no puedes subir actualizaciones.
+on:
+  workflow_dispatch:
+
+jobs:
+  crear:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Crear la llave
+        run: |
+          CLAVE="$(openssl rand -hex 16)"
+          keytool -genkeypair -keystore llave.jks -alias asistente -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass "$CLAVE" -keypass "$CLAVE" -dname "CN=Asistente Financiero, O=Asistente Financiero, C=EC"
+          base64 -w0 llave.jks > ANDROID_KEYSTORE_BASE64.txt
+          {
+            echo "ANDROID_KEYSTORE_PASSWORD=$CLAVE"
+            echo "ANDROID_KEY_PASSWORD=$CLAVE"
+            echo "ANDROID_KEY_ALIAS=asistente"
+            echo
+            keytool -list -v -keystore llave.jks -alias asistente -storepass "$CLAVE" | grep -E "SHA1|SHA256"
+            echo
+            echo "Hash para Facebook:"
+            keytool -exportcert -alias asistente -keystore llave.jks -storepass "$CLAVE" | openssl sha1 -binary | openssl base64
+          } > DATOS_DE_LA_LLAVE.txt
+      - name: Entregar (solo tú puedes bajarlo, se borra en 1 día)
+        uses: actions/upload-artifact@v4
+        with:
+          name: llave-de-firma
+          path: |
+            llave.jks
+            ANDROID_KEYSTORE_BASE64.txt
+            DATOS_DE_LA_LLAVE.txt
+          retention-days: 1
