@@ -600,7 +600,7 @@
       let j = i + 1;
       const hayMoneda = toks[j] && MONEDAS.has(toks[j].n);
       if (hayMoneda) j++;
-      if (toks[j] && toks[j].n === 'con' && toks[j + 1] && toks[j + 1].num != null && toks[j + 1].num < 100 && Number.isInteger(toks[j + 1].num)) {
+      if (toks[j] && /^(con|punto|coma)$/.test(toks[j].n) && toks[j + 1] && toks[j + 1].num != null && toks[j + 1].num < 100 && Number.isInteger(toks[j + 1].num)) {
         const b = toks[j + 1];
         const cent = toks[j + 2] && /^(centavo|centavos|ctvs|ctv)$/.test(toks[j + 2].n);
         const alFinal = j + 1 === toks.length - 1;
@@ -863,8 +863,13 @@
     /* ---- tarjeta y forma de pago */
     const credito = { modo: null, meses: null, cuota: null, interes: null };
     let usaTarjeta = false, efectivoExplicito = false;
+    // Detectar "pagué LA tarjeta" / "pagué DE la tarjeta" = pago al banco, NO compra con tarjeta
+    const esPagoATarjeta = /\b(pagu[eé]|pagamos|abon[eé]|abonamos|pagar?)\s+(la|de la|a la|mi|al)\s+tarjeta\b/.test(txt)
+      || /\b(pago|abono)\s+(de |a |al )?(la\s+)?(tarjeta|banco)\b/.test(txt)
+      || /\bpag(ué?|e|amos)\s+del?\s+(banco|austro|pichincha|guayaquil|bolivariano|produbanco|internacional|pacifico|solidario|biess)\b/.test(txt);
     n.forEach((w, i) => {
-      if (/^(tarjeta|tarjetas|visa|mastercard|master|diners|amex|american)$/.test(w)) { usaTarjeta = true; marcar([i], 'otro'); }
+      // Solo marcar como "pago con tarjeta" si NO es un pago a la tarjeta
+      if (!esPagoATarjeta && /^(tarjeta|tarjetas|visa|mastercard|master|diners|amex|american)$/.test(w)) { usaTarjeta = true; marcar([i], 'otro'); }
       if (/^(credito)$/.test(w) && n[i - 1] !== 'del' && n[i - 1] !== 'de') { usaTarjeta = true; }
       if (/^(efectivo|cash)$/.test(w)) { efectivoExplicito = true; marcar([i], 'otro'); }
       if (/^(debito)$/.test(w)) { efectivoExplicito = true; marcar([i], 'otro'); }
@@ -1014,6 +1019,9 @@
         marcar(c.usados, 'cat');
       } else if (tipoItem === 'ingreso') {
         catId = 'extra'; conf = 'media';
+      } else if (esPagoATarjeta) {
+        // "pagué la tarjeta del austro $600" => categoría Deudas y cuotas
+        catId = 'deudas'; conf = 'alta';
       } else { catId = 'otros'; conf = 'ninguna'; }
       // texto libre del concepto (sin palabras de relleno)
       const contenido = idx.filter((i) => roles[i] !== 'cat' || true).filter((i) => !PARADA.has(n[i]) && toks[i].num == null).map((i) => toks[i].raw.replace(/[?!.,;:]+$/, ''));
@@ -3582,7 +3590,19 @@
   }
   function marcarEntrada() { ultimaSalida = 0; }
 
-  AF.seguridad = { usarAlmacen, pinValido, pinDebil, existe, longitudPin, crear, abrirConPin, cambiarPin, bloquear, estaAbierta, estadoIntentos,
+  // Crea la bóveda con un PIN interno generado automáticamente (modo sin PIN).
+  // El "auto-PIN" se guarda en localStorage; si se borra, el usuario deberá reiniciar la cuenta.
+  async function crearSinPin(ns) {
+    const autoPin = String(Math.floor(100000 + Math.random() * 900000));
+    try { localStorage.setItem('af_clave_' + ns, autoPin); } catch (e) { /* private mode */ }
+    return crear(ns, autoPin);
+  }
+  // Devuelve el PIN interno si existe (modo sin PIN), o null.
+  function obtenerAutoPin(ns) {
+    try { return localStorage.getItem('af_clave_' + ns); } catch (e) { return null; }
+  }
+
+  AF.seguridad = { usarAlmacen, pinValido, pinDebil, existe, longitudPin, crear, crearSinPin, obtenerAutoPin, abrirConPin, cambiarPin, bloquear, estaAbierta, estadoIntentos,
     activarHuella, huellaActiva, desactivarHuella, abrirConHuella, guardarDatos, leerDatos, marcaDatos, paqueteRespaldo, restaurarPaquete,
     borrarCuenta, sesion, guardarSesion, cerrarSesion, espacioDe, marcarSalida, marcarEntrada, debeBloquear, b64, deB64 };
   if (typeof module === 'object' && module.exports) module.exports = AF.seguridad;
@@ -3763,15 +3783,24 @@
     }
     const W = g.SpeechRecognition || g.webkitSpeechRecognition;
     if (!W) throw err('sin_voz', 'Este equipo no tiene reconocimiento de voz. Escribe lo que quieres registrar.');
-    const rec = new W(); rec.lang = idiomaVoz(); rec.interimResults = true; rec.maxAlternatives = 1;
-    let ultimo = '';
+    const rec = new W(); rec.lang = idiomaVoz(); rec.interimResults = true; rec.maxAlternatives = 1; rec.continuous = true;
+    let ultimo = '', parado = false;
     const terminado = new Promise((res, rej) => {
-      rec.onresult = (e) => { ultimo = Array.from(e.results).map((r) => r[0].transcript).join(' '); if (alParcial) alParcial(ultimo); };
-      rec.onerror = (e) => (e.error === 'no-speech' ? res('') : rej(err('sin_voz', 'No pude escuchar (' + e.error + ').')));
-      rec.onend = () => res(ultimo);
+      rec.onresult = (e) => {
+        // En modo continuo, acumular todos los resultados (finales e intermedios)
+        let acum = '';
+        for (let i = 0; i < e.results.length; i++) acum += e.results[i][0].transcript;
+        ultimo = acum.trim();
+        if (alParcial) alParcial(ultimo);
+      };
+      rec.onerror = (e) => {
+        if (e.error === 'no-speech') return; // en continuo, el silencio no es error — seguir escuchando
+        rej(err('sin_voz', 'No pude escuchar (' + e.error + ').'));
+      };
+      rec.onend = () => { if (!parado) { try { rec.start(); } catch (er) { res(ultimo); } } else res(ultimo); };
     });
     rec.start();
-    return { parar: async () => { try { rec.stop(); } catch (e) { /* nada */ } }, terminado };
+    return { parar: async () => { parado = true; try { rec.stop(); } catch (e) { /* nada */ } }, terminado };
   }
   async function hablar(texto) {
     if (!texto) return;
@@ -4325,10 +4354,20 @@
       } else if (clave === 'pais') {
         titulo = '¿Dónde vives?'; sub = 'Así uso las palabras de tu país (diferido, cuotas…) y tu moneda.';
         const zona = h('div');
+        let filtroPais = '';
+        const inpBusca = h('input', { class: 'entrada', type: 'search', placeholder: '🔍 Buscar país…', 'aria-label': 'Buscar país', style: 'margin-top:8px', oninput: (e) => { filtroPais = U.norm(e.target.value); pint(); } });
         const pint = () => {
           AF.ui.vaciar(zona);
-          zona.appendChild(h('div', { class: 'opciones', estilo: { marginTop: '8px' } }, PLAN.paises.map((p) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': r.pais === p.codigo ? 'true' : 'false', onclick: () => { r.pais = p.codigo; r.moneda = p.moneda; pint(); } }, p.nombre))));
-          zona.appendChild(campo('Moneda', h('div', { class: 'opciones' }, Object.keys(PLAN.monedas).map((m) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': r.moneda === m ? 'true' : 'false', onclick: () => { r.moneda = m; pint(); } }, PLAN.monedas[m].simbolo + ' ' + m)))));
+          zona.appendChild(inpBusca);
+          const filtrados = PLAN.paises.filter((p) => !filtroPais || U.norm(p.nombre).includes(filtroPais));
+          const lista = h('div', { style: 'max-height:220px;overflow-y:auto;border:2px solid var(--linea);border-radius:12px;margin-top:8px' },
+            filtrados.map((p) => h('button', {
+              type: 'button',
+              style: 'display:flex;align-items:center;width:100%;padding:12px 16px;border:0;border-bottom:1px solid var(--linea);background:' + (r.pais === p.codigo ? 'var(--panel-suave)' : 'var(--hoja)') + ';color:' + (r.pais === p.codigo ? 'var(--acento)' : 'var(--texto)') + ';font-weight:' + (r.pais === p.codigo ? '700' : '400') + ';font-size:var(--t-md);text-align:left;cursor:pointer',
+              onclick: () => { r.pais = p.codigo; r.moneda = p.moneda; filtroPais = ''; inpBusca.value = ''; pint(); },
+            }, (r.pais === p.codigo ? '✓ ' : '') + p.nombre)));
+          zona.appendChild(lista);
+          zona.appendChild(campo('Moneda', h('div', { class: 'opciones', style: 'margin-top:4px' }, Object.keys(PLAN.monedas).map((m) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': r.moneda === m ? 'true' : 'false', onclick: () => { r.moneda = m; pint(); } }, PLAN.monedas[m].simbolo + ' ' + m)))));
         };
         pint(); cuerpo = zona;
       } else if (clave === 'moneda') {
@@ -4383,8 +4422,14 @@
       const segm = h('div', { class: 'segmentos', estilo: { marginTop: '18px', width: '220px' } },
         [PLAN.sesion.pinMin, PLAN.sesion.pinMax].map((n) => h('button', { type: 'button', 'aria-pressed': n === len ? 'true' : 'false', onclick: (e) => { len = n; vista.cambiarLargo(n); segm.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', b === e.currentTarget ? 'true' : 'false')); } }, n + ' dígitos')));
       const vista = pantallaPin({
-        titulo: 'Crea tu PIN', sub: 'Lo pedimos cuando abras la app. Si lo olvidas, tus datos no se pueden recuperar: guárdalo bien.', len, arriba: segm,
-        pie: [h('button', { class: 'btn-texto', type: 'button', onclick: () => { k = pasos().length - 1; mostrar(); } }, 'Volver')],
+        titulo: 'Crea tu PIN', sub: 'Opcional. Si no quieres PIN, entra sin él (tus datos siguen cifrados).', len, arriba: segm,
+        pie: [
+          h('button', { class: 'btn-texto', type: 'button', onclick: () => { k = pasos().length - 1; mostrar(); } }, 'Volver'),
+          h('button', { class: 'btn-texto', type: 'button', style: 'margin-top:4px;opacity:0.7', onclick: async () => {
+            try { await app.crearCuenta({ ajustes: r, pin: null }); }
+            catch (e) { /* ya se manejó */ }
+          } }, 'Continuar sin PIN'),
+        ],
         alCompletar: async (pin) => {
           if (primero === null) {
             if (Sg().pinDebil(pin)) return { ok: false, mensaje: 'Ese PIN es muy fácil de adivinar. Prueba otro.' };
@@ -4427,7 +4472,17 @@
   /* ----------------------------------------------------------------------- bloqueo */
   async function bloqueo() {
     const app = AF.app;
-    const ns = app.ns, len = await Sg().longitudPin(ns);
+    const ns = app.ns;
+
+    // Cuenta creada sin PIN: entrar automáticamente con el auto-PIN guardado.
+    const autoPin = Sg().obtenerAutoPin(ns);
+    if (autoPin) {
+      const r = await Sg().abrirConPin(ns, autoPin);
+      if (r.ok) { await app.entrar(); return; }
+      // Si falló (localStorage borrado), mostrar pantalla de error limpia
+    }
+
+    const len = await Sg().longitudPin(ns);
     const nombre = (app.sesion && app.sesion.nombre) || '';
     const conHuella = (await Sg().huellaActiva(ns)) && (await N().huellaDisponible());
     let vista;
@@ -4497,52 +4552,71 @@
       h('div', { class: 'avatar', 'aria-hidden': 'true' }, (nombre || '·').charAt(0).toUpperCase()),
       h('div', { class: 'saludo-texto' }, saludo),
       h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Ajustes', onclick: () => AF.app.abrir('Ajustes', (c) => V.mas.ajustes(c)) }, ico('ajustes')));
-    const el = h('section', { class: 'horizonte', 'aria-label': 'Cuánto puedes gastar hoy' }, cab);
+    const el = h('section', { class: 'horizonte', 'aria-label': 'Resumen financiero' }, cab);
 
     if (!p.ingresos) {
       el.appendChild(h('div', { class: 'cifra-bloque' },
-        h('div', { class: 'cifra-etiqueta' }, 'Hoy puedes gastar'),
+        h('div', { class: 'cifra-etiqueta' }, 'Sin ingreso registrado'),
         h('div', { class: 'cifra' }, '—'),
-        h('p', { class: 'cifra-pie suave' }, 'Registra tu sueldo y te digo cuánto puedes gastar cada día hasta tu cobro.'),
+        h('p', { class: 'cifra-pie suave' }, 'Registra tu sueldo y te digo cuánto te queda hasta tu cobro.'),
         h('button', { class: 'btn btn-voz', type: 'button', estilo: { marginTop: '18px' }, onclick: () => C().formMovimiento({ inicial: { tipo: 'ingreso', cat: 'sueldo', monto: D.ajustes.sueldo || '' }, alGuardar: (m) => C().guardarMov(m) }) }, 'Registrar mi sueldo')));
       return el;
     }
-    const pasado = p.hoyDisponible < 0;
-    const usado = p.ingresos > 0 ? Math.min(1, Math.max(0, (p.gastadoAntes + p.gastadoHoy + p.fijos + p.cuotas + p.metas) / p.ingresos)) : 0;
+
+    // Número principal: lo que queda hasta el cobro (siempre positivo o cero)
     const cobro = U.deISO(p.proximo).getDate() + ' de ' + U.nombreMes(p.proximo);
+    const restoPositivo = Math.max(0, p.resto);
+    const sinDinero = p.resto <= 0;
+    const usado = p.ingresos > 0 ? Math.min(1, Math.max(0, (p.gastadoAntes + p.gastadoHoy + p.fijos + p.cuotas + p.metas) / p.ingresos)) : 0;
+    const diasTexto = p.dias === 1 ? '1 día' : p.dias + ' días';
+
     el.appendChild(h('div', { class: 'cifra-bloque' },
-      h('div', { class: 'cifra-etiqueta' }, pasado ? 'Hoy te pasaste de lo que podías gastar' : 'Hoy puedes gastar'),
-      h('div', { class: 'cifra' + (pasado ? ' pasado' : ''), 'aria-live': 'polite' }, h('span', { class: 'cambio-cifra' }, $(p.hoyDisponible))),
-      h('p', { class: 'cifra-pie suave' }, p.disponible > 0
-        ? 'Te quedan ' + $(p.resto) + ' hasta tu cobro del ' + cobro + ' (' + p.dias + (p.dias === 1 ? ' día' : ' días') + ').'
-        : 'Ya no te queda dinero para este periodo. Tu cobro es el ' + cobro + '.')));
-    el.appendChild(h('div', { class: 'avance' + (usado > 0.9 ? ' alerta' : ''), role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(usado * 100), 'aria-label': 'Dinero usado de tu ingreso' }, h('i', { estilo: { width: Math.round(usado * 100) + '%' } })));
-    const datos = [['Ingresos', $(p.ingresos)], ['Gastos', $(p.gastadoAntes + p.gastadoHoy)]];
-    el.appendChild(h('div', { class: 'dos-datos' }, datos.map(([t, v]) => h('div', null, h('div', { class: 'dato-etiqueta suave' }, t), h('div', { class: 'dato-valor' }, v)))));
-    if (p.estimado || p.fijos || p.cuotas || p.metas) {
+      h('div', { class: 'cifra-etiqueta' }, sinDinero ? 'Sin saldo hasta el cobro' : 'Disponible hasta el ' + cobro),
+      h('div', { class: 'cifra' + (sinDinero ? ' pasado' : ''), 'aria-live': 'polite' }, h('span', { class: 'cambio-cifra' }, $(restoPositivo))),
+      h('p', { class: 'cifra-pie suave' }, sinDinero
+        ? 'Tu cobro es el ' + cobro + '.'
+        : diasTexto + (p.dias > 0 ? ' · ' + $(Math.round(restoPositivo / p.dias)) + ' por día' : ''))));
+
+    // Barra de progreso
+    el.appendChild(h('div', { class: 'avance' + (usado > 0.85 ? ' alerta' : ''), role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(usado * 100), 'aria-label': 'Del ingreso usado' }, h('i', { estilo: { width: Math.round(usado * 100) + '%' } })));
+
+    // Fila ingresos / gastos
+    el.appendChild(h('div', { class: 'dos-datos' },
+      h('div', null, h('div', { class: 'dato-etiqueta suave' }, 'Ingresos'), h('div', { class: 'dato-valor' }, $(p.ingresos))),
+      h('div', null, h('div', { class: 'dato-etiqueta suave' }, 'Gastos'), h('div', { class: 'dato-valor' }, $(p.gastadoAntes + p.gastadoHoy)))));
+
+    // Notas pequeñas (pagos fijos, cuotas, metas)
+    if (p.fijos || p.cuotas || p.metas) {
       const notas = [];
-      if (p.estimado) notas.push('Usando tu sueldo de ajustes');
-      if (p.fijos) notas.push('ya aparté ' + $(p.fijos) + ' de pagos fijos');
-      if (p.cuotas) notas.push($(p.cuotas) + ' de cuotas de tarjeta');
+      if (p.fijos) notas.push($(p.fijos) + ' en pagos fijos');
+      if (p.cuotas) notas.push($(p.cuotas) + ' en cuotas');
       if (p.metas) notas.push($(p.metas) + ' para metas');
-      el.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '14px' } }, U.cap(notas.join(' · ')) + '.'));
+      el.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '10px' } }, 'Ya aparté: ' + notas.join(' · ') + '.'));
     }
     return el;
   }
 
-  function seccionNecGusto(D, hoy) {
+  function seccionResumenMes(D, hoy) {
+    // Resumen compacto del mes: necesario vs gusto, solo si hay datos
     const t = AF.informes.totales(D, U.inicioMes(hoy), U.finMes(hoy));
     const tot = t.nec.N + t.nec.G + t.nec.sin;
     if (!tot) return null;
-    const pc = (v) => Math.round((v / tot) * 100);
+    const pc = (v) => tot > 0 ? Math.round((v / tot) * 100) : 0;
     return h('section', { class: 'seccion' },
-      h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Necesario o gusto')),
-      h('div', { class: 'barra-dividida', role: 'img', 'aria-label': 'Necesario ' + pc(t.nec.N) + ' por ciento, gusto ' + pc(t.nec.G) + ' por ciento' },
-        t.nec.N ? h('i', { class: 'seg-nec', estilo: { flex: t.nec.N } }) : null, t.nec.G ? h('i', { class: 'seg-gus', estilo: { flex: t.nec.G } }) : null, t.nec.sin ? h('i', { class: 'seg-sin', estilo: { flex: t.nec.sin } }) : null),
-      h('div', { class: 'leyenda' },
-        h('span', null, h('i', { class: 'seg-nec' }), 'Necesario ' + $(t.nec.N) + ' · ' + pc(t.nec.N) + ' %'),
-        h('span', null, h('i', { class: 'seg-gus' }), 'Gusto ' + $(t.nec.G) + ' · ' + pc(t.nec.G) + ' %'),
-        t.nec.sin ? h('span', null, h('i', { class: 'seg-sin' }), 'Sin clasificar ' + $(t.nec.sin)) : null));
+      h('div', { class: 'seccion-cabeza' },
+        h('h2', { class: 'h2' }, 'Este mes'),
+        h('button', { class: 'enlace', type: 'button', onclick: () => AF.app.ir('movimientos') }, 'Ver detalle')),
+      h('div', { class: 'barra-dividida', role: 'img', 'aria-label': 'Necesario ' + pc(t.nec.N) + '%, gusto ' + pc(t.nec.G) + '%' },
+        t.nec.N ? h('i', { class: 'seg-nec', estilo: { flex: t.nec.N } }) : null,
+        t.nec.G ? h('i', { class: 'seg-gus', estilo: { flex: t.nec.G } }) : null,
+        t.nec.sin ? h('i', { class: 'seg-sin', estilo: { flex: t.nec.sin } }) : null),
+      h('div', { class: 'dos-datos', estilo: { marginTop: '10px' } },
+        h('div', null,
+          h('div', { class: 'dato-etiqueta suave' }, '🔵 Necesario'),
+          h('div', { class: 'dato-valor' }, $(t.nec.N) + ' · ' + pc(t.nec.N) + '%')),
+        h('div', null,
+          h('div', { class: 'dato-etiqueta suave' }, '🟠 Gusto'),
+          h('div', { class: 'dato-valor' }, $(t.nec.G) + ' · ' + pc(t.nec.G) + '%'))));
   }
 
   function seccionHormiga(D, hoy) {
@@ -4576,7 +4650,7 @@
     AF.informes.alertas(D, hoy, AF.acceso.tiene('alertasPredictivas')).slice(0, 2).forEach((a) => {
       cuerpo.appendChild(h('div', { class: 'nota', estilo: { marginTop: '16px' }, role: 'status' }, ico('alerta'), h('span', null, a.texto)));
     });
-    [seccionNecGusto(D, hoy), seccionHormiga(D, hoy), seccionUltimos(D, hoy)].forEach((s) => s && cuerpo.appendChild(s));
+    [seccionResumenMes(D, hoy), seccionHormiga(D, hoy), seccionUltimos(D, hoy)].forEach((s) => s && cuerpo.appendChild(s));
     cuerpo.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '28px', textAlign: 'center' } }, PLAN.app.avisoLegal));
     cont.appendChild(cuerpo);
   }
@@ -4743,13 +4817,13 @@
         const fil = (etiqueta, valor, onclick, extraClase) => h('button', { class: 'entendido-fila', type: 'button', onclick }, h('span', { class: 'entendido-etiqueta' }, etiqueta), h('span', { class: 'entendido-valor ' + (extraClase || '') }, valor, ico('derecha', 'chico')));
         const filas = [
           fil(it.tipo === 'ingreso' ? 'Ingreso de' : 'Gasto de', $(it.monto), async () => { const v = await pedirNumero('Monto', it.monto); if (v) { it.monto = v; dibujar(); } }, 'monto-grande'),
-          fil('Categoría', (it.catIcono || '') + ' ' + it.catNombre + (duda ? ' · ¿es correcta?' : ''), async () => {
+          fil('Categoría', (it.catIcono || '') + ' ' + it.catNombre + (duda ? ' ·  ?' : ''), async () => {
             const id = await elegirCategoria(it.tipo, it.cat);
             if (!id) return;
             const c = S().categoria(id); it.cat = id; it.catNombre = c.nombre; it.catIcono = c.icono; it.catConfianza = 'alta'; if (it.tipo === 'gasto') it.nec = c.nec || null;
             if (it.palabraNueva) { S().aprender(it.palabraNueva, id); aviso('Aprendí que «' + it.palabraNueva + '» es ' + c.nombre.toLowerCase()); it.palabraNueva = null; }
             dibujar();
-          }, duda ? 'duda' : ''),
+          }),
         ];
         if (it.tipo === 'gasto') filas.push(fil('¿Necesario o gusto?', it.nec === 'N' ? 'Necesario' : it.nec === 'G' ? 'Gusto' : 'Sin clasificar', () => { it.nec = it.nec === 'N' ? 'G' : it.nec === 'G' ? null : 'N'; dibujar(); }));
         filas.push(fil('Fecha', U.cap(U.fechaCorta(it.fecha, AF.app.hoy())), async () => { const f = await elegirFecha(it.fecha); if (f) { it.fecha = f; dibujar(); } }));
@@ -4785,6 +4859,7 @@
     }
 
     async function guardar() {
+      if (!vivo) return;                              // si el usuario ya canceló, no guardar nada
       const D = S().d, hoy = AF.app.hoy();
       const guardados = [];
       for (const it of items) {
@@ -4818,7 +4893,10 @@
     const extras = [];
     const modo = AF.acceso.tiene('puedesGastarHoyCompleto') ? 'completo' : 'simple';
     const p = AF.informes.puedesGastarHoy(D, hoy, modo);
-    if (movs.some((m) => m.tipo === 'gasto') && p.ingresos) extras.push(p.hoyDisponible >= 0 ? 'Hoy todavía puedes gastar ' + $(p.hoyDisponible) + '.' : 'Hoy ya te pasaste ' + $(-p.hoyDisponible) + '.');
+    if (movs.some((m) => m.tipo === 'gasto') && p.ingresos) {
+      if (p.hoyDisponible >= 0) extras.push('Hoy todavía puedes gastar ' + $(p.hoyDisponible) + '.');
+      else if (p.hoyDisponible < -1) extras.push('Hoy te pasaste ' + $(-p.hoyDisponible) + ' de tu presupuesto diario.');
+    }
     AF.informes.presupuestos(D, hoy).forEach((b) => {
       if (movs.some((m) => m.tipo === 'gasto' && (!b.cat || b.cat === m.cat))) {
         if (b.nivel === 'detente') extras.push('Detente: llegaste al límite de ' + b.nombre.toLowerCase() + '.');
@@ -5357,25 +5435,48 @@
   }
 
   /* ------------------------------------------------------------------ costos de la tarjeta */
-  // Lo que cobra el banco (del catálogo, con fuente y fecha) + lo que la persona anotó ella. Nada se inventa.
+  // Lo que cobra el banco: compacto por defecto, expandible al tocar.
   function seccionCostos(cont, t) {
     const b = B().buscar(t.bancoId);
     const todas = B().filas(b, t.nivel, t.costos);
     const con = todas.filter((x) => x.texto), sin = todas.filter((x) => !x.texto);
     const fu = b && b.fuente;
-    const sec = h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Costos de tu tarjeta')));
-    if (fu && B().tieneCostos(b)) sec.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginBottom: '8px' } }, b.nombre + ' · ' + fu.texto + ' · ' + fu.vigencia + '. Valores con IVA.'));
-    if (con.length) {
-      sec.appendChild(h('div', { class: 'lista' }, con.map((x) => fila({ icono: x.icono, titulo: x.etiqueta, sub: x.texto, derecha: ico('adelante'), onclick: () => editarCosto(t, x) }))));
-    } else {
-      sec.appendChild(h('div', { class: 'nota' }, ico('info'), h('span', null, h('strong', null, 'Aún no tengo los costos de ' + (t.banco || 'tu banco') + '. '),
-        'No los invento. Anota lo que te cobra (avance, renovación, tasa…) y queda guardado aquí.')));
+    const sec = h('section', { class: 'seccion' });
+
+    if (!con.length) {
+      // Sin datos: nota compacta + botón para anotar
+      sec.appendChild(h('div', { class: 'nota' }, ico('info'), h('span', null,
+        h('strong', null, 'Sin costos de ' + (t.banco || 'tu banco') + '. '), 'Anótalos y los recuerdo.',
+        sin.length ? h('button', { class: 'enlace', type: 'button', estilo: { marginLeft: '4px' }, onclick: () => elegirCosto(t, sin) }, 'Anotar') : null)));
+      if (b && b.tarifarioUrl) sec.appendChild(h('a', { class: 'btn-texto', href: b.tarifarioUrl, target: '_blank', rel: 'noopener noreferrer', estilo: { display: 'block', textAlign: 'center', marginTop: '4px', fontSize: 'var(--t-xs)' } }, 'Tarifario oficial de ' + (b.corto || b.nombre)));
+      cont.appendChild(sec);
+      return;
     }
+
+    // Con datos: cabeza colapsable
+    let abierto = false;
+    const detDiv = h('div', { style: 'display:none' });
+    const toggle = h('button', { type: 'button', style: 'display:flex;align-items:center;justify-content:space-between;width:100%;background:none;border:0;padding:0;cursor:pointer;text-align:left', onclick: () => {
+      abierto = !abierto;
+      detDiv.style.display = abierto ? '' : 'none';
+      flecha.style.transform = abierto ? 'rotate(90deg)' : '';
+    } },
+      h('h2', { class: 'h2' }, 'Costos de tu tarjeta'),
+      h('span', { style: 'display:flex;align-items:center;gap:6px' },
+        h('span', { class: 'texto-xs suave' }, con.length + ' conceptos'),
+        h('span', { style: 'transition:transform .2s;display:inline-block' }, ico('adelante'))));
+    // guardar ref al ícono de flecha
+    const flecha = toggle.querySelector('span > span:last-child');
+
+    if (fu && B().tieneCostos(b)) detDiv.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginBottom: '8px', marginTop: '6px' } }, b.nombre + ' · ' + fu.vigencia + '. Con IVA.'));
+    detDiv.appendChild(h('div', { class: 'lista' }, con.map((x) => fila({ icono: x.icono, titulo: x.etiqueta, sub: x.texto, derecha: ico('adelante'), onclick: () => editarCosto(t, x) }))));
     const calc = calculadoraAvance(b);
-    if (calc) sec.appendChild(calc);
-    if (sin.length) sec.appendChild(h('button', { class: 'btn btn-borde btn-bloque', type: 'button', estilo: { marginTop: '12px' }, onclick: () => elegirCosto(t, sin) }, 'Anotar un costo'));
-    if (b && b.tarifarioUrl && !B().tieneCostos(b)) sec.appendChild(h('a', { class: 'btn-texto', href: b.tarifarioUrl, target: '_blank', rel: 'noopener noreferrer', estilo: { display: 'block', textAlign: 'center', marginTop: '8px' } }, 'Abrir el tarifario oficial de ' + b.corto));
-    if (con.length) sec.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '10px' } }, 'Son los valores publicados por el banco y pueden cambiar. Si tu estado de cuenta dice otra cosa, manda tu estado de cuenta: toca una línea y anota tu dato.'));
+    if (calc) detDiv.appendChild(calc);
+    if (sin.length) detDiv.appendChild(h('button', { class: 'btn btn-borde btn-bloque', type: 'button', estilo: { marginTop: '10px' }, onclick: () => elegirCosto(t, sin) }, 'Anotar otro costo'));
+    detDiv.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '8px' } }, 'Toca una línea para ajustar el valor si tu estado de cuenta dice otra cosa.'));
+
+    sec.appendChild(toggle);
+    sec.appendChild(detDiv);
     cont.appendChild(sec);
   }
 
@@ -6870,7 +6971,11 @@
 
   // Se llama al terminar la bienvenida: crea la bóveda, guarda los ajustes y entra.
   app.crearCuenta = async ({ ajustes, pin }) => {
-    await Sg().crear(app.ns, pin);
+    if (pin !== null && pin !== undefined) {
+      await Sg().crear(app.ns, pin);
+    } else {
+      await Sg().crearSinPin(app.ns);
+    }
     const nuevo = S().vacio();
     Object.assign(nuevo.ajustes, { nombre: ajustes.nombre, pais: ajustes.pais, moneda: ajustes.moneda, diaCobro: ajustes.diaCobro, sueldo: ajustes.sueldo || null, cargas: ajustes.cargas || 0, bienvenidaHecha: true });
     nuevo.tarjetas = (ajustes.tarjetas || []).map((t) => Object.assign({ id: AF.util.uid(), creado: Date.now() }, t));
