@@ -300,13 +300,28 @@
       o.acciones && o.acciones.length
         ? h('div', { class: 'hoja-acciones' }, o.acciones.map((a) => h('button', {
           class: 'btn ' + (a.clase || 'btn-primario'), type: 'button',
-          onclick: () => { if (a.onclick) { if (a.onclick(api) === false) return; } if (a.cierra !== false) api.cerrar(); },
+          onclick: async () => { if (a.onclick && await a.onclick(api) === false) return; if (a.cierra !== false) api.cerrar(); },
         }, a.texto))) : null);
     const api = {
       cerrar() { telon.remove(); caja.remove(); if (o.alCerrar) o.alCerrar(); },
       el: caja,
+      cambiosPendientes: () => modificado,
     };
-    telon.addEventListener('click', api.cerrar);
+    let modificado = false, inicioY = null;
+    caja.addEventListener('input', () => { modificado = true; });
+    caja.addEventListener('change', () => { modificado = true; });
+    if (o.confirmarSalida) caja.addEventListener('click', (ev) => {
+      if (ev.target.closest('.opcion, .segmentos button')) modificado = true;
+    });
+    const solicitarCierre = () => {
+      if (o.confirmarSalida && modificado && !g.confirm('¿Descartar los cambios sin guardar?')) return;
+      api.cerrar();
+    };
+    telon.addEventListener('click', solicitarCierre);
+    const asa = caja.querySelector('.hoja-asa');
+    asa.style.touchAction = 'none';
+    asa.addEventListener('pointerdown', (ev) => { inicioY = ev.clientY; asa.setPointerCapture(ev.pointerId); });
+    asa.addEventListener('pointerup', (ev) => { if (inicioY !== null && ev.clientY - inicioY > 50) solicitarCierre(); inicioY = null; });
     cont.appendChild(telon); cont.appendChild(caja);
     return api;
   }
@@ -870,7 +885,9 @@
     n.forEach((w, i) => {
       // Solo marcar como "pago con tarjeta" si NO es un pago a la tarjeta
       if (!esPagoATarjeta && /^(tarjeta|tarjetas|visa|mastercard|master|diners|amex|american)$/.test(w)) { usaTarjeta = true; marcar([i], 'otro'); }
-      if (/^(credito)$/.test(w) && n[i - 1] !== 'del' && n[i - 1] !== 'de') { usaTarjeta = true; }
+      if (/^(credito)$/.test(w) && n[i - 1] !== 'del' && n[i - 1] !== 'de') { usaTarjeta = true; marcar([i], 'otro'); }
+      // "tarjeta de crédito" describe el medio de pago; no es la categoría Deudas.
+      if (w === 'credito' && /^(de|del)$/.test(n[i - 1] || '') && /^(tarjeta|tarjetas)$/.test(n[i - 2] || '')) marcar([i - 1, i], 'otro');
       if (/^(efectivo|cash)$/.test(w)) { efectivoExplicito = true; marcar([i], 'otro'); }
       if (/^(debito)$/.test(w)) { efectivoExplicito = true; marcar([i], 'otro'); }
       if (/^(corriente|contado)$/.test(w)) { credito.modo = 'corriente'; usaTarjeta = true; marcar([i], 'otro'); }
@@ -1080,6 +1097,18 @@
     const txt = n.join(' ');
     if (/^(ayuda|que puedes hacer|como funciona|que haces)\b/.test(txt)) return { tipo: 'ayuda', texto: txt };
 
+    // Un abono a una tarjeta es distinto de una compra pagada con ella.
+    const esAbono = /\b(pague|pagamos|abone|abonamos|pagar|pago|abono)\b/.test(txt)
+      && /\b(tarjeta|visa|mastercard|diners|amex)\b/.test(txt)
+      && /\b(pague|pagamos|abone|abonamos|pagar|pago|abono)\s+(?:\$?\d+(?:[.,]\d+)?\s*(?:dolares?\s+)?|)(?:(?:la|mi|a|al|de|del|a la|de la|de mi|a mi)\s+){0,2}(?:tarjeta|visa|mastercard|diners|amex)\b/.test(txt);
+    if (esAbono) {
+      const fecha = leerFecha(toks, ctx.hoy);
+      const numeros = toks.filter((t, i) => t.num != null && !fecha.usados.includes(i));
+      const tarjetaId = tarjetaDeTexto(n, ctx) || (ctx.tarjetas.length === 1 ? ctx.tarjetas[0].id : null);
+      return { tipo: 'pago_tarjeta', monto: numeros.length === 1 ? numeros[0].num : null,
+        tarjetaId, fecha: fecha.fecha, texto: crudo };
+    }
+    if (/^(mira|oye|escucha)\b.*\b(anterior|antes|lo que te dije)\b/.test(txt)) return { tipo: 'aclarar', texto: crudo };
     const cor = detectarCorreccion(toks, n, txt, ctx);
     if (cor) return Object.assign(cor, { texto: txt, partes: partes(toks, new Array(toks.length).fill('')) });
     const pre = detectarPresupuesto(toks, n, txt, ctx);
@@ -2379,11 +2408,12 @@
     if (!(tarjeta.diaCorte && tarjeta.diaVencimiento)) faltanDatos.push('fechas');
     const compras = movs.filter((m) => m.tipo === 'gasto' && m.cuenta === 'tarjeta' && m.tarjetaId === tarjeta.id);
     const pagos = movs.filter((m) => m.tipo === 'pago_tarjeta' && m.tarjetaId === tarjeta.id);
-    let todas = [], avisos = [], sinTasa = [];
+    let todas = [], avisos = [], sinTasa = [], comprasSinPlan = 0, capitalSinPlan = 0;
     compras.forEach((c) => {
       const p = planCompra(c, tarjeta);
       p.avisos.forEach((a) => avisos.push(a));
       if (p.faltaTasa) sinTasa.push(c);
+      if (!p.cuotas.length) { comprasSinPlan++; capitalSinPlan += c.monto; }
       p.cuotas.forEach((q) => todas.push(Object.assign({ compraId: c.id, desc: c.desc, cat: c.cat }, q)));
     });
     todas.sort((a, b) => (a.vence < b.vence ? -1 : a.vence > b.vence ? 1 : a.n - b.n));
@@ -2394,8 +2424,9 @@
       q.pagado = r2(aplica); q.pendiente = r2(q.monto - aplica); abono = r2(abono - aplica);
     });
     const pendientes = todas.filter((q) => q.pendiente > 0.004);
-    const deudaTotal = r2(pendientes.reduce((s, q) => s + q.pendiente, 0));
-    const capitalPendiente = r2(pendientes.reduce((s, q) => s + q.capital * (q.pendiente / q.monto), 0));
+    const capitalNoCalculado = r2(Math.max(0, capitalSinPlan - abono));
+    const deudaTotal = r2(pendientes.reduce((s, q) => s + q.pendiente, 0) + capitalNoCalculado);
+    const capitalPendiente = r2(pendientes.reduce((s, q) => s + q.capital * (q.pendiente / q.monto), 0) + capitalNoCalculado);
     // próximo vencimiento = la fecha más próxima con algo pendiente
     const prox = pendientes[0] || null;
     const proximoVence = prox ? prox.vence : null;
@@ -2414,7 +2445,7 @@
       diferidasProximo, pagoMinimo, siguienteCorte,
       diasParaVencer: proximoVence ? U.diasEntre(hoy, proximoVence) : null,
       diasParaCorte: siguienteCorte ? U.diasEntre(hoy, siguienteCorte) : null,
-      faltanDatos, avisos, comprasSinTasa: sinTasa.length,
+      faltanDatos, avisos, comprasSinTasa: sinTasa.length, comprasSinPlan, capitalNoCalculado,
     };
   }
 
@@ -2495,7 +2526,7 @@
     const dia = d.ajustes.diaCobro || 1;
     const inicio = ultimoDiaCobro(hoy, dia);
     const proximo = U.proximoDia(U.sumarDias(hoy, 1), dia);
-    return { inicio, proximo, dias: Math.max(1, U.diasEntre(hoy, proximo)), diaCobro: dia };
+    return { inicio, proximo, dias: Math.max(1, U.diasEntre(hoy, proximo)), diaCobro: d.ajustes.diaCobro };
   }
 
   function fijosPendientes(d, cic, hoy) {
@@ -3471,8 +3502,8 @@
   async function existe(ns) { return !!(await leerJSON(await clave(ns, 'boveda'))); }
   async function longitudPin(ns) { const b = await leerJSON(await clave(ns, 'boveda')); return (b && b.len) || S().pinMin; }
 
-  async function crear(ns, pin) {
-    if (!pinValido(pin)) throw new Error('PIN_INVALIDO');
+  async function crear(ns, pin, claveInterna) {
+    if (!claveInterna && !pinValido(pin)) throw new Error('PIN_INVALIDO');
     const raw = azar(32);
     const salt = azar(16), iter = S().pbkdf2Iteraciones;
     const kPin = await claveDePin(pin, salt, iter);
@@ -3509,6 +3540,7 @@
     const salt = azar(16);
     b.salt = b64(salt); b.len = String(pinNuevo).length; b.pin = await cifrar(await claveDePin(pinNuevo, salt, b.iter), Kraw);
     await escribirJSON(await clave(ns, 'boveda'), b);
+    try { localStorage.removeItem('af_clave_' + ns); } catch (e) { /* sin almacenamiento web */ }
     return true;
   }
 
@@ -3557,12 +3589,13 @@
 
   // Para copia en la nube: todo sale YA cifrado (la nube nunca ve nada legible).
   async function paqueteRespaldo(ns) {
-    return { app: 'asistente-financiero', v: 1, ts: Date.now(), boveda: await leerJSON(await clave(ns, 'boveda')), datos: await leerJSON(await clave(ns, 'datos')) };
+    return { app: 'asistente-financiero', v: 1, ts: Date.now(), boveda: await leerJSON(await clave(ns, 'boveda')), datos: await leerJSON(await clave(ns, 'datos')), claveSinPin: obtenerAutoPin(ns) || undefined };
   }
   async function restaurarPaquete(ns, p) {
     if (!p || p.app !== 'asistente-financiero' || !p.boveda || !p.datos) throw new Error('PAQUETE_INVALIDO');
     await escribirJSON(await clave(ns, 'boveda'), Object.assign({}, p.boveda, { bio: null }));   // la huella es del teléfono: se vuelve a activar
     await escribirJSON(await clave(ns, 'datos'), p.datos);
+    try { if (p.claveSinPin) localStorage.setItem('af_clave_' + ns, p.claveSinPin); else localStorage.removeItem('af_clave_' + ns); } catch (e) { /* almacenamiento deshabilitado */ }
     bloquear();
   }
 
@@ -3570,6 +3603,7 @@
   async function borrarCuenta(ns, secretos) {
     bloquear();
     for (const p of ['boveda', 'datos', 'intentos']) await almacen.del(await clave(ns, p));
+    try { localStorage.removeItem('af_clave_' + ns); } catch (e) { /* almacenamiento deshabilitado */ }
     try { if (secretos && secretos.borrar) await secretos.borrar(ns); } catch (e) { /* nada que borrar */ }
   }
 
@@ -3590,12 +3624,11 @@
   }
   function marcarEntrada() { ultimaSalida = 0; }
 
-  // Crea la bóveda con un PIN interno generado automáticamente (modo sin PIN).
-  // El "auto-PIN" se guarda en localStorage; si se borra, el usuario deberá reiniciar la cuenta.
+  // Sin PIN visible: la clave interna aleatoria se guarda solo para esta cuenta en el teléfono.
   async function crearSinPin(ns) {
-    const autoPin = String(Math.floor(100000 + Math.random() * 900000));
+    const autoPin = b64(azar(32));
     try { localStorage.setItem('af_clave_' + ns, autoPin); } catch (e) { /* private mode */ }
-    return crear(ns, autoPin);
+    return crear(ns, autoPin, true);
   }
   // Devuelve el PIN interno si existe (modo sin PIN), o null.
   function obtenerAutoPin(ns) {
@@ -3660,6 +3693,7 @@
   }
   const URL_GOOGLE = 'https://accounts.google.com/gsi/client';
   const urlFacebook = () => 'https://connect.facebook.net/es_LA/sdk.js';
+  let tokenDriveNativo = null;
   let tokenGoogle = null;                                                  // { token, vence, drive, email } solo en memoria (nunca en disco)
   let fbIniciado = false;
   // Se llama al mostrar la portada: así las ventanas de Google/Facebook abren en el mismo toque del botón (si no, Chrome las bloquea).
@@ -3719,7 +3753,7 @@
     let r;
     try {
       r = proveedor === 'google'
-        ? await L.login({ provider: 'google', options: {} })                                           // sin "scopes": el correo y el nombre ya vienen
+        ? await L.login({ provider: 'google', options: { scopes: [PLAN.sesion.googleAlcanceDrive] } })
         : await L.login({ provider: 'facebook', options: { permissions: PLAN.sesion.facebookPermisos } });
     } catch (e) {
       const m = String((e && (e.code || e.message)) || e);
@@ -3729,6 +3763,7 @@
     const x = r.result || {}, p = x.profile || {};
     if (proveedor === 'google') {
       if (!p.id && !p.email) throw err('fallo', 'Google no devolvió tu cuenta.');
+      if (x.accessToken && x.accessToken.token) tokenDriveNativo = { token: x.accessToken.token, vence: Date.now() + (Number(x.accessToken.expiresIn) || 3000) * 1000 };
       return { proveedor, id: String(p.id || p.email), nombre: p.givenName || p.name || '', email: p.email || '', foto: p.imageUrl || '' };
     }
     const uid = p.userID || (x.accessToken && x.accessToken.userId);
@@ -3736,7 +3771,7 @@
     return { proveedor, id: String(uid), nombre: (p.name || '').split(' ')[0], email: p.email || '', foto: p.imageURL || '' };
   }
   async function cerrarSesionSocial(proveedor) {
-    tokenGoogle = null;
+    tokenGoogle = null; tokenDriveNativo = null;
     try { if (!esNativo()) { if (proveedor === 'facebook' && g.FB && fbIniciado) g.FB.logout(() => {}); return; } const L = plugin('SocialLogin'); if (L && sociales) await L.logout({ provider: proveedor }); } catch (e) { /* ya estaba cerrada */ }
   }
 
@@ -3773,17 +3808,24 @@
       let permiso = await R.checkPermissions();
       if (permiso.speechRecognition !== 'granted') permiso = await R.requestPermissions();
       if (permiso.speechRecognition !== 'granted') throw err('permiso', 'Sin permiso del micrófono no puedo escucharte. Puedes escribir.');
-      let ultimo = '', cierra, cerrado = false;
-      const terminado = new Promise((res) => { cierra = (t) => { if (cerrado) return; cerrado = true; res(t); }; });
+      let ultimo = '', cierra, cerrado = false, silencio;
+      const terminado = new Promise((res) => { cierra = (t) => { if (cerrado) return; cerrado = true; clearTimeout(silencio); res(t); }; });
+      const detener = async () => { clearTimeout(silencio); try { await R.stop(); } catch (e) { /* ya estaba detenido */ } setTimeout(() => cierra(ultimo), 400); };
       await R.removeAllListeners();
-      await R.addListener('partialResults', (d) => { if (d && d.matches && d.matches[0]) { ultimo = d.matches[0]; if (alParcial) alParcial(ultimo); } });
+      await R.addListener('partialResults', (d) => {
+        if (d && d.matches && d.matches[0]) {
+          ultimo = d.matches[0]; if (alParcial) alParcial(ultimo);
+          clearTimeout(silencio); silencio = setTimeout(detener, 2600);
+        }
+      });
       await R.addListener('listeningState', (d) => { if (d && d.status === 'stopped') setTimeout(() => cierra(ultimo), 250); });
       await R.start({ language: idiomaVoz(), maxResults: 3, partialResults: true, popup: false });
-      return { parar: async () => { try { await R.stop(); } catch (e) { /* ya estaba detenido */ } setTimeout(() => cierra(ultimo), 400); }, terminado };
+      if (!silencio && !cerrado) silencio = setTimeout(detener, 12000);
+      return { parar: detener, terminado };
     }
     const W = g.SpeechRecognition || g.webkitSpeechRecognition;
     if (!W) throw err('sin_voz', 'Este equipo no tiene reconocimiento de voz. Escribe lo que quieres registrar.');
-    const rec = new W(); rec.lang = idiomaVoz(); rec.interimResults = true; rec.maxAlternatives = 1; rec.continuous = true;
+    const rec = new W(); rec.lang = idiomaVoz(); rec.interimResults = true; rec.maxAlternatives = 1; rec.continuous = false;
     let ultimo = '', parado = false;
     const terminado = new Promise((res, rej) => {
       rec.onresult = (e) => {
@@ -3794,10 +3836,10 @@
         if (alParcial) alParcial(ultimo);
       };
       rec.onerror = (e) => {
-        if (e.error === 'no-speech') return; // en continuo, el silencio no es error — seguir escuchando
+        if (e.error === 'no-speech') { res(ultimo); return; }
         rej(err('sin_voz', 'No pude escuchar (' + e.error + ').'));
       };
-      rec.onend = () => { if (!parado) { try { rec.start(); } catch (er) { res(ultimo); } } else res(ultimo); };
+      rec.onend = () => res(ultimo);
     });
     rec.start();
     return { parar: async () => { parado = true; try { rec.stop(); } catch (e) { /* nada */ } }, terminado };
@@ -3923,10 +3965,16 @@
       if (!tokenGoogle.drive) throw err('sin_permiso', 'Para la copia en Drive tienes que marcar el permiso de Drive cuando Google lo pregunte.');
       return tokenGoogle.token;
     }
+    if (tokenDriveNativo && tokenDriveNativo.vence > Date.now() + 60000) return tokenDriveNativo.token;
+    if (interactivo === false) throw err('sin_token', 'La copia automática se hará al volver a conectar Drive.');
     const L = await prepararSociales();
     const r = await L.login({ provider: 'google', options: { scopes: [PLAN.sesion.googleAlcanceDrive] } });
     const t = r.result && r.result.accessToken && r.result.accessToken.token;
     if (!t) throw err('sin_permiso', 'Google no dio permiso para el respaldo.');
+    const u = await (await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: 'Bearer ' + t } })).json();
+    const sesion = AF.app && AF.app.sesion;
+    if (sesion && u.sub && String(u.sub) !== String(sesion.id) && u.email !== sesion.email) throw err('otra_cuenta', 'Elige la misma cuenta de Google con la que entraste.');
+    tokenDriveNativo = { token: t, vence: Date.now() + (Number(r.result.accessToken.expiresIn) || 3000) * 1000 };
     return t;
   }
   async function driveFetch(token, url, op) {
@@ -3939,8 +3987,8 @@
     const r = await (await driveFetch(token, 'https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=' + q + '&fields=files(id,modifiedTime)')).json();
     return (r.files || [])[0] || null;
   }
-  async function respaldoSubir(paquete) {
-    const token = await tokenDrive(); const cuerpo = JSON.stringify(paquete);
+  async function respaldoSubir(paquete, silencioso) {
+    const token = await tokenDrive(silencioso ? false : undefined); const cuerpo = JSON.stringify(paquete);
     const f = await driveBuscar(token);
     if (f) { await driveFetch(token, 'https://www.googleapis.com/upload/drive/v3/files/' + f.id + '?uploadType=media', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: cuerpo }); return f.id; }
     const lim = 'af' + Date.now();
@@ -4078,6 +4126,8 @@
 
   /* ----------------------------------------------------------------------- movimientos */
   const catDe = (id) => AF.store.categoria(id);
+  const ICONOS_CATEGORIA = { comida_hogar: 'inicio', servicios: 'repetir', vivienda: 'inicio', transporte: 'inicio', combustible: 'repetir', salud: 'info', educacion: 'papel', comida_fuera: 'archivo', antojos: 'archivo', salidas: 'personas', ropa: 'archivo', compras_grandes: 'tarjeta', suscripciones: 'repetir', cuidado_personal: 'personas', mascotas: 'personas', turismo: 'inicio', arte_cultura: 'estrella', deudas: 'tarjeta', sueldo: 'grafica' };
+  const iconoCategoria = (id) => ico(ICONOS_CATEGORIA[id] || 'archivo');
   function subDeMov(m, hoy) {
     const c = catDe(m.cat), partes = [c.nombre];
     if (m.cuenta === 'tarjeta') {
@@ -4091,11 +4141,11 @@
   function filaMov(m, hoy, onclick, conFecha) {
     if (m.tipo === 'pago_tarjeta') {
       const t = AF.store.buscar('tarjetas', m.tarjetaId);
-      return fila({ icono: '💳', titulo: 'Pago de ' + (t ? t.nombre : 'tarjeta'), sub: U.fechaCorta(m.fecha, hoy), derecha: h('span', { class: 'monto' }, $(m.monto)), onclick });
+      return fila({ icono: ico('tarjeta'), titulo: 'Pago de ' + (t ? t.nombre : 'tarjeta'), sub: U.fechaCorta(m.fecha, hoy), derecha: h('span', { class: 'monto' }, $(m.monto)), onclick });
     }
     const c = catDe(m.cat);
     return fila({
-      icono: c.icono, titulo: m.desc || c.nombre, sub: subDeMov(m, conFecha ? hoy : null),
+      icono: iconoCategoria(c.id), titulo: m.desc || c.nombre, sub: subDeMov(m, conFecha ? hoy : null),
       derecha: h('span', { class: 'monto ' + (m.tipo === 'ingreso' ? 'ingreso' : 'gasto') }, (m.tipo === 'ingreso' ? '+' : '−') + $(m.monto)), onclick,
     });
   }
@@ -4149,13 +4199,13 @@
 
   /* --------------------------------------------------------- selector de categoría */
   function selectorCategoria(tipo, valor, alCambiar) {
-    const caja = h('div', { class: 'opciones' });
-    const pintar = (sel) => {
-      AF.ui.vaciar(caja);
-      AF.store.categorias(tipo).forEach((c) => caja.appendChild(h('button', { type: 'button', class: 'opcion', 'aria-pressed': c.id === sel ? 'true' : 'false', onclick: () => { alCambiar(c.id); pintar(c.id); } }, c.icono + ' ' + c.nombre)));
-    };
-    pintar(valor);
-    return caja;
+    const categorias = AF.store.categorias(tipo).slice().sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+    const opcion = (c) => h('option', { value: c.id, selected: c.id === valor }, c.nombre);
+    const grupos = tipo === 'gasto'
+      ? [['Gastos habituales', categorias.filter((c) => c.nec === 'N')], ['Gastos personales', categorias.filter((c) => c.nec === 'G')], ['Otras categorías', categorias.filter((c) => !c.nec)]]
+      : [['Ingresos', categorias]];
+    return h('select', { class: 'entrada', 'aria-label': 'Categoría', onchange: (ev) => alCambiar(ev.target.value) },
+      grupos.filter(([, cs]) => cs.length).map(([nombre, cs]) => h('optgroup', { label: nombre }, cs.map(opcion))));
   }
 
   /* ------------------------------------------------------------------ formulario */
@@ -4218,9 +4268,9 @@
       }
       return m;
     }
-    const acciones = [{ texto: 'Guardar', clase: 'btn-primario', onclick: () => { const m = leer(); if (!m) return false; o.alGuardar(m); } }];
+    const acciones = [{ texto: 'Cancelar', clase: 'btn-borde', onclick: (api) => { if (api.cambiosPendientes() && !g.confirm('¿Descartar los cambios sin guardar?')) return false; } }, { texto: 'Guardar', clase: 'btn-primario', onclick: () => { const m = leer(); if (!m) return false; o.alGuardar(m); } }];
     if (edit) acciones.unshift({ texto: 'Eliminar', clase: 'btn-borde btn-peligro', onclick: () => { if (o.alBorrar) o.alBorrar(); } });
-    return hoja({ titulo: edit ? 'Editar movimiento' : 'Agregar movimiento', cuerpo, acciones });
+    return hoja({ titulo: edit ? 'Editar movimiento' : 'Agregar movimiento', cuerpo, acciones, confirmarSalida: true });
   }
 
   // Guardar / editar / borrar con aviso y "Deshacer"
@@ -4325,7 +4375,7 @@
 
     const el = h('main', { class: 'portada' },
       h('div', { class: 'portada-marca' }, AF.ui.logoApp(176), h('h1', { class: 'portada-nombre' }, PLAN.app.nombre),
-        h('p', { class: 'portada-sub' }, 'Dilo con tu voz. Lo registro, lo ordeno y te digo cuánto puedes gastar hoy.')),
+        h('p', { class: 'portada-sub' }, 'Dilo con tu voz. Registra y organiza tus ingresos y gastos.')),
       h('div', { class: 'portada-acciones' }, botones, mensaje, demo, instalar,
         h('p', { class: 'portada-legal' }, 'Tus datos se guardan cifrados en este teléfono. Entrar con tu cuenta solo sirve para reconocerte (con Google, además, para guardar tu copia en tu propio Drive); no leemos tu banco ni tu correo.')));
     app.pantalla(el);
@@ -4336,52 +4386,67 @@
     const app = AF.app;
     const p0 = PLAN.pais(PLAN.app.paisInicial);
     const r = { nombre: (sesion && sesion.nombre) || '', pais: p0.codigo, moneda: p0.moneda, diaCobro: PLAN.bienvenida.diaCobroDefecto, sueldo: null, cargas: 0, tarjetas: [] };
-    const pasos = () => PLAN.bienvenida.preguntas.filter((k) => !(k === 'cargas' && PLAN.bienvenida.cargasSoloSiSRI && !PLAN.pais(r.pais).sri));
-    let k = 0;
+    const pasos = () => PLAN.bienvenida.preguntas.filter((k) => k !== 'moneda' && !(k === 'cargas' && PLAN.bienvenida.cargasSoloSiSRI && !PLAN.pais(r.pais).sri));
+    let k = 0, terminando = false;
+
+    function vistaPrevia(clave) {
+      if (clave === 'nombre') return h('aside', { class: 'bienvenida-preview' },
+        h('span', { class: 'bienvenida-sello' }, 'TU ESPACIO'), h('strong', null, 'Finanzas claras, en un solo lugar'),
+        h('div', { class: 'bienvenida-preview-grid' },
+          h('span', null, ico('movimientos', 'chico'), 'Movimientos'),
+          h('span', null, ico('tarjeta', 'chico'), 'Tarjetas'),
+          h('span', null, ico('grafica', 'chico'), 'Resumen')));
+      if (clave === 'pais') return h('aside', { class: 'bienvenida-preview claro' },
+        h('span', { class: 'bienvenida-sello' }, 'CONFIGURACIÓN REGIONAL'),
+        h('strong', null, 'Tu dinero, en tu formato'),
+        h('p', null, 'Puedes cambiar el país y la moneda después, sin perder tus movimientos.'));
+      if (clave === 'diaCobro') return h('aside', { class: 'bienvenida-preview claro' },
+        h('span', { class: 'bienvenida-sello' }, 'PLANIFICACIÓN FLEXIBLE'),
+        h('strong', null, 'No tienes que adivinar la fecha'),
+        h('p', null, 'Cuando el día cambie, registra el cobro real. Tus registros serán la referencia.'));
+      if (clave === 'sueldo') return h('aside', { class: 'bienvenida-preview claro' },
+        h('span', { class: 'bienvenida-sello' }, 'REFERENCIA, NO SALDO'),
+        h('strong', null, 'Separa estimaciones de movimientos'),
+        h('p', null, 'Lo previsto ayuda a planificar. Solo lo que registres como cobrado aparece como ingreso real.'));
+      return null;
+    }
 
     function mostrar() {
       const lista = pasos(), clave = lista[k];
-      const total = lista.length + 1;                    // +1: crear PIN
+      const total = lista.length;
       const cabeza = h('div', { class: 'paso-cabeza' }, h('div', { class: 'pasos', 'aria-label': 'Paso ' + (k + 1) + ' de ' + total }, Array.from({ length: total }, (_, i) => h('i', { class: i <= k ? 'hecho' : '' }))));
       let cuerpo, validar = () => true, opcional = false, titulo, sub, textoSiguiente = 'Siguiente', alSaltar = () => { r.sueldo = null; };
-      const siguiente = () => { if (!validar()) return; if (k + 1 >= lista.length) pasoPin(); else { k++; mostrar(); } };
+      const siguiente = () => { if (!validar()) return; if (k + 1 >= lista.length) terminar(); else { k++; mostrar(); } };
 
       if (clave === 'nombre') {
-        titulo = '¿Cómo te llamo?'; sub = 'Para saludarte. Solo se queda en tu teléfono.';
+        titulo = 'Tu nombre'; sub = 'Lo usaremos para personalizar tu espacio.';
         const inp = h('input', { class: 'entrada grande', value: r.nombre, placeholder: 'Tu nombre', autocomplete: 'given-name', maxlength: 30, oninput: (e) => { r.nombre = e.target.value; }, onkeydown: (e) => { if (e.key === 'Enter') siguiente(); } });
-        cuerpo = campo('Nombre', inp); setTimeout(() => inp.focus(), 80);
+        cuerpo = h('div', { class: 'bienvenida-campos' }, campo('Nombre', inp), h('p', { class: 'texto-sm suave' }, 'Una experiencia clara para registrar, consultar y ordenar tus finanzas.'));
         validar = () => { r.nombre = r.nombre.trim(); if (!r.nombre) { inp.focus(); return false; } return true; };
       } else if (clave === 'pais') {
-        titulo = '¿Dónde vives?'; sub = 'Así uso las palabras de tu país (diferido, cuotas…) y tu moneda.';
-        const zona = h('div');
-        let filtroPais = '';
-        const inpBusca = h('input', { class: 'entrada', type: 'search', placeholder: '🔍 Buscar país…', 'aria-label': 'Buscar país', style: 'margin-top:8px', oninput: (e) => { filtroPais = U.norm(e.target.value); pint(); } });
-        const pint = () => {
-          AF.ui.vaciar(zona);
-          zona.appendChild(inpBusca);
-          const filtrados = PLAN.paises.filter((p) => !filtroPais || U.norm(p.nombre).includes(filtroPais));
-          const lista = h('div', { style: 'max-height:220px;overflow-y:auto;border:2px solid var(--linea);border-radius:12px;margin-top:8px' },
-            filtrados.map((p) => h('button', {
-              type: 'button',
-              style: 'display:flex;align-items:center;width:100%;padding:12px 16px;border:0;border-bottom:1px solid var(--linea);background:' + (r.pais === p.codigo ? 'var(--panel-suave)' : 'var(--hoja)') + ';color:' + (r.pais === p.codigo ? 'var(--acento)' : 'var(--texto)') + ';font-weight:' + (r.pais === p.codigo ? '700' : '400') + ';font-size:var(--t-md);text-align:left;cursor:pointer',
-              onclick: () => { r.pais = p.codigo; r.moneda = p.moneda; filtroPais = ''; inpBusca.value = ''; pint(); },
-            }, (r.pais === p.codigo ? '✓ ' : '') + p.nombre)));
-          zona.appendChild(lista);
-          zona.appendChild(campo('Moneda', h('div', { class: 'opciones', style: 'margin-top:4px' }, Object.keys(PLAN.monedas).map((m) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': r.moneda === m ? 'true' : 'false', onclick: () => { r.moneda = m; pint(); } }, PLAN.monedas[m].simbolo + ' ' + m)))));
-        };
-        pint(); cuerpo = zona;
-      } else if (clave === 'moneda') {
-        return (k++, mostrar());                          // ya se eligió junto con el país
+        titulo = 'Tu país y moneda'; sub = 'La aplicación adapta el formato del dinero y las palabras de tu país.';
+        const selector = h('select', { class: 'entrada', 'aria-label': 'País', onchange: (e) => { r.pais = e.target.value; r.moneda = PLAN.pais(r.pais).moneda; moneda.value = r.moneda; } },
+          PLAN.paises.map((p) => h('option', { value: p.codigo, selected: p.codigo === r.pais }, p.nombre)));
+        const moneda = h('select', { class: 'entrada', 'aria-label': 'Moneda', onchange: (e) => { r.moneda = e.target.value; } },
+          Object.keys(PLAN.monedas).map((m) => h('option', { value: m, selected: m === r.moneda }, m + ' · ' + PLAN.monedas[m].simbolo)));
+        cuerpo = h('div', { class: 'bienvenida-campos' }, campo('País', selector), campo('Moneda', moneda),
+          h('p', { class: 'texto-sm suave' }, 'Puedes cambiarlo después en Ajustes.'));
       } else if (clave === 'diaCobro') {
-        titulo = '¿Qué día te pagan?'; sub = 'Con esto calculo cuánto puedes gastar por día hasta tu próximo cobro.';
-        const inp = h('input', { class: 'entrada grande', inputmode: 'numeric', value: r.diaCobro, maxlength: 2, 'aria-label': 'Día del mes', oninput: (e) => { r.diaCobro = Number(e.target.value.replace(/\D/g, '')) || 0; } });
-        cuerpo = h('div', null, campo('Día del mes (1 a 31)', inp), h('div', { class: 'opciones', estilo: { marginTop: '12px' } }, [1, 5, 10, 15, 20, 25, 30].map((n) => h('button', { type: 'button', class: 'opcion', onclick: () => { r.diaCobro = n; inp.value = n; } }, 'Día ' + n))));
-        validar = () => { if (!(r.diaCobro >= 1 && r.diaCobro <= 31)) { inp.focus(); return false; } return true; };
+        titulo = '¿Cuándo recibes tus ingresos?'; sub = 'Puedes registrar una fecha habitual o indicar que cambia cada mes.';
+        const zona = h('div', { class: 'bienvenida-campos' });
+        const inp = h('input', { class: 'entrada', type: 'number', min: 1, max: 31, inputmode: 'numeric', value: r.diaCobro || '', 'aria-label': 'Día habitual', oninput: (e) => { r.diaCobro = Number(e.target.value) || 0; } });
+        const pint = () => { AF.ui.vaciar(zona); zona.appendChild(h('div', { class: 'segmentos' },
+          h('button', { type: 'button', 'aria-pressed': r.diaCobro !== null ? 'true' : 'false', onclick: () => { r.diaCobro = 1; inp.value = 1; pint(); } }, 'Día habitual'),
+          h('button', { type: 'button', 'aria-pressed': r.diaCobro === null ? 'true' : 'false', onclick: () => { r.diaCobro = null; pint(); } }, 'Fecha variable')));
+          if (r.diaCobro !== null) zona.appendChild(campo('Día del mes (1 a 31)', inp));
+          else zona.appendChild(h('p', { class: 'texto-sm suave' }, 'Registra el ingreso cuando lo recibas. No mostraremos una fecha de cobro inventada.'));
+        }; pint(); cuerpo = zona;
+        validar = () => r.diaCobro === null || (r.diaCobro >= 1 && r.diaCobro <= 31);
       } else if (clave === 'sueldo') {
-        titulo = '¿Cuánto cobras al mes?'; sub = 'Es opcional. Sirve para la primera cuenta de «cuánto puedes gastar hoy». Luego tus ingresos reales mandan.';
+        titulo = 'Ingreso mensual previsto'; sub = 'Opcional. Es una referencia para planificar; no se contará como dinero cobrado.';
         opcional = true;
-        const inp = h('input', { class: 'entrada grande', inputmode: 'decimal', placeholder: PLAN.monedas[r.moneda].simbolo + ' 0', value: r.sueldo || '', 'aria-label': 'Ingreso mensual', oninput: (e) => { r.sueldo = U.parseNumero(e.target.value); } });
-        cuerpo = campo('Ingreso mensual', inp);
+        const inp = h('input', { class: 'entrada grande', inputmode: 'decimal', placeholder: PLAN.monedas[r.moneda].simbolo + ' 0', value: r.sueldo || '', 'aria-label': 'Ingreso mensual previsto', oninput: (e) => { r.sueldo = U.parseNumero(e.target.value); } });
+        cuerpo = h('div', { class: 'bienvenida-campos' }, campo('Monto estimado', inp), h('p', { class: 'texto-sm suave' }, 'Cuando registres un ingreso real, ese valor será el que cuente en tus movimientos.'));
       } else if (clave === 'cargas') {
         titulo = '¿Cuántas cargas familiares tienes?'; sub = 'Hijos u otras personas que dependen de ti. Con esto calculo la rebaja de impuestos (SRI) por gastos personales.';
         cuerpo = h('div', { class: 'opciones', estilo: { marginTop: '12px' } }, [0, 1, 2, 3, 4, 5].map((n) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': r.cargas === n ? 'true' : 'false', onclick: (e) => { r.cargas = n; e.currentTarget.parentNode.querySelectorAll('.opcion').forEach((b, i) => b.setAttribute('aria-pressed', i === n ? 'true' : 'false')); } }, n === 5 ? '5 o más' : String(n))));
@@ -4410,39 +4475,19 @@
       }
       const pie = h('div', { estilo: { display: 'flex', flexDirection: 'column', gap: '8px', padding: '0 var(--margen) calc(20px + env(safe-area-inset-bottom))', marginTop: 'auto' } },
         h('button', { class: 'btn btn-primario btn-bloque', type: 'button', 'data-siguiente': '', onclick: siguiente }, textoSiguiente),
-        opcional ? h('button', { class: 'btn-texto', type: 'button', onclick: () => { alSaltar(); k + 1 >= lista.length ? pasoPin() : (k++, mostrar()); } }, 'Saltar') : null);
+        opcional ? h('button', { class: 'btn-texto', type: 'button', onclick: () => { alSaltar(); k + 1 >= lista.length ? terminar() : (k++, mostrar()); } }, 'Saltar') : null);
       const atras = k > 0 ? h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Atrás', onclick: () => { k = Math.max(0, k - 1); mostrar(); } }, ico('atras')) : null;
       app.pantalla(h('main', { class: 'pantalla' }, cabeza,
-        h('div', { class: 'contenido-solo', estilo: { flex: 1 } }, atras, h('h1', { class: 'h1', estilo: { marginTop: '8px' } }, titulo), h('p', { class: 'suave', estilo: { marginTop: '8px' } }, sub), cuerpo), pie));
+        h('div', { class: 'contenido-solo bienvenida-contenido', estilo: { flex: 1 } }, atras,
+          h('span', { class: 'bienvenida-indice' }, 'CONFIGURACIÓN · ' + (k + 1) + ' / ' + total),
+          h('h1', { class: 'h1', estilo: { marginTop: '8px' } }, titulo), h('p', { class: 'suave', estilo: { marginTop: '8px' } }, sub),
+          h('div', { class: 'bienvenida-divisor' }), cuerpo, vistaPrevia(clave)), pie));
     }
 
-    /* ---- crear PIN (último paso) */
-    function pasoPin() {
-      let len = PLAN.sesion.pinMin, primero = null;
-      const segm = h('div', { class: 'segmentos', estilo: { marginTop: '18px', width: '220px' } },
-        [PLAN.sesion.pinMin, PLAN.sesion.pinMax].map((n) => h('button', { type: 'button', 'aria-pressed': n === len ? 'true' : 'false', onclick: (e) => { len = n; vista.cambiarLargo(n); segm.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', b === e.currentTarget ? 'true' : 'false')); } }, n + ' dígitos')));
-      const vista = pantallaPin({
-        titulo: 'Crea tu PIN', sub: 'Opcional. Si no quieres PIN, entra sin él (tus datos siguen cifrados).', len, arriba: segm,
-        pie: [
-          h('button', { class: 'btn-texto', type: 'button', onclick: () => { k = pasos().length - 1; mostrar(); } }, 'Volver'),
-          h('button', { class: 'btn-texto', type: 'button', style: 'margin-top:4px;opacity:0.7', onclick: async () => {
-            try { await app.crearCuenta({ ajustes: r, pin: null }); }
-            catch (e) { /* ya se manejó */ }
-          } }, 'Continuar sin PIN'),
-        ],
-        alCompletar: async (pin) => {
-          if (primero === null) {
-            if (Sg().pinDebil(pin)) return { ok: false, mensaje: 'Ese PIN es muy fácil de adivinar. Prueba otro.' };
-            primero = pin; segm.classList.add('oculto');
-            vista.el.querySelector('h1').textContent = 'Repite tu PIN'; vista.limpiar(); return { ok: true };
-          }
-          if (pin !== primero) { primero = null; segm.classList.remove('oculto'); vista.el.querySelector('h1').textContent = 'Crea tu PIN'; return { ok: false, mensaje: 'No coinciden. Empieza de nuevo.' }; }
-          try { await app.crearCuenta({ ajustes: r, pin }); }
-          catch (e) { primero = null; return { ok: false, mensaje: 'No pude guardar tu PIN. Intenta otra vez.' }; }
-          return { ok: true };
-        },
-      });
-      app.pantalla(vista.el);
+    async function terminar() {
+      if (terminando) return; terminando = true;
+      try { await app.crearCuenta({ ajustes: r, pin: null }); }
+      catch (e) { terminando = false; AF.ui.aviso('No se pudo guardar tu configuración. Inténtalo de nuevo.'); }
     }
     mostrar();
   }
@@ -4547,7 +4592,7 @@
     const p = AF.informes.puedesGastarHoy(D, hoy, modo);
     const nombre = D.ajustes.nombre || '';
     const hora = new Date().getHours();
-    const saludo = (hora < 12 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches') + (nombre ? ', ' + nombre : '') + (hora < 6 ? ' 🌙' : hora < 12 ? ' ☀️' : hora < 19 ? ' 🌤️' : ' 🌙');
+    const saludo = (hora < 12 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches') + (nombre ? ', ' + nombre : '');
     const cab = h('div', { class: 'saludo' },
       h('div', { class: 'avatar', 'aria-hidden': 'true' }, (nombre || '·').charAt(0).toUpperCase()),
       h('div', { class: 'saludo-texto' }, saludo),
@@ -4558,31 +4603,29 @@
       el.appendChild(h('div', { class: 'cifra-bloque' },
         h('div', { class: 'cifra-etiqueta' }, 'Sin ingreso registrado'),
         h('div', { class: 'cifra' }, '—'),
-        h('p', { class: 'cifra-pie suave' }, 'Registra tu sueldo y te digo cuánto te queda hasta tu cobro.'),
+        h('p', { class: 'cifra-pie suave' }, 'Registra un ingreso para comenzar a ver tus movimientos.'),
         h('button', { class: 'btn btn-voz', type: 'button', estilo: { marginTop: '18px' }, onclick: () => C().formMovimiento({ inicial: { tipo: 'ingreso', cat: 'sueldo', monto: D.ajustes.sueldo || '' }, alGuardar: (m) => C().guardarMov(m) }) }, 'Registrar mi sueldo')));
       return el;
     }
 
-    // Número principal: lo que queda hasta el cobro (siempre positivo o cero)
-    const cobro = U.deISO(p.proximo).getDate() + ' de ' + U.nombreMes(p.proximo);
-    const restoPositivo = Math.max(0, p.resto);
-    const sinDinero = p.resto <= 0;
+    // El sueldo indicado en la bienvenida es una previsión, no un depósito.
+    const previsto = p.estimado;
+    const negativo = p.resto < 0;
     const usado = p.ingresos > 0 ? Math.min(1, Math.max(0, (p.gastadoAntes + p.gastadoHoy + p.fijos + p.cuotas + p.metas) / p.ingresos)) : 0;
-    const diasTexto = p.dias === 1 ? '1 día' : p.dias + ' días';
-
+    const etiqueta = previsto ? 'Proyección del periodo' : 'Balance según tus registros';
     el.appendChild(h('div', { class: 'cifra-bloque' },
-      h('div', { class: 'cifra-etiqueta' }, sinDinero ? 'Sin saldo hasta el cobro' : 'Disponible hasta el ' + cobro),
-      h('div', { class: 'cifra' + (sinDinero ? ' pasado' : ''), 'aria-live': 'polite' }, h('span', { class: 'cambio-cifra' }, $(restoPositivo))),
-      h('p', { class: 'cifra-pie suave' }, sinDinero
-        ? 'Tu cobro es el ' + cobro + '.'
-        : diasTexto + (p.dias > 0 ? ' · ' + $(Math.round(restoPositivo / p.dias)) + ' por día' : ''))));
+      h('div', { class: 'cifra-etiqueta' }, etiqueta),
+      h('div', { class: 'cifra' + (negativo ? ' pasado' : ''), 'aria-live': 'polite' }, $(p.resto)),
+      h('p', { class: 'cifra-pie suave' }, previsto
+        ? 'Incluye un ingreso previsto que aún no has registrado como cobrado.'
+        : 'Ingresos menos gastos y compromisos registrados; no es el saldo del banco.')));
 
     // Barra de progreso
     el.appendChild(h('div', { class: 'avance' + (usado > 0.85 ? ' alerta' : ''), role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(usado * 100), 'aria-label': 'Del ingreso usado' }, h('i', { estilo: { width: Math.round(usado * 100) + '%' } })));
 
     // Fila ingresos / gastos
     el.appendChild(h('div', { class: 'dos-datos' },
-      h('div', null, h('div', { class: 'dato-etiqueta suave' }, 'Ingresos'), h('div', { class: 'dato-valor' }, $(p.ingresos))),
+      h('div', null, h('div', { class: 'dato-etiqueta suave' }, previsto ? 'Ingreso previsto' : 'Ingresos registrados'), h('div', { class: 'dato-valor' }, $(p.ingresos))),
       h('div', null, h('div', { class: 'dato-etiqueta suave' }, 'Gastos'), h('div', { class: 'dato-valor' }, $(p.gastadoAntes + p.gastadoHoy)))));
 
     // Notas pequeñas (pagos fijos, cuotas, metas)
@@ -4612,10 +4655,10 @@
         t.nec.sin ? h('i', { class: 'seg-sin', estilo: { flex: t.nec.sin } }) : null),
       h('div', { class: 'dos-datos', estilo: { marginTop: '10px' } },
         h('div', null,
-          h('div', { class: 'dato-etiqueta suave' }, '🔵 Necesario'),
+          h('div', { class: 'dato-etiqueta suave' }, h('i', { class: 'dato-punto nec' }), 'Necesario'),
           h('div', { class: 'dato-valor' }, $(t.nec.N) + ' · ' + pc(t.nec.N) + '%')),
         h('div', null,
-          h('div', { class: 'dato-etiqueta suave' }, '🟠 Gusto'),
+          h('div', { class: 'dato-etiqueta suave' }, h('i', { class: 'dato-punto gusto' }), 'Gusto'),
           h('div', { class: 'dato-valor' }, $(t.nec.G) + ' · ' + pc(t.nec.G) + '%'))));
   }
 
@@ -4625,7 +4668,7 @@
     const pro = AF.acceso.tiene('hormigaDetalle');
     return h('section', { class: 'seccion' },
       h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Gastos hormiga')),
-      fila({ icono: '🐜', titulo: $(hm.total) + ' este mes', sub: hm.veces + (hm.veces === 1 ? ' compra pequeña' : ' compras pequeñas') + ' · al año serían ' + $(hm.alAnio), derecha: pro ? ico('derecha') : AF.ui.chipPro(),
+      fila({ icono: ico('grafica'), titulo: $(hm.total) + ' este mes', sub: hm.veces + (hm.veces === 1 ? ' compra pequeña' : ' compras pequeñas') + ' · al año serían ' + $(hm.alAnio), derecha: pro ? ico('derecha') : AF.ui.chipPro(),
         onclick: () => (pro ? AF.app.abrir('Gastos hormiga', (c) => V.informesUI.hormiga(c)) : C().pedirPro('hormigaDetalle')) }));
   }
 
@@ -4644,6 +4687,10 @@
     const D = AF.store.d, hoy = AF.app.hoy();
     cont.appendChild(horizonte(D, hoy));
     const cuerpo = h('div', { class: 'contenido' });
+    cuerpo.appendChild(h('div', { class: 'acciones-inicio' },
+      h('button', { class: 'btn btn-borde', type: 'button', onclick: () => V.voz.abrir({ modo: 'voz' }) }, ico('mic', 'chico'), 'Hablar'),
+      h('button', { class: 'btn btn-borde', type: 'button', onclick: () => V.bandeja.fotoFactura() }, ico('camara', 'chico'), 'Factura'),
+      h('button', { class: 'btn btn-borde', type: 'button', onclick: () => C().formMovimiento({ alGuardar: (m) => C().guardarMov(m) }) }, ico('mas_', 'chico'), 'Agregar')));
     const st = AF.acceso.estado(hoy);
     if (st.tipo === 'prueba') cuerpo.appendChild(h('button', { class: 'nota pro', type: 'button', estilo: { width: '100%', textAlign: 'left', marginTop: '20px' }, onclick: () => AF.app.abrir('Pro', (c) => V.pro.render(c)) },
       ico('estrella', 'relleno'), h('span', null, h('strong', null, 'Pro gratis: ' + (st.diasPrueba === 1 ? 'te queda 1 día' : 'te quedan ' + st.diasPrueba + ' días') + '. '), 'Mira qué conservas después.')));
@@ -4725,6 +4772,7 @@
   const cabeza = (izq) => h('div', { class: 'voz-cabeza' }, h('div', { class: 'suave' }, izq || ''), h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Cerrar', onclick: cerrar }, ico('cerrar')));
   function pintar(partes) {
     if (!capa) return;
+    capa.classList.remove('voz-compacta');
     AF.ui.vaciar(capa);
     partes.forEach((p) => p && capa.appendChild(p));
     const foco = capa.querySelector('[data-foco]'); if (foco) setTimeout(() => foco.focus(), 60);
@@ -4738,8 +4786,9 @@
     const estado = h('div', { class: 'voz-estado' }, 'Te escucho');
     const btn = h('button', { class: 'mic-grande escuchando', type: 'button', 'aria-label': 'Terminar', onclick: () => { if (escucha) escucha.parar(); } }, ico('mic'));
     pintar([cabeza(), h('div', { class: 'voz-cuerpo' }, estado, trans, onda), h('div', { class: 'voz-pie' }, btn, h('button', { class: 'btn-texto', type: 'button', style: 'color:var(--sobre-panel)', onclick: () => { if (escucha) { escucha.parar(); escucha = null; } mostrarTexto(ultimo); } }, 'Prefiero escribir'))]);
+    if (capa) capa.classList.add('voz-compacta');
     try {
-      const e = await N().escuchar((t) => { ultimo = t; AF.ui.vaciar(trans); trans.appendChild(d.createTextNode(t)); });
+      const e = await N().escuchar((t) => { ultimo = t; });
       escucha = e; vivoLocal.e = e;
       const final = await e.terminado;
       if (escucha !== e) return;                       // cambió de pantalla mientras tanto
@@ -4775,7 +4824,7 @@
   async function procesar(texto) {
     let r = AF.parser.interpretar(texto, ctx());
     const dudoso = r.tipo === 'desconocido' || (r.tipo === 'registrar' && r.items && r.items.length && r.items.every((i) => i.catConfianza === 'ninguna') && !r.items.some((i) => i.palabraNueva === null));
-    if (dudoso && AF.ia && AF.acceso.tiene('entenderFraseLibreIA') && AF.acceso.iaDisponible()) {
+    if (dudoso && !/\b(tarjeta|visa|mastercard|diners|amex|credito)\b/i.test(texto) && AF.ia && AF.acceso.tiene('entenderFraseLibreIA') && AF.acceso.iaDisponible()) {
       pintar([cabeza(), h('div', { class: 'voz-cuerpo' }, h('p', { class: 'transcripcion' }, texto), h('p', { class: 'voz-estado', estilo: { marginTop: '14px' } }, 'Pensando…'))]);
       const x = await AF.ia.interpretar(texto, ctx());
       if (x) r = x;
@@ -4786,6 +4835,8 @@
   function mostrar(r, texto) {
     switch (r.tipo) {
       case 'registrar': return vistaRegistrar(r, texto);
+      case 'pago_tarjeta': return vistaPagoTarjeta(r);
+      case 'aclarar': return vistaAclaracion(r);
       case 'preguntar': return vistaPregunta(r, texto);
       case 'corregir': return vistaCorregir(r, texto);
       case 'presupuesto': return vistaPresupuesto(r, texto);
@@ -4798,6 +4849,56 @@
   const Salir = (texto, acciones, extra) => pintar([cabeza(), h('div', { class: 'voz-cuerpo' }, extra), h('div', { class: 'voz-pie' }, acciones)]);
   const btnPrim = (t, f, cls) => h('button', { class: 'btn ' + (cls || 'btn-voz') + ' btn-bloque', type: 'button', onclick: f }, t);
   const btnTxt = (t, f) => h('button', { class: 'btn-texto', type: 'button', style: 'color:var(--sobre-panel)', onclick: f }, t);
+
+  function vistaAclaracion(r) {
+    const ultimo = S().d.movs.slice().sort((a,b) => b.creado - a.creado)[0];
+    const frase = String(r.texto || '');
+    const comienzo = frase.search(/\b(gast[eé]|compr[eé]|pagu[eé]|abon[eé]|recib[ií]|cobr[eé])\b/i);
+    const entendido = comienzo >= 0 ? AF.parser.interpretar(frase.slice(comienzo), ctx()) : null;
+    const item = entendido && entendido.tipo === 'registrar' && entendido.items.length === 1 ? entendido.items[0] : null;
+    if (ultimo && ultimo.tipo === 'gasto' && item && item.tipo === 'gasto' && item.monto > 0 && (item.cuenta !== 'tarjeta' || item.tarjetaId)) {
+      const patch = { monto: U.r2(item.monto) };
+      if (item.cuenta === 'tarjeta') { patch.cuenta = 'tarjeta'; patch.tarjetaId = item.tarjetaId; patch.credito = item.credito; }
+      if (item.catConfianza === 'alta') patch.cat = item.cat;
+      pintar([cabeza('Corregir el último'), h('div', { class: 'voz-cuerpo' },
+        h('p', { class: 'voz-respuesta' }, 'Entendí una corrección del último movimiento. Confirma el cambio.'),
+        h('div', { class: 'entendido' },
+          h('div', { class: 'entendido-fila' }, h('span', null, 'Antes'), h('strong', null, $(ultimo.monto))),
+          h('div', { class: 'entendido-fila' }, h('span', null, 'Ahora'), h('strong', null, $(item.monto))),
+          item.cuenta === 'tarjeta' ? h('div', { class: 'entendido-fila' }, h('span', null, 'Tarjeta'), h('strong', null, (S().buscar('tarjetas', item.tarjetaId) || {}).nombre || 'Tarjeta')) : null,
+          item.credito && item.credito.meses ? h('div', { class: 'entendido-fila' }, h('span', null, 'Plazo'), h('strong', null, item.credito.meses + ' meses')) : null),
+        h('p', { class: 'texto-sm suave', estilo: { marginTop: '12px' } }, 'Se modificará el movimiento existente. No se añadirá otro gasto.')),
+        h('div', { class: 'voz-pie' }, btnPrim('Aplicar corrección', () => { S().editar('movs', ultimo.id, patch, 'Corregí el último movimiento'); cerrar(); aviso('Movimiento corregido', { texto: 'Deshacer', onclick: () => S().deshacer() }); }),
+          btnTxt('Editar manualmente', () => { cerrar(); C().editarMov(ultimo); }))]);
+      return;
+    }
+    pintar([cabeza('Corregir'), h('div', { class: 'voz-cuerpo' }, h('p', { class: 'voz-respuesta' },
+      ultimo ? 'Puedo ayudarte a corregir el último movimiento. Revísalo antes de cambiarlo.' : 'Todavía no hay un movimiento para corregir.')),
+      h('div', { class: 'voz-pie' }, ultimo ? btnPrim('Editar último movimiento', () => { cerrar(); C().editarMov(ultimo); }) : null, btnTxt('Cancelar', cerrar))]);
+  }
+
+  /* Un pago de tarjeta reduce una deuda; no es otro gasto de consumo. */
+  function vistaPagoTarjeta(r) {
+    const tarjetas = S().d.tarjetas;
+    if (!tarjetas.length) return Salir('', [btnPrim('Entendido', cerrar)], h('p', { class: 'voz-respuesta' }, 'Primero agrega tu tarjeta en la sección Tarjetas.'));
+    let monto = r.monto, tarjetaId = r.tarjetaId;
+    const dibujar = () => {
+      const t = tarjetas.find((x) => x.id === tarjetaId);
+      const filas = h('div', { class: 'entendido' },
+        h('button', { class: 'entendido-fila', type: 'button', onclick: async () => { const v = await pedirNumero('Monto del pago', monto || 0); if (v) { monto = v; dibujar(); } } }, h('span', null, 'Monto'), h('strong', null, monto ? $(monto) : 'Elegir monto')),
+        h('button', { class: 'entendido-fila', type: 'button', onclick: async () => { const v = await elegirOpcion('¿Qué tarjeta pagaste?', tarjetas.map((x) => [x.id, x.nombre])); if (v) { tarjetaId = v; dibujar(); } } }, h('span', null, 'Tarjeta'), h('strong', null, t ? t.nombre : 'Elegir tarjeta')),
+        h('div', { class: 'entendido-fila' }, h('span', null, 'Fecha'), h('strong', null, U.cap(U.fechaCorta(r.fecha, AF.app.hoy())))));
+      pintar([cabeza('Pago de tarjeta'), h('div', { class: 'voz-cuerpo' },
+        h('p', { class: 'voz-respuesta' }, 'Revisa el pago antes de guardarlo'), filas,
+        h('p', { class: 'texto-sm suave', estilo: { marginTop: '12px' } }, 'El pago se registra por separado de tus compras.')),
+        h('div', { class: 'voz-pie' }, btnPrim('Guardar pago', () => {
+          if (!(monto > 0) || !tarjetaId) { aviso('Elige el monto y la tarjeta.'); return; }
+          const mov = S().agregar('movs', { tipo: 'pago_tarjeta', monto: U.r2(monto), fecha: r.fecha, tarjetaId, cat: null, desc: 'Pago ' + t.nombre }, 'Pagué ' + t.nombre);
+          if (mov) { cerrar(); aviso('Pago registrado', { texto: 'Deshacer', onclick: () => S().deshacer() }); }
+        }), btnTxt('Cancelar', cerrar))]);
+    };
+    dibujar();
+  }
 
   /* ------------------------------------------------------------------- registrar */
   function vistaRegistrar(r, texto) {
@@ -4869,7 +4970,7 @@
           if (m.cuenta === 'tarjeta') {
             m.tarjetaId = it.tarjetaId;
             const pro = AF.acceso.tiene('tarjetaDiferidoCuotas');
-            m.credito = it.credito && it.credito.modo === 'diferido' && pro && it.credito.meses ? { modo: 'diferido', meses: it.credito.meses, interes: it.credito.interes !== false, cuota: it.credito.cuota || null } : { modo: 'corriente' };
+            m.credito = it.credito && it.credito.modo === 'diferido' && pro && it.credito.meses ? { modo: 'diferido', meses: it.credito.meses, interes: it.credito.interes == null ? null : it.credito.interes, cuota: it.credito.cuota || null } : { modo: 'corriente' };
             if (m.credito.modo === 'diferido' && m.credito.interes && m.credito.cuota == null) {
               const t = S().buscar('tarjetas', it.tarjetaId);
               if (t && t.tasaAnual == null) { const tasa = await pedirTasa(t); if (tasa != null) S().editar('tarjetas', t.id, { tasaAnual: tasa }, 'Puse la tasa de ' + t.nombre); }
@@ -4893,10 +4994,7 @@
     const extras = [];
     const modo = AF.acceso.tiene('puedesGastarHoyCompleto') ? 'completo' : 'simple';
     const p = AF.informes.puedesGastarHoy(D, hoy, modo);
-    if (movs.some((m) => m.tipo === 'gasto') && p.ingresos) {
-      if (p.hoyDisponible >= 0) extras.push('Hoy todavía puedes gastar ' + $(p.hoyDisponible) + '.');
-      else if (p.hoyDisponible < -1) extras.push('Hoy te pasaste ' + $(-p.hoyDisponible) + ' de tu presupuesto diario.');
-    }
+
     AF.informes.presupuestos(D, hoy).forEach((b) => {
       if (movs.some((m) => m.tipo === 'gasto' && (!b.cat || b.cat === m.cat))) {
         if (b.nivel === 'detente') extras.push('Detente: llegaste al límite de ' + b.nombre.toLowerCase() + '.');
@@ -4989,7 +5087,7 @@
   /* --------------------------------------------------------------- ayuda / no entendí */
   const EJEMPLOS_AYUDA = [
     ['Pagué 30 de luz', 'Registrar un gasto'], ['Me pagaron el sueldo, 1.200', 'Registrar un ingreso'], ['Pagué 30 de luz y 12 de internet', 'Varios a la vez'],
-    ['Cuánto gasté este mes', 'Preguntar'], ['Cuánto puedo gastar hoy', 'Tu día de hoy'], ['Cambia el último a salud', 'Corregir'], ['Borra el último', 'Borrar'], ['Ponme un límite de 100 en salidas', 'Poner un límite'],
+    ['Cuánto gasté este mes', 'Preguntar'], ['Cómo voy este mes', 'Resumen'], ['Cambia el último a salud', 'Corregir'], ['Borra el último', 'Borrar'], ['Ponme un límite de 100 en salidas', 'Poner un límite'],
   ];
   function vistaAyuda() {
     pintar([cabeza('Qué puedo hacer'), h('div', { class: 'voz-cuerpo' }, h('p', { class: 'transcripcion' }, 'Háblame normal'), h('div', { class: 'entendido' }, EJEMPLOS_AYUDA.map(([f, t]) => h('button', { class: 'entendido-fila', type: 'button', onclick: () => procesar(f) }, h('span', null, '«' + f + '»'), h('span', { class: 'entendido-etiqueta' }, t))))), h('div', { class: 'voz-pie' }, btnPrim('Hablar', escuchar), btnTxt('Cerrar', cerrar))]);
@@ -5197,16 +5295,18 @@
   }
 
   function plastico(t, e, hoy, grande) {
-    const venceTxt = e.proximoVence && e.aPagarProximo ? 'Vence ' + (e.diasParaVencer <= 0 ? 'hoy' : e.diasParaVencer === 1 ? 'mañana' : 'el ' + fechaLarga(e.proximoVence)) : 'Sin pagos pendientes';
+    const incompleto = e.comprasSinPlan > 0;
+    const pagoIncompleto = incompleto && e.origen !== 'estado';
+    const venceTxt = pagoIncompleto ? 'Faltan datos para calcular' : e.proximoVence && e.aPagarProximo ? 'Vence ' + (e.diasParaVencer <= 0 ? 'hoy' : e.diasParaVencer === 1 ? 'mañana' : 'el ' + fechaLarga(e.proximoVence)) : 'Sin pagos pendientes';
     const usado = t.cupo ? Math.min(1, e.cupoUsado / t.cupo) : null;
     const banco = t.bancoId ? B().buscar(t.bancoId) : null;
     return h('div', { class: 'plastico tarjeta-credito ' + acabado(t.nivel) },
       h('div', { class: 'plastico-cabeza' }, banco ? AF.ui.insigniaBanco(banco, 30) : h('span', { class: 'plastico-nombre' }, t.nombre), marcaRed(t.red)),
       h('div', { class: 'plastico-medio' }, chipTarjeta(),
-        h('div', { class: 'plastico-monto' }, h('div', { class: 'suave texto-xs' }, e.origen === 'estado' ? 'A pagar · según tu estado' : 'A pagar · estimado'), h('div', { class: 'plastico-cifra' }, $(e.aPagarProximo)))),
+        h('div', { class: 'plastico-monto' }, h('div', { class: 'suave texto-xs' }, e.origen === 'estado' ? 'A pagar · según tu estado' : 'A pagar · estimado'), h('div', { class: 'plastico-cifra' }, pagoIncompleto ? '—' : $(e.aPagarProximo)))),
       h('div', { class: 'plastico-numero' }, h('span', { class: 'plastico-digitos' }, t.ultimos4 ? '•••• •••• •••• ' + t.ultimos4 : t.nombre), t.nivel ? h('span', { class: 'suave plastico-nivel' }, t.nivel) : null),
-      h('div', null, h('div', { class: 'plastico-pie' }, h('span', null, venceTxt), t.cupo ? h('span', { class: 'suave' }, 'Cupo libre ' + $(Math.max(0, t.cupo - e.cupoUsado))) : null),
-        usado != null ? h('div', { class: 'cupo', role: 'img', 'aria-label': 'Cupo usado ' + Math.round(usado * 100) + ' por ciento' }, h('i', { estilo: { width: Math.round(usado * 100) + '%' } })) : null));
+      h('div', null, h('div', { class: 'plastico-pie' }, h('span', null, venceTxt), t.cupo ? h('span', { class: 'suave' }, 'Cupo libre estimado ' + $(Math.max(0, t.cupo - e.cupoUsado))) : null),
+        usado != null && !incompleto ? h('div', { class: 'cupo', role: 'img', 'aria-label': 'Cupo usado ' + Math.round(usado * 100) + ' por ciento' }, h('i', { estilo: { width: Math.round(usado * 100) + '%' } })) : null));
   }
 
   /* ------------------------------------------------------------------ lista */
@@ -6439,7 +6539,7 @@
   /* ------------------------------------------------------------------ pantalla Pro */
   const ETIQUETAS = {
     entenderFraseLibreIA: 'Entiende frases libres con IA', corregirLibreIA: 'Corrige con IA, con tus propias palabras', preguntasLibresIA: 'Responde cualquier pregunta sobre tu plata',
-    puedesGastarHoyCompleto: '«Hoy puedes gastar» con cuotas y metas', hormigaDetalle: 'Qué gastos hormiga son y cuánto ahorrarías', presupuestoPorCategoria: 'Límites por categoría',
+    puedesGastarHoyCompleto: 'Proyección con cuotas y metas', hormigaDetalle: 'Análisis de gastos pequeños', presupuestoPorCategoria: 'Límites por categoría',
     tarjetaDiferidoCuotas: 'Diferidos y cuotas con intereses', asesorTarjeta: '¿Pago el mínimo o el total?', meConviene: '«¿Me conviene?» antes de comprar', simulador: 'Simulador «¿qué pasa si…?»',
     alertasPredictivas: 'Alertas que se adelantan', sri: 'SRI: gastos deducibles (Ecuador)', fotoFacturaProductos: 'Factura foto: producto por producto', compartirCaptura: 'Compartir captura de tu resumen',
     importarPDF: 'Importar estado de cuenta', conciliar: 'Conciliar con tu estado de cuenta', suscripcionesDetectadas: 'Detecta suscripciones solo', cobroPorWhatsApp: 'Cobros por WhatsApp',
@@ -6450,10 +6550,10 @@
 
   function render(cont) {
     const st = AF.acceso.estado(AF.app.hoy()), p = PLAN.precios;
-    const cab = h('section', { class: 'nota pro', estilo: { alignItems: 'center' } }, ico('estrella', 'relleno'), h('div', null,
+    const cab = h('section', { class: 'pro-hero' }, h('div', { class: 'pro-hero-icon' }, ico('estrella', 'relleno')), h('div', null,
       st.tipo === 'pro' ? h('div', null, h('strong', null, 'Eres Pro'), ' hasta el ' + U.fechaCorta(st.hasta, AF.app.hoy()) + '.')
         : st.tipo === 'prueba' ? h('div', null, h('strong', null, 'Pro gratis: ' + (st.diasPrueba === 1 ? 'te queda 1 día' : 'te quedan ' + st.diasPrueba + ' días')), '. Después sigues con Gratis; no pierdes tus datos.')
-          : h('div', null, h('strong', null, 'Estás en Gratis'), '. Todo lo básico funciona; Pro suma lo de abajo.')));
+          : h('div', null, h('strong', null, 'Un espacio más completo para tus finanzas'), h('p', null, 'Pro amplía los informes, la planificación y las herramientas para tus tarjetas.'))));
     cont.appendChild(cab);
     if (st.tipo === 'gratis' && !S().d.plan.inicioPrueba) {
       cont.appendChild(h('button', { class: 'btn btn-voz btn-bloque', type: 'button', estilo: { marginTop: '16px' }, onclick: () => { AF.acceso.iniciarPrueba(AF.app.hoy()); AF.bus.emit('plan'); aviso('Pro activado ' + PLAN.prueba.diasProGratis + ' días'); } }, 'Probar Pro ' + PLAN.prueba.diasProGratis + ' días gratis'));
@@ -6470,16 +6570,17 @@
       if (k === 'sri' && !PLAN.pais(S().d.ajustes.pais).sri) return;
       filas.push(h('div', null, ETIQUETAS[k]), h('div', { class: 'centro suave' }, '—'), h('div', { class: 'centro', estilo: { color: 'var(--acento)' } }, ico('ok', 'chico')));
     });
-    cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Lo que cambia')), h('div', { class: 'pro-comparar' }, filas)));
     if (st.tipo !== 'pro') {
       const ahorro = Math.round((1 - p.anualUSD / (p.mensualUSD * 12)) * 100);
-      cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Elige tu plan')),
-        h('div', { estilo: { display: 'flex', flexDirection: 'column', gap: '10px' } },
-          h('button', { class: 'btn btn-primario btn-bloque', type: 'button', onclick: () => comprar('anual') }, 'Anual · ' + $(p.anualUSD, { moneda: 'USD', fijo: true }) + ' al año (ahorras ' + ahorro + ' %)'),
-          h('button', { class: 'btn btn-borde btn-bloque', type: 'button', onclick: () => comprar('mensual') }, 'Mensual · ' + $(p.mensualUSD, { moneda: 'USD', fijo: true }) + ' al mes'),
+      cont.appendChild(h('section', { class: 'seccion pro-planes' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Elige tu plan')),
+        h('div', { class: 'pro-plan-grid' },
+          h('button', { class: 'pro-plan recomendado', type: 'button', onclick: () => comprar('anual') }, h('span', { class: 'pro-plan-etiqueta' }, 'MEJOR VALOR · AHORRA ' + ahorro + ' %'), h('strong', null, 'Anual'), h('span', { class: 'pro-plan-precio' }, $(p.anualUSD, { moneda: 'USD', fijo: true })), h('small', null, 'por año')),
+          h('button', { class: 'pro-plan', type: 'button', onclick: () => comprar('mensual') }, h('span', { class: 'pro-plan-etiqueta' }, 'FLEXIBLE'), h('strong', null, 'Mensual'), h('span', { class: 'pro-plan-precio' }, $(p.mensualUSD, { moneda: 'USD', fijo: true })), h('small', null, 'por mes'))),
+        h('div', { class: 'pro-restaurar' },
           h('button', { class: 'btn-texto', type: 'button', onclick: restaurar }, 'Ya pagué: restaurar mi compra')),
         h('p', { class: 'texto-xs suave', estilo: { marginTop: '12px' } }, 'El cobro lo hace Google Play y puedes cancelar cuando quieras desde Play. Los precios pueden variar según tu país.')));
     }
+    cont.appendChild(h('details', { class: 'pro-detalles seccion' }, h('summary', null, 'Comparar Gratis y Pro', ico('derecha', 'chico')), h('div', { class: 'pro-comparar' }, filas)));
   }
   async function comprar(plan) {
     try {
@@ -6699,6 +6800,7 @@
 
   const ir = (t, f) => () => AF.app.abrir(t, (c) => f(c));
   const proChip = (fn) => (AF.acceso.tiene(fn) ? ico('derecha') : AF.ui.chipPro());
+  let paginaMas = 'Planificar';
 
   /* --------------------------------------------------------------------- hub */
   function render(cont) {
@@ -6710,40 +6812,68 @@
       h('span', null, st.tipo === 'pro' ? h('strong', null, 'Eres Pro') : st.tipo === 'prueba' ? h('strong', null, 'Pro gratis: ' + (st.diasPrueba === 1 ? 'te queda 1 día' : 'te quedan ' + st.diasPrueba + ' días')) : h('strong', null, 'Gratis'),
         st.tipo === 'gratis' ? ' · Mira qué te da Pro' : ' · Ver mi plan')));
     const grupo = (titulo, filas) => h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, titulo)), h('div', { class: 'lista' }, filas));
-    const f = (icono, titulo, sub, onclick, derecha) => fila({ icono, titulo, sub, onclick, derecha: derecha || ico('derecha') });
-    cuerpo.appendChild(grupo('Tu plata', [
-      f('📊', 'Resumen y reportes', 'Mes, año, comparar, PDF y Excel', ir('Resumen', (c) => V.informesUI.resumen(c))),
-      f('🎯', 'Límites de gasto', D.presupuestos.length ? D.presupuestos.length + (D.presupuestos.length === 1 ? ' activo' : ' activos') : 'Para no pasarte', ir('Límites de gasto', (c) => V.finanzas.presupuestos(c))),
-      f('🏁', 'Metas de ahorro', D.metas.length ? D.metas.length + (D.metas.length === 1 ? ' meta' : ' metas') : 'Ahorra para algo concreto', ir('Metas', (c) => V.finanzas.metas(c))),
-      f('🔁', 'Pagos fijos', 'Arriendo, internet, colegio…', ir('Pagos fijos', (c) => V.finanzas.fijos(c))),
-      f('🤝', 'Préstamos entre personas', 'Quién te debe y a quién le debes', ir('Préstamos', (c) => V.finanzas.prestamos(c))),
-      f('📺', 'Suscripciones', 'Lo que pagas cada mes', ir('Suscripciones', (c) => V.finanzas.suscripciones(c))),
-      f('🏆', 'Retos', '30 días sin gastos hormiga', ir('Retos', (c) => V.finanzas.retos(c))),
-    ]));
-    cuerpo.appendChild(grupo('Agregar sin escribir', [
-      f('🧾', 'Foto de una factura', 'La leo y tú confirmas', () => V.bandeja.fotoFactura()),
-      f('📥', 'Bandeja por revisar', (D.bandeja.filter((b) => !b.hecho).length ? D.bandeja.filter((b) => !b.hecho).length + ' por revisar' : 'Nada por revisar') + ' · compartidos del banco', ir('Por revisar', (c) => V.bandeja.render(c))),
-      f('📄', 'Importar un estado de cuenta', 'Pega el texto y lo comparo con lo tuyo', ir('Importar estado de cuenta', (c) => V.bandeja.importar(c)), proChip('importarPDF')),
-    ]));
-    cuerpo.appendChild(grupo('Con Pro', [
-      f('🧮', 'Simulador «¿qué pasa si…?»', 'Prueba sin tocar tus datos', ir('Simulador', (c) => V.pro.simulador(c)), proChip('simulador')),
-      PLAN.pais(D.ajustes.pais).sri ? f('🏛️', 'SRI: gastos deducibles', 'Rebaja aproximada de impuestos', ir('SRI', (c) => V.pro.sri(c)), proChip('sri')) : null,
-      f('👫', 'Pareja o familia', 'Gastos compartidos', ir('Pareja o familia', (c) => V.pro.pareja(c)), proChip('parejaFamilia')),
-      f('✈️', 'Viajes y otras monedas', 'Gasta en otra moneda sin enredarte', ir('Viajes', (c) => V.pro.viajes(c)), proChip('variasMonedasViajes')),
-    ]));
-    if (N().instalacion.disponible()) cuerpo.appendChild(grupo('Esta app', [
-      f('📲', 'Instalar en este teléfono', 'Se abre como una app, sin barra del navegador', async () => { if (await N().instalacion.instalar()) aviso('Instalada'); }, h('span')),
-    ]));
-    cuerpo.appendChild(grupo('Tu cuenta', [
-      f('⚙️', 'Ajustes', 'Nombre, país, modo y color, bloqueo, voz', ir('Ajustes', (c) => ajustes(c))),
-      f('☁️', 'Copia de seguridad', N().proveedorListo && AF.app.sesion && AF.app.sesion.proveedor === 'google' ? 'En tu Google Drive' : 'En un archivo', ir('Copia de seguridad', (c) => respaldo(c))),
-      f('🚪', 'Cerrar sesión', AF.app.sesion && AF.app.sesion.email ? AF.app.sesion.email : 'Vuelves a la primera pantalla', cerrarSesion, h('span')),
-    ]));
-    cuerpo.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '28px', textAlign: 'center' } }, PLAN.app.nombre + ' ' + PLAN.app.version + ' · ' + PLAN.app.avisoLegal));
+    const simbolos = { '📊':'grafica', '🎯':'meta', '🏁':'meta', '🔁':'repetir', '📺':'repetir', '🤝':'personas', '🧾':'camara', '📥':'archivo', '📄':'papel', '🧮':'grafica', '🏛️':'archivo', '👫':'personas', '✈️':'inicio', '🏆':'estrella', '⚙️':'ajustes', '☁️':'nube', '🚪':'salir', '📲':'inicio' };
+    const f = (icono, titulo, sub, onclick, derecha) => fila({ icono: ico(simbolos[icono] || 'info'), titulo, sub, onclick, derecha: derecha || ico('derecha') });
+    const paginas = [
+      ['Planificar', [
+        grupo('Vista general', [
+          f('📊', 'Resumen y reportes', 'Mes, año, PDF y Excel', ir('Resumen', (c) => V.informesUI.resumen(c))),
+          f('🎯', 'Límites de gasto', D.presupuestos.length ? D.presupuestos.length + ' activos' : 'Tus límites por categoría', ir('Límites de gasto', (c) => V.finanzas.presupuestos(c))),
+          f('🏁', 'Metas de ahorro', D.metas.length ? D.metas.length + ' metas' : 'Objetivos y aportes', ir('Metas', (c) => V.finanzas.metas(c))),
+        ]),
+        grupo('Pagos y deudas', [
+          f('🔁', 'Pagos fijos', 'Alquiler, servicios y colegio', ir('Pagos fijos', (c) => V.finanzas.fijos(c))),
+          f('📺', 'Suscripciones', 'Servicios periódicos', ir('Suscripciones', (c) => V.finanzas.suscripciones(c))),
+          f('🤝', 'Préstamos', 'Lo que debes y te deben', ir('Préstamos', (c) => V.finanzas.prestamos(c))),
+        ]),
+      ]],
+      ['Importar', [
+        grupo('Documentos', [
+          f('🧾', 'Escanear factura', 'Fotografía y revisa los datos', () => V.bandeja.fotoFactura()),
+          f('📥', 'Por revisar', D.bandeja.filter((x) => !x.hecho).length + ' pendientes', ir('Por revisar', (c) => V.bandeja.render(c))),
+          f('📄', 'Estado de cuenta', 'Importar y comparar movimientos', ir('Importar estado de cuenta', (c) => V.bandeja.importar(c)), proChip('importarPDF')),
+        ]),
+      ]],
+      ['Herramientas', [
+        grupo('Explorar', [
+          f('🧮', 'Simulador', 'Proyecta compras y ahorro', ir('Simulador', (c) => V.pro.simulador(c)), proChip('simulador')),
+          PLAN.pais(D.ajustes.pais).sri ? f('🏛️', 'Gastos deducibles', 'SRI · Ecuador', ir('SRI', (c) => V.pro.sri(c)), proChip('sri')) : null,
+          f('👫', 'Pareja o familia', 'Gastos compartidos', ir('Pareja o familia', (c) => V.pro.pareja(c)), proChip('parejaFamilia')),
+          f('✈️', 'Otras monedas', 'Viajes y cambios', ir('Viajes', (c) => V.pro.viajes(c)), proChip('variasMonedasViajes')),
+          f('🏆', 'Retos', 'Pequeños objetivos', ir('Retos', (c) => V.finanzas.retos(c))),
+        ]),
+      ]],
+      ['Cuenta', [
+        grupo('Tus datos', [
+          f('⚙️', 'Ajustes y seguridad', 'Datos personales, PIN y apariencia', ir('Ajustes', (c) => ajustes(c))),
+          f('☁️', 'Copia de seguridad', AF.app.sesion && AF.app.sesion.proveedor === 'google' ? 'Google Drive' : 'Archivo', ir('Copia de seguridad', (c) => respaldo(c))),
+          f('🚪', 'Cerrar sesión', 'Salir de este teléfono', cerrarSesion, h('span')),
+        ]),
+        N().instalacion.disponible() ? grupo('Aplicación', [f('📲', 'Instalar', 'Instalar en este teléfono', async () => { if (await N().instalacion.instalar()) aviso('Instalada'); }, h('span'))]) : null,
+      ]],
+    ];
+    const zona = h('div');
+    const pestanas = h('div', { class: 'mas-pestanas', role: 'tablist', 'aria-label': 'Secciones' });
+    const dibujar = () => {
+      AF.ui.vaciar(pestanas); AF.ui.vaciar(zona);
+      paginas.forEach(([nombre]) => pestanas.appendChild(h('button', { type: 'button', role: 'tab', 'aria-selected': nombre === paginaMas ? 'true' : 'false', onclick: () => { paginaMas = nombre; dibujar(); } }, nombre)));
+      paginas.find(([nombre]) => nombre === paginaMas)[1].forEach((n) => n && zona.appendChild(n));
+    };
+    dibujar(); cuerpo.appendChild(pestanas); cuerpo.appendChild(zona);
+    cuerpo.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '24px', textAlign: 'center' } }, PLAN.app.nombre + ' ' + PLAN.app.version));
     cont.appendChild(cuerpo);
   }
   async function cerrarSesion() {
-    if (await C().confirmar({ titulo: '¿Cerrar sesión?', texto: 'Tus datos siguen cifrados en este teléfono. Al volver a entrar con la misma cuenta, los recuperas con tu PIN.', si: 'Cerrar sesión' })) AF.app.cerrarSesion();
+    if (!(await C().confirmar({ titulo: 'Cerrar sesión', texto: 'Al salir puedes conservar o borrar los datos de este teléfono.', si: 'Continuar' }))) return;
+    const borrar = await C().confirmar({ titulo: 'Datos de este teléfono', texto: '¿Quieres borrarlos? Si entraste con Google, primero guardaré una copia en Drive.', si: 'Borrar y cerrar', no: 'Conservar y cerrar' });
+    if (!borrar) { await AF.app.cerrarSesion({ borrar: false }); return; }
+    if (AF.app.sesion.proveedor === 'google') {
+      try { await AF.app.cerrarSesion({ borrar: true }); aviso('Copia guardada en Drive; datos del teléfono borrados.'); }
+      catch (e) { aviso('No se pudo guardar la copia en Drive. Tus datos siguen en este teléfono.'); }
+    } else {
+      const ok = await C().confirmar({ titulo: 'Sin copia en Drive', texto: 'Esta cuenta no tiene respaldo automático en Drive. Si necesitas conservar tus datos, exporta primero una copia desde Cuenta. ¿Borro ahora los datos de este teléfono?', si: 'Borrar y cerrar', no: 'Cancelar' });
+      if (ok) { await AF.app.cerrarSesion({ borrar: true }); aviso('Datos del teléfono borrados.'); }
+    }
   }
 
   /* ------------------------------------------------------------------ ajustes */
@@ -6752,33 +6882,48 @@
     hoja({ titulo, cuerpo: h('div', null, campo('', inp, ayuda)), acciones: [{ texto: 'Guardar', clase: 'btn-primario', onclick: () => { const r = alGuardar(inp.value); return r === false ? false : undefined; } }] });
     setTimeout(() => inp.focus(), 150);
   };
+  let paginaAjustes = 'Perfil';
+  function editarPaisMoneda(a) {
+    let pais = a.pais, moneda = a.moneda;
+    const divisa = h('select', { class: 'entrada', 'aria-label': 'Moneda', onchange: (e) => { moneda = e.target.value; } },
+      Object.keys(PLAN.monedas).map((m) => h('option', { value: m, selected: m === moneda }, m + ' · ' + PLAN.monedas[m].simbolo)));
+    const lugar = h('select', { class: 'entrada', 'aria-label': 'País', onchange: (e) => { pais = e.target.value; moneda = PLAN.pais(pais).moneda; divisa.value = moneda; } },
+      PLAN.paises.map((p) => h('option', { value: p.codigo, selected: p.codigo === pais }, p.nombre)));
+    hoja({ titulo: 'País y moneda', cuerpo: h('div', null, campo('País', lugar), campo('Moneda', divisa),
+      h('p', { class: 'texto-sm suave', estilo: { marginTop: '14px' } }, 'Cambia el formato de los importes; tus movimientos se conservan.')),
+      acciones: [{ texto: 'Guardar cambios', clase: 'btn-primario', onclick: () => S().ajustar({ pais, moneda }) }] });
+  }
   function ajustes(cont) {
     const D = S().d, a = D.ajustes;
+    const perfil = h('div'), apariencia = h('div'), seguridad = h('div');
+    let seccionActual = perfil;
+    const poner = (n) => seccionActual.appendChild(n);
     const p = PLAN.pais(a.pais);
     const fila2 = (icono, titulo, valor, onclick) => fila({ icono, titulo, sub: valor, onclick, derecha: ico('derecha') });
     const sw = (titulo, sub, activo, cambia) => h('button', { class: 'interruptor', type: 'button', role: 'switch', 'aria-checked': activo ? 'true' : 'false', estilo: { width: '100%', textAlign: 'left' }, onclick: () => cambia(!activo) }, h('div', { class: 'interruptor-texto' }, h('div', { class: 'fila-titulo', estilo: { whiteSpace: 'normal' } }, titulo), sub ? h('div', { class: 'fila-sub', estilo: { whiteSpace: 'normal' } }, sub) : null), h('span', { class: 'pastilla' }));
     const sec = (t) => h('div', { class: 'seccion-cabeza', estilo: { marginTop: '28px' } }, h('h2', { class: 'h2' }, t));
-    cont.appendChild(h('div', { estilo: { marginTop: '4px' } }));
-    cont.appendChild(sec('Tus datos'));
-    cont.appendChild(h('div', { class: 'lista' },
+    poner(h('div', { estilo: { marginTop: '4px' } }));
+    poner(sec('Tus datos'));
+    poner(h('div', { class: 'lista' },
       fila2('🙂', 'Nombre', a.nombre || 'Sin nombre', () => editor('Nombre', a.nombre, 'texto', (v) => { if (!v.trim()) return false; S().ajustar({ nombre: v.trim() }); })),
-      fila2('🌎', 'País y moneda', p.nombre + ' · ' + a.moneda, () => hoja({ titulo: 'País y moneda', cuerpo: h('div', null, h('div', { class: 'opciones', estilo: { marginTop: '10px' } }, PLAN.paises.map((x) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': a.pais === x.codigo ? 'true' : 'false', onclick: (e) => { S().ajustar({ pais: x.codigo, moneda: x.moneda }); AF.app.refrescar(); e.currentTarget.closest('.hoja').previousSibling.click(); } }, x.nombre))),
-        campo('Moneda', h('div', { class: 'opciones' }, Object.keys(PLAN.monedas).map((m) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': a.moneda === m ? 'true' : 'false', onclick: (e) => { S().ajustar({ moneda: m }); e.currentTarget.closest('.hoja').previousSibling.click(); } }, PLAN.monedas[m].simbolo + ' ' + m))))) })),
-      fila2('📅', 'Día de cobro', 'Día ' + a.diaCobro, () => editor('Día de cobro', a.diaCobro, 'num', (v) => { const n = Math.round(U.parseNumero(v)); if (!(n >= 1 && n <= 31)) return false; S().ajustar({ diaCobro: n }); })),
-      fila2('💼', 'Ingreso mensual', a.sueldo ? $(a.sueldo) : 'Sin definir', () => editor('Ingreso mensual', a.sueldo, 'num', (v) => { S().ajustar({ sueldo: v.trim() ? U.parseNumero(v) : null }); }, 'Se usa solo si aún no registras ingresos en el periodo.')),
+      fila2('🌎', 'País y moneda', p.nombre + ' · ' + a.moneda, () => editarPaisMoneda(a)),
+      fila2('📅', 'Fecha de cobro', a.diaCobro ? 'Día ' + a.diaCobro : 'Fecha variable', () => hoja({ titulo: 'Fecha de cobro', cuerpo: h('div', { class: 'opciones', estilo: { marginTop: '12px' } }, h('button', { type: 'button', class: 'opcion', onclick: (e) => { S().ajustar({ diaCobro: null }); e.currentTarget.closest('.hoja').previousSibling.click(); } }, 'Fecha variable'), h('input', { class: 'entrada', type: 'number', min: 1, max: 31, placeholder: 'Día del mes (1 a 31)', value: a.diaCobro || '', onchange: (e) => { const n = Number(e.target.value); if (n >= 1 && n <= 31) S().ajustar({ diaCobro: n }); } })) })),
+      fila2('💼', 'Ingreso previsto', a.sueldo ? $(a.sueldo) : 'Sin definir', () => editor('Ingreso mensual', a.sueldo, 'num', (v) => { S().ajustar({ sueldo: v.trim() ? U.parseNumero(v) : null }); }, 'Se usa solo si aún no registras ingresos en el periodo.')),
       p.sri ? fila2('👨‍👩‍👧', 'Cargas familiares', String(a.cargas || 0), () => hoja({ titulo: 'Cargas familiares', cuerpo: h('div', { class: 'opciones', estilo: { marginTop: '12px' } }, [0, 1, 2, 3, 4, 5].map((n) => h('button', { type: 'button', class: 'opcion', onclick: (e) => { S().ajustar({ cargas: n }); e.currentTarget.closest('.hoja').previousSibling.click(); } }, n === 5 ? '5 o más' : String(n)))) })) : null));
-    cont.appendChild(sec('Apariencia y voz'));
-    cont.appendChild(h('div', null,
+    seccionActual = apariencia;
+    poner(sec('Apariencia y voz'));
+    poner(h('div', null,
       h('div', { class: 'campo' }, h('label', null, 'Color de la app'), h('div', { class: 'opciones' }, PLAN.apariencia.colores.map((c) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': (a.colorApp || 'marino') === c.id ? 'true' : 'false', onclick: () => S().ajustar({ colorApp: c.id }) },
         h('span', { class: 'muestra-color', estilo: { background: AF.tema.paleta('claro', c.id).voz } }), c.nombre)))),
       h('div', { class: 'campo' }, h('label', null, 'Gráficas'), h('div', { class: 'segmentos' }, [['barras', 'Barras'], ['lineas', 'Líneas'], ['circulo', 'Círculo']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': (a.grafica || 'barras') === k ? 'true' : 'false', onclick: () => S().ajustar({ grafica: k }) }, t)))),
       h('div', { class: 'campo' }, h('label', null, 'Modo'), h('div', { class: 'segmentos' }, [['auto', 'Automático'], ['claro', 'Claro'], ['oscuro', 'Oscuro']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': (a.tema || 'auto') === k ? 'true' : 'false', onclick: () => S().ajustar({ tema: k }) }, t)))),
       sw('Que me responda en voz alta', 'Lee en voz alta lo que entendió y las respuestas.', a.respuestaVoz, (v) => S().ajustar({ respuestaVoz: v }))));
-    cont.appendChild(sec('Seguridad'));
-    cont.appendChild(h('div', { class: 'lista' },
+    seccionActual = seguridad;
+    poner(sec('Seguridad'));
+    poner(h('div', { class: 'lista' },
       fila2('⏱️', 'Pedir PIN o huella', a.bloqueoSeg === 0 ? 'Cada vez que salgas' : 'Tras ' + (a.bloqueoSeg >= 60 ? a.bloqueoSeg / 60 + ' min' : a.bloqueoSeg + ' s') + ' fuera de la app', () => hoja({ titulo: 'Pedir PIN o huella', cuerpo: h('div', { class: 'opciones', estilo: { marginTop: '12px' } }, [[0, 'Siempre'], [30, '30 segundos'], [60, '1 minuto'], [300, '5 minutos']].map(([s, t]) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': a.bloqueoSeg === s ? 'true' : 'false', onclick: (e) => { S().ajustar({ bloqueoSeg: s }); e.currentTarget.closest('.hoja').previousSibling.click(); } }, t))) })),
-      fila2('🔑', 'Cambiar mi PIN', 'Uno nuevo de ' + PLAN.sesion.pinMin + ' a ' + PLAN.sesion.pinMax + ' dígitos', cambiarPin)));
-    const zonaHuella = h('div'); cont.appendChild(zonaHuella);
+      fila2('🔑', Sg().obtenerAutoPin(AF.app.ns) ? 'Activar PIN' : 'Cambiar mi PIN', 'Uno nuevo de ' + PLAN.sesion.pinMin + ' a ' + PLAN.sesion.pinMax + ' dígitos', cambiarPin)));
+    const zonaHuella = h('div'); poner(zonaHuella);
     N().huellaDisponible().then(async (ok) => {
       if (!ok) { zonaHuella.appendChild(h('p', { class: 'texto-sm suave', estilo: { marginTop: '8px' } }, 'Este teléfono no tiene huella configurada.')); return; }
       const on = await Sg().huellaActiva(AF.app.ns);
@@ -6788,14 +6933,24 @@
         AF.app.refrescar();
       }));
     });
-    cont.appendChild(sec('Tus palabras'));
+    poner(sec('Tus palabras'));
     const aprendidas = Object.entries(D.diccionario);
-    cont.appendChild(aprendidas.length ? h('div', { class: 'lista' }, aprendidas.slice(0, 30).map(([w, cat]) => fila({ icono: S().categoria(cat).icono, titulo: w, sub: S().categoria(cat).nombre, derecha: h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Olvidar ' + w, onclick: () => { S().olvidarAprendido(w); AF.app.refrescar(); } }, ico('cerrar')) })))
+    poner(aprendidas.length ? h('div', { class: 'lista' }, aprendidas.slice(0, 30).map(([w, cat]) => fila({ icono: S().categoria(cat).icono, titulo: w, sub: S().categoria(cat).nombre, derecha: h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Olvidar ' + w, onclick: () => { S().olvidarAprendido(w); AF.app.refrescar(); } }, ico('cerrar')) })))
       : h('p', { class: 'texto-sm suave' }, 'Cuando corriges una categoría, aprendo la palabra y la verás aquí.'));
-    cont.appendChild(sec('Datos'));
-    cont.appendChild(h('div', { class: 'lista' },
+    poner(sec('Datos'));
+    poner(h('div', { class: 'lista' },
       fila2('🗑️', 'Borrar todos mis datos', 'Movimientos, tarjetas y metas. No se puede deshacer.', borrarTodo)));
-    cont.appendChild(h('div', { estilo: { height: '24px' } }));
+    poner(h('div', { estilo: { height: '24px' } }));
+    const area = h('div');
+    const nav = h('div', { class: 'ajustes-pestanas', role: 'tablist', 'aria-label': 'Ajustes' });
+    const pintarAjustes = () => {
+      AF.ui.vaciar(nav); AF.ui.vaciar(area);
+      [['Perfil', perfil], ['Apariencia', apariencia], ['Seguridad', seguridad]].forEach(([nombre, nodo]) => {
+        nav.appendChild(h('button', { type: 'button', role: 'tab', 'aria-selected': paginaAjustes === nombre ? 'true' : 'false', onclick: () => { paginaAjustes = nombre; pintarAjustes(); } }, nombre));
+        if (paginaAjustes === nombre) area.appendChild(nodo);
+      });
+    };
+    pintarAjustes(); cont.appendChild(nav); cont.appendChild(area);
   }
 
   function cambiarPin() {
@@ -6803,12 +6958,12 @@
     const nuevo = h('input', { class: 'entrada grande', type: 'password', inputmode: 'numeric', maxlength: n.pinMax, 'aria-label': 'PIN nuevo', placeholder: '••••' });
     const rep = h('input', { class: 'entrada grande', type: 'password', inputmode: 'numeric', maxlength: n.pinMax, 'aria-label': 'Repite el PIN nuevo', placeholder: '••••' });
     const err = h('div', { class: 'ayuda', role: 'alert', estilo: { color: 'var(--gasto)', minHeight: '18px' } });
-    hoja({ titulo: 'Cambiar mi PIN', cuerpo: h('div', null, h('p', { class: 'suave', estilo: { marginTop: '4px' } }, 'Si lo olvidas, los datos no se pueden recuperar.'), campo('PIN nuevo (' + n.pinMin + ' a ' + n.pinMax + ' números)', nuevo), campo('Repítelo', rep), err),
+    hoja({ titulo: 'Cambiar mi PIN', cuerpo: h('div', null, h('p', { class: 'suave', estilo: { marginTop: '4px' } }, 'Elige un PIN que recuerdes. Se pedirá al volver a abrir la aplicación.'), campo('PIN nuevo (' + n.pinMin + ' a ' + n.pinMax + ' números)', nuevo), campo('Repítelo', rep), err),
       acciones: [{ texto: 'Cambiar PIN', clase: 'btn-primario', onclick: async () => {
         if (!Sg().pinValido(nuevo.value)) { err.textContent = 'Usa de ' + n.pinMin + ' a ' + n.pinMax + ' números.'; return false; }
         if (Sg().pinDebil(nuevo.value)) { err.textContent = 'Ese PIN es muy fácil de adivinar.'; return false; }
         if (nuevo.value !== rep.value) { err.textContent = 'No coinciden.'; return false; }
-        try { await Sg().cambiarPin(AF.app.ns, nuevo.value); aviso('PIN cambiado'); } catch (e) { aviso('No pude cambiar el PIN'); }
+        try { await Sg().cambiarPin(AF.app.ns, nuevo.value); aviso('PIN cambiado'); } catch (e) { err.textContent = 'No se pudo cambiar el PIN. Inténtalo de nuevo.'; return false; }
       } }] });
   }
 
@@ -6824,7 +6979,7 @@
   function respaldo(cont) {
     const D = S().d, esGoogle = AF.app.sesion && AF.app.sesion.proveedor === 'google';
     const info = h('p', { class: 'texto-sm suave', estilo: { marginTop: '8px' } }, 'Revisando…');
-    cont.appendChild(h('p', { class: 'suave', estilo: { marginTop: '4px' } }, 'La copia sale ya cifrada con tu PIN: ni Google ni nadie puede leerla. Para restaurarla necesitas el PIN que usabas al hacerla.'));
+    cont.appendChild(h('p', { class: 'suave', estilo: { marginTop: '4px' } }, Sg().obtenerAutoPin(AF.app.ns) ? 'Si no activaste PIN, la copia incluye la clave de recuperación en la carpeta privada de esta app en tu Drive. Quien acceda a esa copia puede recuperar los datos.' : 'La copia se cifra con tu PIN. Para restaurarla necesitarás ese PIN.'));
     const msg = (t) => { info.textContent = t; };
     const hacer = async (fn, ok, mal) => { try { await fn(); aviso(ok); } catch (e) { aviso(mal || (e && e.message) || 'No se pudo'); } };
     const copia = async () => { await S().guardarYa(); return Sg().paqueteRespaldo(AF.app.ns); };
@@ -6834,7 +6989,7 @@
         h('div', { estilo: { display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '14px' } },
           h('button', { class: 'btn btn-primario btn-bloque', type: 'button', onclick: async (e) => { const boton = e.currentTarget; boton.disabled = true; await hacer(async () => { await N().respaldoSubir(await copia()); S().ajustar({ ultimaCopia: Date.now() }); msg('Última copia: ahora mismo.'); }, 'Copia guardada en Drive', 'No pude subir la copia. ¿Tienes internet y diste permiso?'); boton.disabled = false; } }, ico('nube'), 'Hacer copia ahora'),
           h('button', { class: 'btn btn-borde btn-bloque', type: 'button', onclick: async () => {
-            if (!(await C().confirmar({ titulo: '¿Restaurar la copia de Drive?', texto: 'Reemplaza lo que tienes ahora por la copia. Te pedirá el PIN que usabas al hacerla.', si: 'Restaurar' }))) return;
+            if (!(await C().confirmar({ titulo: '¿Restaurar la copia de Drive?', texto: 'Reemplaza los datos de este teléfono por los de la copia. Si tenía PIN, lo necesitarás.', si: 'Restaurar' }))) return;
             await hacer(async () => { const p = await N().respaldoBajar(); if (!p) throw new Error('No hay ninguna copia en tu Drive.'); await Sg().restaurarPaquete(AF.app.ns, p); S().cargar(null); AF.app.abierta = false; await V.acceso.bloqueo(); }, 'Copia restaurada');
           } }, 'Restaurar desde Drive'),
           h('button', { class: 'btn-texto btn-peligro', type: 'button', onclick: async () => { if (await C().confirmar({ titulo: '¿Borrar la copia de Drive?', texto: 'Tus datos del teléfono no se tocan.', si: 'Borrar copia', peligro: true })) await hacer(async () => { const r = await N().respaldoBorrar(); msg(r ? 'Copia borrada.' : 'No había copia.'); }, 'Copia de Drive borrada'); } }, 'Borrar la copia de Drive'))));
@@ -6911,6 +7066,10 @@
     const y = g.scrollY;
     AF.ui.vaciar(vistaEl);
     const tope = app.pila[app.pila.length - 1];
+    vistaEl.dataset.vista = tope ? 'detalle' : app.tab;
+    const conCompositor = !tope && (app.tab === 'inicio' || app.tab === 'movimientos');
+    compositorEl.classList.toggle('oculto', !conCompositor);
+    raiz().classList.toggle('sin-compositor', !conCompositor);
     if (tope) {
       const cuerpo = h('div', { class: 'contenido' });
       const cab = h('header', { class: 'barra-superior' }, h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Atrás', onclick: () => app.atras() }, ico('atras')), h('h1', { class: 'h2' }, tope.titulo));
@@ -6955,9 +7114,9 @@
   async function ofrecerRecuperar() {
     try {
       if (!app.sesion || app.sesion.proveedor !== 'google') return false;
-      const info = await N().respaldoInfo({ soloSiHayPermiso: true });
+      const info = await N().respaldoInfo({ soloSiHayPermiso: !N().esNativo() });
       if (!info) return false;
-      const si = await V().comun.confirmar({ titulo: 'Encontré una copia tuya en Drive', texto: 'Es del ' + new Date(info.fecha).toLocaleDateString('es') + '. ¿La recupero? Vas a necesitar el PIN que usabas entonces.', si: 'Recuperar mi copia', no: 'Empezar de cero' });
+      const si = await V().comun.confirmar({ titulo: 'Encontré una copia tuya en Drive', texto: 'Es del ' + new Date(info.fecha).toLocaleDateString('es') + '. ¿La recupero en este teléfono?', si: 'Recuperar mi copia', no: 'Empezar de cero' });
       if (!si) return false;
       const p = await N().respaldoBajar(); if (!p) return false;
       await Sg().restaurarPaquete(app.ns, p);
@@ -6982,7 +7141,7 @@
     if (PLAN.prueba.iniciaAlCrearCuenta) nuevo.plan.inicioPrueba = app.hoy();
     S().cargar(nuevo, { escribir: (dd) => Sg().guardarDatos(app.ns, dd) });
     await S().guardarYa();
-    await V().acceso.ofrecerHuella();
+    if (pin != null) await V().acceso.ofrecerHuella();
     await app.entrar(true);
   };
 
@@ -6998,6 +7157,7 @@
     app.tab = 'inicio'; app.pila = [];
     dibujar();
     programarAvisos();
+    if (app.sesion && app.sesion.proveedor === 'google') app.copiaAutomatica(true);
     if (app.pendienteVoz) { app.pendienteVoz = false; V().voz.abrir({ modo: 'voz' }); }
     if (app.pendienteCompartido && V().bandeja) { const x = app.pendienteCompartido; app.pendienteCompartido = null; V().bandeja.recibir(x); }
   };
@@ -7013,16 +7173,48 @@
     return V().acceso.bloqueo();
   };
 
-  app.cerrarSesion = async () => {
-    try { await S().guardarYa(); } catch (e) { /* nada */ }
-    const prov = app.sesion && app.sesion.proveedor;
-    app.abierta = false;
-    if (PLAN.sesion.cerrarSesionBorraDatos && app.ns) await Sg().borrarCuenta(app.ns, N().secretosHuella);
-    await N().cerrarSesionSocial(prov);
-    await Sg().cerrarSesion();
-    S().cargar(null);
-    app.sesion = null; app.ns = null;
-    V().acceso.portada();
+  let temporizadorCopia = null, copiaEnProceso = false, copiaPendiente = false, copiaPromesa = null, cerrandoSesion = false;
+  app.copiaAutomatica = (interactiva) => {
+    if (cerrandoSesion || !app.abierta || !app.sesion || app.sesion.proveedor !== 'google') return;
+    clearTimeout(temporizadorCopia);
+    temporizadorCopia = setTimeout(async () => {
+      if (copiaEnProceso) { copiaPendiente = true; return; }
+      if (!app.abierta || !app.ns) return;
+      copiaEnProceso = true;
+      copiaPromesa = (async () => {
+        try {
+          await S().guardarYa();
+          await N().respaldoSubir(await Sg().paqueteRespaldo(app.ns), !interactiva);
+          S().d.ajustes.ultimaCopia = Date.now();
+        } catch (e) { if (interactiva) aviso('Copia de Drive pendiente. Revisa tu conexión o permisos en Cuenta.'); }
+        finally { copiaEnProceso = false; copiaPromesa = null; if (copiaPendiente) { copiaPendiente = false; app.copiaAutomatica(false); } }
+      })();
+      await copiaPromesa;
+    }, interactiva ? 500 : 2500);
+  };
+  AF.bus.on('cambio', () => app.copiaAutomatica(false));
+  AF.bus.on('ajustes', () => app.copiaAutomatica(false));
+
+  app.cerrarSesion = async (opciones) => {
+    const borrar = !!(opciones && opciones.borrar);
+    cerrandoSesion = true;
+    clearTimeout(temporizadorCopia);
+    try {
+      if (copiaPromesa) await copiaPromesa;
+      clearTimeout(temporizadorCopia);
+      await S().guardarYa();
+      const prov = app.sesion && app.sesion.proveedor;
+      if (borrar && prov === 'google') {
+        await N().respaldoSubir(await Sg().paqueteRespaldo(app.ns));
+      }
+      if (borrar && app.ns) await Sg().borrarCuenta(app.ns, N().secretosHuella);
+      app.abierta = false;
+      await N().cerrarSesionSocial(prov);
+      await Sg().cerrarSesion();
+      S().cargar(null);
+      app.sesion = null; app.ns = null;
+      V().acceso.portada();
+    } finally { cerrandoSesion = false; }
   };
 
   app.reiniciarCuenta = async () => {

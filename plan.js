@@ -366,10 +366,10 @@
     //   botonFondo          = botones principales   ·   paleta = colores de reserva para íconos que no son una categoría
     apariencia: {
       claro: {
-        papel: '#EEF2F8', hoja: '#FFFFFF', tinta: '#0E1A2E', tinta2: '#56647A', linea: '#DDE4EE',
-        panel: '#10233F', panelFondo: 'linear-gradient(165deg,#0B1A30 0%,#13294A 100%)', panelSuave: '#E4ECF8',
-        acento: '#1F5FD6', botonFondo: '#1F5FD6',
-        voz: '#2B6FEA', vozFondo: '#2B6FEA', sobreVoz: '#FFFFFF', naranja: '#E8751A',
+        papel: '#F2F4F3', hoja: '#FFFFFF', tinta: '#14283A', tinta2: '#536575', linea: '#DCE4E4',
+        panel: '#102B3C', panelFondo: 'linear-gradient(165deg,#0B1A30 0%,#163649 100%)', panelSuave: '#E7F0EE',
+        acento: '#125F61', botonFondo: '#125F61',
+        voz: '#125F61', vozFondo: '#125F61', sobreVoz: '#FFFFFF', naranja: '#DC7A2D',
         oro: '#E0A526', oroSuave: '#FBF0D5', sobreOro: '#5C3D00',
         gasto: '#C62F2F', gastoSuave: '#FBE4E4', gastoVivo: '#E04848',
         ingreso: '#0E8A5F', ingresoSuave: '#DDF3EA', ingresoVivo: '#1DB57A',
@@ -390,7 +390,7 @@
       // Colores que la persona puede elegir en Más → Ajustes → Apariencia. Solo cambian lo grande, los botones y el micrófono;
       // ingresos verde y gastos rojo no se tocan. 'azul' es el de origen.
       colores: [
-        { id: 'marino', nombre: 'Azul', claro: {}, oscuro: {} },
+        { id: 'marino', nombre: 'Azul petróleo', claro: {}, oscuro: {} },
         { id: 'petroleo', nombre: 'Petróleo',
           claro: { panel: '#0E3B43', panelFondo: 'linear-gradient(165deg,#09292F 0%,#0F525D 100%)', panelSuave: '#E0EFF2', acento: '#0F6674', botonFondo: '#0F6674', voz: '#0F7F90', vozFondo: '#0F7F90' },
           oscuro: { panel: '#0E3B43', panelFondo: 'linear-gradient(165deg,#09292F 0%,#0F525D 100%)', panelSuave: '#15303A', papel: '#08171C', hoja: '#0F252C', acento: '#6FD0DE', botonFondo: '#168798', voz: '#1BA3B8', vozFondo: '#1BA3B8' } },
