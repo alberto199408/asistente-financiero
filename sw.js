@@ -1,7 +1,7 @@
-/* Asistente Financiero — ayudante para abrir sin internet (generado por scripts/construir-web.js; versión 8a9fde51f7).
+/* Asistente Financiero — ayudante para abrir sin internet (generado por scripts/construir-web.js; versión 831dc19b8e).
    Con internet pide siempre lo más nuevo (si subes cambios, se ven en la próxima apertura); sin internet o con internet lento usa la copia guardada.
    Nunca toca las llamadas a Google, Facebook, Drive ni a la IA: esas van directo a internet. */
-const CACHE = 'asistente-8a9fde51f7';
+const CACHE = 'asistente-831dc19b8e';
 const ARCHIVOS = ["./","app.css","app.js","apple-touch-icon.png","favicon.png","icon-192.png","icon-512.png","icon-maskable-512.png","index.html","logos.js","manifest.webmanifest","plan.js","tema.js"];
 const ESPERA = 4000;
 
@@ -15,7 +15,8 @@ self.addEventListener('activate', (e) => {
 function deInternet(req) {
   return new Promise((ok, mal) => {
     let listo = false; const t = setTimeout(() => { if (!listo) { listo = true; mal(new Error('tardó')); } }, ESPERA);
-    fetch(req).then((r) => {
+    // «no-cache»: siempre pregunta a GitHub si el archivo cambió (si no cambió responde sin bajarlo). Así no se queda con la copia de 10 minutos.
+    fetch(req.mode === 'navigate' ? req.url : req, { cache: 'no-cache' }).then((r) => {
       if (listo) return; listo = true; clearTimeout(t);
       if (r && r.ok && r.type === 'basic') { const copia = r.clone(); caches.open(CACHE).then((c) => c.put(req, copia)).catch(() => {}); }
       ok(r);
@@ -27,6 +28,7 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   let url; try { url = new URL(req.url); } catch (x) { return; }
   if (url.origin !== self.location.origin) return;
-  const guardado = () => caches.match(req, { ignoreSearch: req.mode === 'navigate' }).then((c) => c || (req.mode === 'navigate' ? caches.match('./index.html') : null) || new Response('', { status: 504, statusText: 'sin internet' }));
+  if (url.searchParams.has('_v')) return;                       // consulta de «¿hay versión nueva?»: va directo a internet
+  const guardado = () => caches.match(req, { ignoreSearch: true }).then((c) => c || (req.mode === 'navigate' ? caches.match('./index.html') : null) || new Response('', { status: 504, statusText: 'sin internet' }));
   e.respondWith(deInternet(req).then((r) => (r && r.ok ? r : guardado())).catch(guardado));
 });

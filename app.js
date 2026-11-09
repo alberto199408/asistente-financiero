@@ -4305,11 +4305,59 @@
     alCambiar: (f) => { oyentesInstalar.push(f); },
     async instalar() { if (!eventoInstalar) return false; const ev = eventoInstalar; eventoInstalar = null; ev.prompt(); let r; try { r = await ev.userChoice; } catch (e) { return false; } oyentesInstalar.forEach((f) => f()); return !!r && r.outcome === 'accepted'; },
   };
-  // Registra el sw.js (copia para abrir sin internet) y pide que el navegador NO borre los datos si falta espacio.
+  /* ------------------------------------------------------ versión web: saber si hay una versión nueva y aplicarla */
+  // La compilación la escribe scripts/construir-web.js (huella de todos los archivos). En desarrollo queda sin escribir y no se busca nada.
+  const COMPILACION = '831dc19b8e';
+  const esCompilada = /^[0-9a-f]{10}$/.test(COMPILACION);
+  let registro = null, nuevaCompilacion = null, ultimaBusqueda = 0;
+  const oyentesVersion = [];
+  async function compilacionPublicada() {
+    // «_v» hace que el ayudante (sw.js) NO toque esta consulta: va directo a internet, sin la copia de 10 minutos que deja GitHub.
+    const r = await g.fetch('sw.js?_v=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) throw new Error('http ' + r.status);
+    const m = /versión ([0-9a-f]{10})/.exec(await r.text());
+    return m ? m[1] : null;
+  }
+  // Devuelve { hay, compilacion } · { hay:false } si ya tienes la última · { hay:false, error:true } si no pudo consultar · { hay:false, desarrollo:true }
+  async function buscarActualizacion() {
+    if (esNativo() || !esCompilada) return { hay: false, desarrollo: true };
+    ultimaBusqueda = Date.now();
+    try {
+      if (registro) registro.update().catch(() => {});
+      const publicada = await compilacionPublicada();
+      if (publicada && publicada !== COMPILACION) {
+        const nueva = publicada !== nuevaCompilacion; nuevaCompilacion = publicada;
+        if (nueva) oyentesVersion.slice().forEach((f) => { try { f(publicada); } catch (e) { /* nada */ } });
+        return { hay: true, compilacion: publicada };
+      }
+      return { hay: false };
+    } catch (e) { return { hay: false, error: true }; }
+  }
+  // Trae los archivos nuevos saltándose la copia del navegador, borra las copias viejas del ayudante y recarga. NO toca tus datos.
+  async function aplicarActualizacion() {
+    try {
+      // index.html trae las direcciones nuevas de todos los demás archivos (app.js?v=…), así que basta con que ESA llegue fresca.
+      await Promise.all(['./', 'index.html', 'manifest.webmanifest'].map((u) => g.fetch(u, { cache: 'reload' }).catch(() => {})));
+      if (g.navigator.serviceWorker && g.navigator.serviceWorker.getRegistrations) {
+        const regs = await g.navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map((r) => r.unregister().catch(() => {})));
+      }
+      if (g.caches && g.caches.keys) { const ks = await g.caches.keys(); await Promise.all(ks.filter((k) => k.indexOf('asistente-') === 0).map((k) => g.caches.delete(k))); }
+    } catch (e) { /* aun así recargamos */ }
+    g.location.reload();
+  }
+  const version = { compilacion: COMPILACION, compilada: esCompilada, hayNueva: () => nuevaCompilacion, buscar: buscarActualizacion, aplicar: aplicarActualizacion,
+    alHaberNueva: (f) => { oyentesVersion.push(f); if (nuevaCompilacion) f(nuevaCompilacion); } };
+
+  // Registra el sw.js (copia para abrir sin internet), pide que el navegador NO borre los datos si falta espacio
+  // y revisa si hay versión nueva: al abrir, al volver a la app y cada 5 minutos con la app a la vista.
   function prepararWeb() {
     if (esNativo() || !g.navigator) return;
-    try { if ('serviceWorker' in g.navigator && (g.location.protocol === 'https:' || esLocal())) g.navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) { /* sin sw: la app funciona igual, solo que sin internet no abre */ }
+    try { if ('serviceWorker' in g.navigator && (g.location.protocol === 'https:' || esLocal())) g.navigator.serviceWorker.register('sw.js').then((r) => { registro = r; }).catch(() => {}); } catch (e) { /* sin sw: la app funciona igual, solo que sin internet no abre */ }
     try { if (g.navigator.storage && g.navigator.storage.persist) g.navigator.storage.persist().catch(() => {}); } catch (e) { /* nada */ }
+    if (!esCompilada || !g.document) return;
+    setTimeout(buscarActualizacion, 2500);
+    g.document.addEventListener('visibilitychange', () => { if (!g.document.hidden && Date.now() - ultimaBusqueda > 30000) buscarActualizacion(); });
+    setInterval(() => { if (!g.document.hidden) buscarActualizacion(); }, 5 * 60 * 1000);
   }
 
   /* ----------------------------------------------------------------- varios */
@@ -4333,7 +4381,7 @@
 
   AF.nativo = { esNativo, esLocal, plugin, almacenNativo, proveedorListo, iniciarSesion, cerrarSesionSocial, huellaDisponible, secretosHuella, vozDisponible, escuchar, hablar, callar,
     leerTextoDeImagen, escucharCompartidos, permisoAvisos, programarAvisos, compartirTexto, entregarArchivo, comprarPro, restaurarCompras,
-    respaldoSubir, respaldoInfo, respaldoBajar, respaldoBorrar, drivePermisoAMano, precargarWeb, prepararWeb, instalacion, vibrar, alVolverAPrimerPlano, alAbrirEnlace, botonAtras, salir, espera };
+    respaldoSubir, respaldoInfo, respaldoBajar, respaldoBorrar, drivePermisoAMano, precargarWeb, prepararWeb, version, instalacion, vibrar, alVolverAPrimerPlano, alAbrirEnlace, botonAtras, salir, espera };
   if (typeof module === 'object' && module.exports) module.exports = AF.nativo;
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
@@ -7375,9 +7423,12 @@
       f('👫', 'Pareja o familia', 'Gastos compartidos', ir('Pareja o familia', (c) => V.pro.pareja(c)), proChip('parejaFamilia')),
       f('✈️', 'Viajes y otras monedas', 'Gasta en otra moneda sin enredarte', ir('Viajes', (c) => V.pro.viajes(c)), proChip('variasMonedasViajes')),
     ]));
-    if (N().instalacion.disponible()) cuerpo.appendChild(grupo('Esta app', [
-      f('📲', 'Instalar en este teléfono', 'Se abre como una app, sin barra del navegador', async () => { if (await N().instalacion.instalar()) aviso('Instalada'); }, h('span')),
-    ]));
+    const esWeb = !N().esNativo();
+    const filasApp = [
+      N().instalacion.disponible() ? f('📲', 'Instalar en este teléfono', 'Se abre como una app, sin barra del navegador', async () => { if (await N().instalacion.instalar()) aviso('Instalada'); }, h('span')) : null,
+      esWeb ? f('🔄', 'Buscar actualización', 'Versión ' + PLAN.app.version + (N().version.compilada ? ' · compilación ' + N().version.compilacion : ' · desarrollo'), buscarActualizacion, h('span')) : null,
+    ].filter(Boolean);
+    if (filasApp.length) cuerpo.appendChild(grupo('Esta app', filasApp));
     cuerpo.appendChild(grupo('Tu cuenta', [
       f('⚙️', 'Ajustes', 'Cómo cobras, país, voz, PIN, apariencia', ir('Ajustes', (c) => ajustes(c))),
       f('☁️', 'Copia de seguridad', N().proveedorListo && AF.app.sesion && AF.app.sesion.proveedor === 'google' ? 'En tu Google Drive' : 'En un archivo', ir('Copia de seguridad', (c) => respaldo(c))),
@@ -7385,6 +7436,15 @@
     ]));
     cuerpo.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '28px', textAlign: 'center' } }, PLAN.app.nombre + ' ' + PLAN.app.version + ' · ' + PLAN.app.avisoLegal));
     cont.appendChild(cuerpo);
+  }
+  // Pregunta a GitHub si hay una versión más nueva que la que está abierta. Aplicarla no borra ningún dato.
+  async function buscarActualizacion() {
+    aviso('Buscando…');
+    const r = await N().version.buscar();
+    if (r.desarrollo) { aviso('Versión de desarrollo: no busca actualizaciones'); return; }
+    if (r.error) { aviso('No pude consultar. Revisa tu internet e inténtalo otra vez'); return; }
+    if (!r.hay) { aviso('Ya tienes la última versión'); return; }
+    if (await C().confirmar({ titulo: 'Hay una versión nueva', texto: 'Se instala en unos segundos y la app se reabre sola. No pierdes ningún dato.', si: 'Actualizar' })) N().version.aplicar();
   }
   async function cerrarSesion() {
     const conPin = await Sg().tienePin(AF.app.ns);
@@ -7792,6 +7852,19 @@
   }
   app.programarAvisos = programarAvisos;
 
+  /* ------------------------------------------------------- aviso de versión nueva (versión web) */
+  function avisoVersionNueva() {
+    const r = raiz(); if (!r || r.querySelector('.aviso-version')) return;
+    const texto = h('span', null, 'Hay una versión nueva');
+    const boton = h('button', { class: 'aviso-version-si', type: 'button' }, 'Actualizar');
+    const cerrar = h('button', { class: 'aviso-version-no', type: 'button', 'aria-label': 'Ahora no' }, '×');
+    const caja = h('div', { class: 'aviso-version', role: 'status' }, texto, boton, cerrar);
+    boton.onclick = () => { boton.disabled = true; cerrar.remove(); texto.textContent = 'Actualizando…'; N().version.aplicar(); };
+    cerrar.onclick = () => caja.remove();
+    r.appendChild(caja);
+  }
+  app.avisoVersionNueva = avisoVersionNueva;
+
   /* ------------------------------------------------------------------- arranque */
   app.iniciar = async function () {
     AF.tema.aplicar('auto');
@@ -7799,6 +7872,7 @@
     if (AF.bancos) { AF.bancos.cargarCache(); AF.bancos.actualizarRemoto(); }     // tarifas de bancos: si hay archivo remoto, se actualizan solas
     const al = N().almacenNativo(); if (al) Sg().usarAlmacen(al);
     N().prepararWeb();                                                        // versión web: copia para abrir sin internet + datos que el navegador no borra
+    N().version.alHaberNueva(avisoVersionNueva);                              // versión web: si GitHub tiene una versión más nueva, lo avisa con un botón
 
     N().alVolverAPrimerPlano(() => { if (app.abierta && !app.exento) { Sg().marcarSalida(); respaldarAhora(); } }, () => {
       if (!app.abierta) return;

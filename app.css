@@ -544,3 +544,11 @@ h1, h2, h3, p { margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
 }
+
+/* Aviso de versión nueva (arriba, no tapa el campo para escribir) */
+.aviso-version { position: fixed; left: 12px; right: 12px; top: calc(10px + env(safe-area-inset-top)); max-width: 460px; margin: 0 auto; z-index: 70; display: flex; align-items: center; gap: 10px; background: var(--panel); color: var(--sobre-panel); padding: 10px 8px 10px 16px; border-radius: 14px; box-shadow: 0 14px 28px -12px rgba(11, 26, 48, 0.6); font-weight: 560; font-size: var(--t-sm); animation: baja-aviso 220ms var(--ease); }
+.aviso-version span { flex: 1; min-width: 0; }
+.aviso-version-si { background: #FFC53D; color: #1B1500; font-weight: 750; padding: 8px 14px; border-radius: 10px; flex: none; }
+.aviso-version-si:disabled { opacity: 0.7; }
+.aviso-version-no { width: 34px; height: 34px; border-radius: 50%; font-size: 20px; line-height: 1; color: inherit; opacity: 0.8; flex: none; }
+@keyframes baja-aviso { from { opacity: 0; transform: translateY(-12px); } }

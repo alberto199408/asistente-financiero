@@ -16,7 +16,7 @@
     app: {
       nombre: 'Asistente Financiero',            // PROVISIONAL (nombre de trabajo)
       nombreCorto: 'Asistente',
-      version: '3.0.0',
+      version: '3.1.0',
       // PROVISIONAL. Ojo: el id del paquete NO se puede cambiar después de publicar en Play.
       idPaquete: 'com.asistentefinanciero.app',
       desarrollador: '',                          // LUIS: nombre de desarrollador en Play (no su nombre personal)
