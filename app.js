@@ -376,7 +376,7 @@
     const o = {
       v: 1, creado: new Date().toISOString(),
       ajustes: { nombre: '', pais: p.codigo, moneda: p.moneda, diaCobro: PLAN.bienvenida.diaCobroDefecto, sueldo: null, cargas: 0,
-        tema: 'claro', colorApp: 'marino', respuestaVoz: true, bloqueoSeg: PLAN.sesion.bloquearTrasSegundos, bienvenidaHecha: false },
+        tema: 'auto', colorApp: 'marino', respuestaVoz: !!(PLAN.voz && PLAN.voz.hablarPorDefecto), bloqueoSeg: PLAN.sesion.bloquearTrasSegundos, bienvenidaHecha: false },
       plan: { inicioPrueba: null, proHasta: null, ia: {} },
       diccionario: {}, historial: [],
     };
@@ -460,11 +460,15 @@
 
   /* ---------------------------------------------------------------- Ajustes */
   function ajustar(patch) { Object.assign(d.ajustes, patch); guardar(); bus.emit('ajustes'); return d.ajustes; }
-  function aprender(palabra, catId) {
+  // Aprende una palabra: un id de categoría, o { cat, nec } para recordar también si fue necesario o gusto.
+  function aprender(palabra, valor) {
     const k = U.norm(palabra).trim();
-    if (!k || !catId) return;
-    d.diccionario[k] = catId; guardar();
+    if (!k || !valor || k.length < 2) return;
+    if (typeof valor === 'object') { if (!valor.cat) return; d.diccionario[k] = valor.nec ? { cat: valor.cat, nec: valor.nec } : valor.cat; }
+    else d.diccionario[k] = valor;
+    guardar();
   }
+  const aprendidoCat = (v) => (v && typeof v === 'object' ? v.cat : v);
   function olvidarAprendido(palabra) { delete d.diccionario[U.norm(palabra).trim()]; guardar(); }
 
   /* -------------------------------------------------------------- Categorías */
@@ -488,7 +492,7 @@
 
   AF.bus = bus;
   AF.store = { bus, vacio, cargar, datos: () => d, get d() { return d; }, guardar, guardarYa, agregar, editar, borrar, buscar, deshacer, puedeDeshacer,
-    ajustar, aprender, olvidarAprendido, categorias, categoria, movs, movsEntre, ultimoMov, exportar, reemplazarTodo, borrarTodo, COLECCIONES };
+    ajustar, aprender, aprendidoCat, olvidarAprendido, categorias, categoria, movs, movsEntre, ultimoMov, exportar, reemplazarTodo, borrarTodo, COLECCIONES };
   if (typeof module === 'object' && module.exports) module.exports = AF.store;
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
@@ -556,7 +560,7 @@
 
   /* ---------------------------------------------------------------- Listas de palabras */
   const set = (s) => new Set(s.split(/\s+/).filter(Boolean));
-  const V_GASTO = set('gaste gastamos gasto gastado gastaron pague pagamos pagado compre compramos comprado pedi consumi done aboné abone inverti');
+  const V_GASTO = set('gaste gastamos gasto gastado gastaron pague pagamos pagado apague compre compramos comprado pedi consumi done aboné abone inverti cancele cancelamos');  // «apagué» = el dictado oye mal «pagué»; «cancelé» = pagué en varios países
   const V_INGRESO = set('gane ganamos gano ganancia cobre cobramos recibi recibimos ingrese ingresaron vendi vendimos');
   const FRASES_INGRESO = ['me pagaron', 'me depositaron', 'me llego', 'me llegaron', 'me entro', 'me dieron', 'me regalaron', 'me transfirieron', 'me abonaron', 'me depositaron', 'me pagan', 'ingreso de', 'un ingreso'];
   const FRASES_GASTO = ['me cobraron', 'me costo', 'me salio', 'un gasto', 'gasto de'];
@@ -565,8 +569,34 @@
   const OPENER_PREGUNTA = set('cuanto cuantos cuanta cuantas cual cuales dime muestrame desglosame desglosa resumeme resumen cuando donde hay tengo puedo podria alcanza conviene que');
   const V_CORREGIR = set('cambia cambialo cambiale cambiar corrige corrigelo corregir modifica modificalo edita editalo ponlo pon pone marca marcalo borra borralo borrar elimina eliminalo eliminar quita quitalo anula anulalo anular deshaz deshacer olvidalo mejor');
   const V_BORRAR = set('borra borralo borrar elimina eliminalo eliminar quita quitalo anula anulalo anular olvidalo');
+  const V_PAGAR = set('pague pagamos pagado pago apague abone abonamos abonado abono cancele cancelamos cancelado deposite depositamos cubri cubrimos');
+  const PAL_TARJETA = set('tarjeta tarjetas visa mastercard master diners amex american');
+  const INTERROGATIVAS = set('cuanto cuantos cuanta cuantas cuando cual cuales donde dime dame muestrame demuestrame desglosame desglosa resumeme indicame cuentame explicame necesito saber');
+  // Relleno que la gente dice antes de pedir algo: se quita para entender lo que de verdad pidió.
+  const RELLENO = ['te hago una consulta', 'tengo una consulta', 'una consulta', 'tengo una pregunta', 'una pregunta', 'quiero saber', 'quisiera saber', 'me gustaria saber', 'necesito saber', 'quiero que me digas', 'puedes decirme', 'podrias decirme', 'me puedes decir', 'me podrias decir',
+    'por favor', 'porfa', 'porfis', 'ayudame', 'oye', 'hola', 'asistente', 'claudia', 'claude', 'a ver', 'bueno', 'eh', 'este', 'mira', 'ok'];
+  // Si la persona se corrige a mitad de frase, vale lo que dijo al final.
+  const CORRECCION = ['o mejor dicho', 'mejor dicho', 'o sea', 'es decir', 'quiero decir', 'mas bien', 'perdon', 'digo'];
+  // Palabras que no van en el nombre del movimiento (verbos, muletillas, moneda, tarjeta, plazo...).
+  const DESC_EXCLUIR = set('gaste gastamos gasto gastado gastaron pague pagamos pagado compre compramos comprado pedi consumi done abone inverti gane ganamos gano cobre cobramos recibi recibimos ingrese vendi '
+    + 'comi cene almorce desayune merende tome bebi '
+    + 'hice hicimos hizo fui fuimos logre logrando logrado consegui pude tuve tenia quise fue era es son esta estan hay hubo use '
+    + 'tambien ademas luego despues hoy ayer anoche ahora ahorita recien ya '
+    + 'credito creditos plazo plazos meses mes cuotas cuota diferido diferida diferidos tarjeta tarjetas banco intereses interes sin con efectivo debito corriente contado '
+    + 'dolares dolar usd pesos peso soles sol euros euro centavos centavo bolivares '
+    + 'me mi mis te tu tus su sus nos nuestro nuestra un una unos unas el la los las lo de del en por para al a y e o que como mas casi solo otra otro otros otras cosa cosas algo nuevo nueva');
   const MESES_N = U.MESES;
   const DIAS_N = U.DIAS;
+
+  // Quita relleno y se queda con lo que la persona dijo al final si se corrigió.
+  function depurar(txt) {
+    let t = ' ' + txt + ' ';
+    let corte = -1;
+    CORRECCION.forEach((c) => { const k = t.lastIndexOf(' ' + c + ' '); if (k > corte) corte = k + c.length + 1; });
+    if (corte > 0) t = ' ' + t.slice(corte).trim() + ' ';
+    RELLENO.forEach((r) => { t = t.split(' ' + r + ' ').join(' '); });
+    return t.replace(/\s+/g, ' ').trim();
+  }
 
   /* ------------------------------------------------------------------------ Tokens */
   const limpiar = (raw) => U.norm(raw).replace(/^[¿¡"'(\[]+/, '').replace(/[?!"')\].,;:]+$/, '');
@@ -662,8 +692,9 @@
         for (const fr of variantes) {
           // 1) lo aprendido de las correcciones del usuario gana siempre
           if (dicc[fr]) {
-            const c = cats.find((x) => x.id === dicc[fr] && (!tipo || x.tipo === tipo));
-            if (c) { const sc = 100 + len; if (sc > mejor.score) { mejor.cat = c; mejor.score = sc; mejor.usados = idx.slice(i, i + len); mejor.aprendido = true; } }
+            const v = dicc[fr]; const idCat = typeof v === 'string' ? v : v.cat;
+            const c = cats.find((x) => x.id === idCat && (!tipo || x.tipo === tipo));
+            if (c) { const sc = 100 + len; if (sc > mejor.score) { mejor.cat = c; mejor.score = sc; mejor.usados = idx.slice(i, i + len); mejor.aprendido = true; mejor.necAprendido = typeof v === 'object' && v.nec !== undefined ? v.nec : undefined; mejor.palabra = fr; } }
           }
           // 2) el diccionario de fábrica (palabras largas pesan más: "tanque de gas" gana a "tanque")
           const hits = m.get(fr);
@@ -671,7 +702,7 @@
             hits.forEach((h) => {
               if (tipo && h.cat.tipo !== tipo) return;
               const sc = h.peso * (len > 1 ? 1 + len * 0.6 : 1);
-              if (sc > mejor.score) { mejor.cat = h.cat; mejor.score = sc; mejor.usados = idx.slice(i, i + len); mejor.aprendido = false; }
+              if (sc > mejor.score) { mejor.cat = h.cat; mejor.score = sc; mejor.usados = idx.slice(i, i + len); mejor.aprendido = false; mejor.necAprendido = undefined; mejor.palabra = fr; }
             });
           }
         }
@@ -805,33 +836,50 @@
   function detectarPregunta(toks, n, txt, ctx) {
     const abre = OPENER_PREGUNTA.has(n[0]) || (n[0] === 'en' && n[1] === 'que') || /^(como voy|como estoy|como me va|a cuanto|me queda|me alcanza|me conviene|que tal)/.test(txt) || /^(por favor |oye |dime |asistente )+(cuanto|cual|como|en que)/.test(txt);
     const signo = /\?\s*$/.test(txt) || /^[¿]/.test(txt);
-    if (!abre && !signo) return null;
-    // "puedo", "hay", "tengo", "que" solo abren pregunta si no hay verbo de registro
+    const hayMonto = toks.some((t) => t.num != null);
+    // Una palabra de pregunta en cualquier parte («dime cuándo…», «…cuánto me falta») sin un monto que registrar: es pregunta.
+    const interrogativaDentro = n.some((w) => INTERROGATIVAS.has(w)) || /\b(cada que tiempo|cada cuanto|me toca pagar|me falta|me faltan|consejo|consejos|innecesari|que gastos|que debo hacer)\b/.test(txt);
+    if (!abre && !signo && !(interrogativaDentro && !hayMonto)) return null;
+    // "puedo", "hay", "tengo", "que" solo abren pregunta si no hay verbo de registro con monto
     const hayVerbo = n.some((w) => V_GASTO.has(w) || V_INGRESO.has(w));
-    if (hayVerbo && toks.some((t) => t.num != null) && !/^(cuanto|cuantos|cuanta|cuantas|dime|muestrame|desglosame)/.test(n[0])) return null;
-    if (hayVerbo && /^que\b/.test(txt) && !/\?/.test(txt)) return null;
+    if (hayVerbo && hayMonto && !signo && !/^(cuanto|cuantos|cuanta|cuantas|dime|muestrame|desglosame|cuando|que)/.test(n[0])) return null;
+    if (hayVerbo && /^que\b/.test(txt) && !/\?/.test(txt) && hayMonto) return null;
 
     const per = leerPeriodo(toks, ctx.hoy);
     const cant = toks.find((t) => t.num != null);
     const q = { tipo: 'preguntar', tema: 'balance', periodo: per, texto: txt };
+    q.sinTarjeta = /\b(sin (contar|hacer cuenta|incluir|tomar en cuenta|considerar|sumar)( de| con| a)?|aparte de|menos|excepto|fuera de|quitando) (la |mi |las |mis |el |los )?(tarjeta|tarjetas|credito)/.test(txt);
+    q.cuando = /\b(cuando|que dia|en que fecha|fecha|fechas)\b/.test(txt);
+    const hayTarjeta = /\b(tarjeta|tarjetas|visa|mastercard|diners|amex)\b/.test(txt);
+    const hablaDeCuotas = /\b(cuota|cuotas|me falta|me faltan|falta por pagar|cada que tiempo|cada cuanto|me toca pagar|toca pagar|cuantas cuotas|cuanto me falta|me toca (el |mi |la )?pago|toca el pago|el pago de|pago del|pago de la|pago de mi|cuando (lo |la )?pago|proximo pago|siguiente pago|cuando (me )?toca|cuando vence|cuando se paga|cuando pago)\b/.test(txt);
     // tema
-    if (/\b(puedo gastar|puedes gastar|me queda|cuanto me queda|disponible|me alcanza para hoy|libre)\b/.test(txt)) q.tema = 'disponible';
+    if (/\b(puedo gastar|puedes gastar|me queda|cuanto me queda|cuanto tengo|tengo disponible|disponible|me alcanza para hoy|libre)\b/.test(txt) && !hablaDeCuotas && !hayTarjeta) q.tema = 'disponible';
     else if (/\b(me conviene|conviene comprar|vale la pena)\b/.test(txt) || (/\b(me alcanza|puedo comprar|podria comprar|puedo pagar)\b/.test(txt) && cant)) { q.tema = 'meconviene'; q.monto = cant ? cant.num : null; }
-    else if (/\b(tarjeta|tarjetas|visa|mastercard|diners|amex)\b/.test(txt) && /\b(debo|deber|pagar|pago|cuota|cuotas|corte|vence|vencimiento|saldo|cupo|intereses|minimo)\b/.test(txt)) {
+    else if (/innecesari|no (era|eran|es|son|fue|fueron) necesari|que no (era|eran) necesari|caprichos?\b|compulsiv|superflu|\bde mas\b|\bgustos\b|\bantojos\b/.test(txt) && !/\bhormiga\b/.test(txt)) q.tema = 'innecesarios';
+    else if (/\b(consejo|consejos|recomendacion|recomiendas|recomendarias|que debo hacer|que hago para|como ahorro|como puedo ahorrar|ayudame a ahorrar|para evitar|evitar esos gastos|en que puedo recortar|que puedo recortar)\b/.test(txt)) q.tema = 'consejo';
+    else if (hablaDeCuotas && !q.sinTarjeta) {
+      // ¿pregunta por una compra concreta? («la cuota del playstation», «los pantalones», «la ropa que me compré»)
+      const quitar = /^(cuanto|cuanta|cuantas|cuantos|cuando|dime|dame|de|del|la|el|los|las|mi|mis|es|son|cuota|cuotas|me|toca|tocan|pagar|pago|pagos|paga|debo|tengo|que|cada|tiempo|falta|faltan|por|y|con|compre|compra|compras|hice|he|hecho|tarjeta|tarjetas|credito|visa|mastercard|diners|amex|un|una|unos|unas|al|a|en|ya|aun|todavia|vence|vencen|cuanto|proxima|proximo|siguiente|mes|meses|total|se|lo|le|esa|ese|eso|esta|este|oye|quisiera|saber|quiero|necesito|dia|fecha)$/;
+      const nombre = n.filter((w, i) => toks[i].num == null && !quitar.test(w) && !per.usados.includes(i) && !PARADA.has(w));
+      if (nombre.length) { q.tema = 'cuota_compra'; q.compra = nombre.join(' '); }
+      else { q.tema = 'tarjeta'; q.tarjetaId = tarjetaDeTexto(n, ctx); }
+    }
+    else if (hayTarjeta && /\b(debo|deber|deuda|pagar|pago|corte|vence|vencimiento|saldo|cupo|intereses|minimo|cuando)\b/.test(txt)) {
       q.tema = 'tarjeta';
       q.tarjetaId = tarjetaDeTexto(n, ctx);
-      q.cuando = /\b(cuando|fecha|vence|vencimiento|corte)\b/.test(txt);
+      q.deuda = /\b(cuanto debo|deuda|saldo|debo en total|debo en la)\b/.test(txt) && !/\bdebo pagar\b/.test(txt);
     }
     else if (/\b(en que gasto mas|que gasto mas|donde gasto mas|mayor gasto|gasto mas)\b/.test(txt)) q.tema = 'masgasto';
     else if (/\bhormiga\b/.test(txt)) q.tema = 'hormiga';
     else if (/\b(ahorr)/.test(txt)) q.tema = 'ahorro';
-    else if (/\b(necesari|gusto|vanidad|capricho)/.test(txt)) q.tema = 'necesario_gusto';
+    else if (/\b(necesari|gusto|vanidad|capricho)/.test(txt)) q.tema = 'innecesarios';
     else if (/\b(ingres\w*|gane|ganado|ganancias?|cobre|cobrado|sueldo|recibi|recibido)\b/.test(txt) && !/\b(gast|desglos)\b/.test(txt)) q.tema = 'ingresos';
-    else if (/\b(gast|desglos|compre|pague|salio|salieron|egreso)/.test(txt)) {
+    else if (/\b(gast|desglos|compre|pague|pagado|salio|salieron|egreso|resumen)/.test(txt)) {
       q.tema = /desglos|detall|por categoria|en que/.test(txt) ? 'desglose' : 'gastos';
-      const rest = n.filter((w, i) => !PARADA.has(w) && toks[i].num == null && !per.usados.includes(i) && !/^(cuanto|cuantos|he|has|hemos|gastado|gaste|gasto|gastos|desglosame|desglosa|dime|muestrame|mis|mi|lo|total|en|por|categoria|categorias)$/.test(w));
-      const c = clasificar(rest, rest.map((_, i) => i), 'gasto', ctx);
-      if (c.cat) { q.cat = c.cat.id; q.catNombre = c.cat.nombre; q.tema = 'gastos'; }
+      const rest = []; const restIdx = [];
+      n.forEach((w, i) => { if (!PARADA.has(w) && toks[i].num == null && !per.usados.includes(i) && !/^(cuanto|cuantos|he|has|hemos|tengo|tenido|gastado|gaste|gasto|gastos|pague|pagado|desglosame|desglosa|dime|dame|muestrame|mis|mi|lo|total|en|por|categoria|categorias|resumen|cuenta|hacer|contar|sin|tarjeta|tarjetas|credito|cuando|fue|fecha|dia)$/.test(w)) { rest.push(w); restIdx.push(i); } });
+      const c = clasificar(rest, restIdx, 'gasto', ctx);
+      if (c.cat && c.cat.id !== 'deudas') { q.cat = c.cat.id; q.catNombre = c.cat.nombre; q.palabra = c.palabra || c.cat.nombre.toLowerCase(); q.tema = 'gastos'; }
     }
     else if (/\b(como voy|como estoy|resumen|resumeme|balance|como me va)\b/.test(txt)) q.tema = 'balance';
     else q.tema = 'balance';
@@ -840,13 +888,43 @@
 
   function tarjetaDeTexto(n, ctx) {
     const tarjetas = ctx.tarjetas || [];
+    const bancos = ctx.bancos || [];
     let mejor = null, sc = 0;
     tarjetas.forEach((t) => {
-      const pal = U.norm([t.nombre, t.banco, t.red, t.nivel].filter(Boolean).join(' ')).split(/\s+/).filter((w) => w && !PARADA.has(w) && !/^(tarjeta|banco|credito|de|del|la)$/.test(w));
-      const hit = pal.filter((w) => n.includes(w)).length;
+      const b = bancos.find((x) => x.id === t.bancoId);
+      const pal = U.norm([t.nombre, t.banco, b && b.nombre, b && b.corto, t.red, t.nivel].filter(Boolean).join(' ')).split(/\s+/).filter((w) => w && !PARADA.has(w) && !/^(tarjeta|banco|cooperativa|credito|de|del|la|el)$/.test(w));
+      const hit = Array.from(new Set(pal)).filter((w) => n.includes(w)).length;
       if (hit > sc) { sc = hit; mejor = t.id; }
     });
     return mejor;
+  }
+  // Palabras que nombran un banco o cooperativa (del catálogo y de las tarjetas de la persona).
+  function palabrasBanco(ctx) {
+    const out = new Set(['austro', 'pichincha', 'guayaquil', 'bolivariano', 'produbanco', 'internacional', 'pacifico', 'solidario', 'biess', 'diners', 'jep', 'bancolombia', 'davivienda', 'bbva', 'santander', 'bcp', 'interbank', 'scotiabank', 'banorte', 'banamex', 'galicia', 'itau', 'nubank', 'nu', 'falabella', 'ripley']);
+    (ctx.bancos || []).forEach((b) => U.norm((b.nombre || '') + ' ' + (b.corto || '')).split(/\s+/).forEach((w) => { if (w && !/^(banco|del|de|la|el|cooperativa|coop|ltda|s\.a\.|sa)$/.test(w) && w.length > 2) out.add(w); }));
+    (ctx.tarjetas || []).forEach((t) => U.norm((t.banco || '') + ' ' + (t.nombre || '')).split(/\s+/).forEach((w) => { if (w && !/^(banco|del|de|la|el|tarjeta|credito|visa|mastercard)$/.test(w) && w.length > 2) out.add(w); }));
+    return out;
+  }
+  // ¿Es un pago A la tarjeta (al banco) y no una compra CON la tarjeta?
+  // Sí cuando hay verbo de pagar + una palabra de tarjeta/banco que NO va después de «con/usando/mediante», y la frase no nombra otra cosa comprada (luz, ropa…).
+  function detectarPagoTarjeta(toks, n, txt, ctx) {
+    const hayPagar = n.some((w) => V_PAGAR.has(w)) || /\b(pago|abono) (de |a |al |para )?(la |mi |el )?(tarjeta|banco|visa|mastercard|diners)/.test(txt);
+    if (!hayPagar) return null;
+    const bancoPal = palabrasBanco(ctx);
+    const esTarjetaOBanco = (w) => PAL_TARJETA.has(w) || w === 'banco' || bancoPal.has(w);
+    const idxs = []; n.forEach((w, i) => { if (esTarjetaOBanco(w)) idxs.push(i); });
+    if (!idxs.length) return null;
+    const conTarjeta = idxs.some((i) => { for (let k = 1; k <= 3; k++) { const a = n[i - k]; if (!a) break; if (/^(con|usando|mediante|desde|a traves de)$/.test(a)) return true; if (!/^(la|mi|el|una|un|las|mis|tarjeta|de|del|credito)$/.test(a)) break; } return false; });
+    if (conTarjeta) return null;
+    // ¿nombra otra cosa comprada? (luz, ropa, mercado…): entonces es una compra, no un pago a la tarjeta
+    const rest = []; const restIdx = [];
+    n.forEach((w, i) => { if (!esTarjetaOBanco(w) && !PARADA.has(w) && toks[i].num == null && !V_PAGAR.has(w) && !/^(credito|cuota|cuotas|deuda|saldo|total|minimo|completo|todo|toda|mes|hoy|ayer|ya|recien)$/.test(w)) { rest.push(w); restIdx.push(i); } });
+    const c = clasificar(rest, restIdx, 'gasto', ctx);
+    if (c.cat && c.cat.id !== 'deudas' && c.score >= 2) return null;
+    let tarjetaId = tarjetaDeTexto(n, ctx), tarjetaDuda = false, sinTarjetas = false;
+    const ts = ctx.tarjetas || [];
+    if (!tarjetaId) { if (ts.length === 1) tarjetaId = ts[0].id; else if (!ts.length) sinTarjetas = true; else tarjetaDuda = true; }
+    return { tarjetaId, tarjetaDuda, sinTarjetas, idxs };
   }
 
   /* ------------------------------------------------------------------- Registrar */
@@ -860,16 +938,30 @@
     const f = leerFecha(toks, hoy);
     marcar(f.usados, 'otro');
 
+    /* ---- ¿es un pago A la tarjeta? (baja la deuda; no es una compra) */
+    const pagoT = detectarPagoTarjeta(toks, n, txt, ctx);
+    if (pagoT) {
+      const cands0 = []; toks.forEach((t, i) => { if (t.num != null && !consumidos.has(i) && !/%$/.test(t.n)) cands0.push(i); });
+      if (!cands0.length) return { tipo: 'registrar', items: [], falta: 'monto', partes: partes(toks, roles), texto: txt };
+      const elegido = cands0[cands0.length - 1];
+      marcar([elegido], 'monto'); n.forEach((w, i) => { if (V_PAGAR.has(w)) marcar([i], 'tipo'); }); marcar(pagoT.idxs, 'cat');
+      const t = (ctx.tarjetas || []).find((x) => x.id === pagoT.tarjetaId) || null;
+      const item = { tipo: 'pago_tarjeta', monto: toks[elegido].num, tarjetaId: pagoT.tarjetaId, tarjetaNombre: t ? t.nombre : null, fecha: f.fecha, desc: 'Pago ' + (t ? t.nombre : 'tarjeta'), cat: null, catNombre: 'Pago de tarjeta', catIcono: '💳', catConfianza: 'alta', cuenta: 'efectivo' };
+      const dudas = []; if (pagoT.tarjetaDuda) dudas.push('tarjeta');
+      return { tipo: 'registrar', items: [item], tarjetaDuda: pagoT.tarjetaDuda, sinTarjetas: pagoT.sinTarjetas, dudas, partes: partes(toks, roles), texto: txt, fecha: f.fecha, pagoTarjeta: true };
+    }
+
     /* ---- tarjeta y forma de pago */
     const credito = { modo: null, meses: null, cuota: null, interes: null };
     let usaTarjeta = false, efectivoExplicito = false;
-    // Detectar "pagué LA tarjeta" / "pagué DE la tarjeta" = pago al banco, NO compra con tarjeta
-    const esPagoATarjeta = /\b(pagu[eé]|pagamos|abon[eé]|abonamos|pagar?)\s+(la|de la|a la|mi|al)\s+tarjeta\b/.test(txt)
-      || /\b(pago|abono)\s+(de |a |al )?(la\s+)?(tarjeta|banco)\b/.test(txt)
-      || /\bpag(ué?|e|amos)\s+del?\s+(banco|austro|pichincha|guayaquil|bolivariano|produbanco|internacional|pacifico|solidario|biess)\b/.test(txt);
+    const bancoPal = palabrasBanco(ctx);
     n.forEach((w, i) => {
-      // Solo marcar como "pago con tarjeta" si NO es un pago a la tarjeta
-      if (!esPagoATarjeta && /^(tarjeta|tarjetas|visa|mastercard|master|diners|amex|american)$/.test(w)) { usaTarjeta = true; marcar([i], 'otro'); }
+      if (/^(tarjeta|tarjetas|visa|mastercard|master|diners|amex|american)$/.test(w)) {
+        usaTarjeta = true; marcar([i], 'otro');
+        // «con la tarjeta del austro», «tarjeta de crédito del pichincha»: el banco no es parte del nombre de la compra
+        let j = i + 1;
+        while (j < n.length && j <= i + 4 && (/^(de|del|la|el|mi|credito|banco)$/.test(n[j]) || bancoPal.has(n[j]))) { if (bancoPal.has(n[j]) || /^(credito|banco)$/.test(n[j])) marcar([j], 'otro'); j++; }
+      }
       if (/^(credito)$/.test(w) && n[i - 1] !== 'del' && n[i - 1] !== 'de') { usaTarjeta = true; }
       if (/^(efectivo|cash)$/.test(w)) { efectivoExplicito = true; marcar([i], 'otro'); }
       if (/^(debito)$/.test(w)) { efectivoExplicito = true; marcar([i], 'otro'); }
@@ -957,13 +1049,15 @@
       if (verboIdx.includes(i - 1)) s += 3;
       if (/^(en|por|de|a|con)$/.test(ant) && !hayMarca(i)) s += 1;
       const sig = n[i + 1];
-      if (sig && !MONEDAS.has(sig) && !PARADA.has(sig) && !hayMarca(i) && toks[i].num <= 12 && Number.isInteger(toks[i].num)) s -= 4; // "2 pizzas": cantidad
-      else if (sig && !MONEDAS.has(sig) && !PARADA.has(sig) && !hayMarca(i)) s -= 0.5;
+      if (sig && !MONEDAS.has(sig) && !PARADA.has(sig) && !hayMarca(i) && toks[i].num <= 12 && Number.isInteger(toks[i].num) && !verboIdx.includes(i + 1)) return -4; // "2 pizzas", "3 cebollas": cantidad, no monto
+      if (sig && !MONEDAS.has(sig) && !PARADA.has(sig) && !hayMarca(i)) s -= 0.5;
       return s;
     };
 
-    // ¿varias cosas en una frase? ("gasté 3 en salchipapa y 5 en pasaje")
+    // ¿varias cosas en una frase? ("gasté 3 en salchipapa y 5 en pasaje"). Los números que parecen cantidad («3 cebollas») no separan nada.
     let segmentos = [{ desde: 0, hasta: toks.length - 1 }];
+    const candsFuertes = cands.filter((i) => puntaje(i) > -3);
+    if (candsFuertes.length >= 1) cands = candsFuertes;
     if (cands.length > 1) {
       const cortes = [];
       let ok = true;
@@ -1012,20 +1106,32 @@
         if (vp >= 0) tipoItem = 'ingreso'; else if (vg >= 0) tipoItem = 'gasto';
       }
       const c = clasificar(palabras, idx, tipoItem, ctx);
-      let catId = null, conf = 'ninguna';
+      let catId = null, conf = 'ninguna', palabraCat = c.palabra || null;
+      // Medidas de mercado («2 libras de papa», «una funda de arroz») = compra para la casa, aunque suene a comida.
+      const medidas = (AF.PLAN.medidasHogar || []);
+      const hayMedida = palabras.some((w) => medidas.includes(w));
       if (c.cat) {
         catId = c.cat.id;
         conf = c.aprendido || c.score >= 2 ? 'alta' : 'media';
         marcar(c.usados, 'cat');
+        if (hayMedida && !c.aprendido && (catId === 'comida_fuera' || catId === 'antojos')) catId = 'comida_hogar';
       } else if (tipoItem === 'ingreso') {
-        catId = 'extra'; conf = 'media';
-      } else if (esPagoATarjeta) {
-        // "pagué la tarjeta del austro $600" => categoría Deudas y cuotas
-        catId = 'deudas'; conf = 'alta';
+        // «me pagaron 800», «cobré», «me depositaron» sin más = el sueldo (es lo normal). Regalos, ventas, premios tienen sus palabras.
+        const sueldoLike = /\b(me pagaron|me pago|me depositaron|me deposito|cobre|cobramos|me cayo|ya me pagaron|me transfirieron|recibi mi pago|me llego el pago|pago de mi trabajo)\b/.test(txt);
+        const ventaLike = /\b(vendi|vendimos|venta|vendido)\b/.test(txt) && ctx.categorias.some((c) => c.id === 'ventas');
+        catId = sueldoLike ? 'sueldo' : ventaLike ? 'ventas' : 'extra'; conf = sueldoLike || ventaLike ? 'alta' : 'media';
+      } else if (hayMedida) {
+        catId = 'comida_hogar'; conf = 'alta';
       } else { catId = 'otros'; conf = 'ninguna'; }
-      // texto libre del concepto (sin palabras de relleno)
-      const contenido = idx.filter((i) => roles[i] !== 'cat' || true).filter((i) => !PARADA.has(n[i]) && toks[i].num == null).map((i) => toks[i].raw.replace(/[?!.,;:]+$/, ''));
+      // nombre limpio del movimiento: lo que compró, sin verbos ni muletillas
+      const esNombreConNumero = (i) => toks[i].num != null && roles[i] !== 'monto' && Number.isInteger(toks[i].num) && toks[i].num <= 99 && i > sg.desde && idx.includes(i - 1) && toks[i - 1].num == null && !DESC_EXCLUIR.has(n[i - 1]) && !PARADA.has(n[i - 1]) && (!n[i + 1] || PARADA.has(n[i + 1]) || consumidos.has(i + 1) || roles[i + 1]);
+      const contenidoIdx = idx.filter((i) => !PARADA.has(n[i]) && !DESC_EXCLUIR.has(n[i]) && !medidas.includes(n[i]) && roles[i] !== 'monto' && (toks[i].num == null || esNombreConNumero(i)));
+      const contenido = contenidoIdx.map((i) => toks[i].raw.replace(/[?!.,;:]+$/, ''));
       let desc = contenido.join(' ').trim();
+      // si lo que dijo es una frase completa del diccionario («comida para mi hogar»), el nombre es esa frase tal cual
+      if (c.cat && c.usados && c.usados.length >= 2 && c.palabra && c.palabra.split(' ').length >= 3) desc = c.usados.map((i) => toks[i].raw.replace(/[?!.,;:]+$/, '')).join(' ');
+      // varias cosas del mercado: «Cebollas, papa y arroz»
+      if (catId === 'comida_hogar' && contenido.length >= 2 && !(c.palabra && c.palabra.split(' ').length >= 2)) desc = contenido.slice(0, -1).join(', ') + ' y ' + contenido[contenido.length - 1];
       let palabraNueva = null;
       if (conf === 'ninguna' && contenido.length) {
         palabraNueva = U.norm(contenido[contenido.length - 1]);
@@ -1033,11 +1139,22 @@
         nuevos.push(palabraNueva);
       }
       const cat = (ctx.categorias.find((x) => x.id === catId)) || null;
-      items.push({
+      let nec = cat ? cat.nec : null;
+      if (c.necAprendido !== undefined) nec = c.necAprendido;
+      const item = {
         tipo: tipoItem, monto: toks[elegido].num, cat: catId, catNombre: cat ? cat.nombre : null, catIcono: cat ? cat.icono : null,
-        catConfianza: conf, desc: desc ? U.cap(desc) : '', fecha: f.fecha, nec: cat ? cat.nec : null, palabraNueva,
+        catConfianza: conf, desc: desc ? U.cap(desc) : '', fecha: f.fecha, nec, palabraNueva, palabraCat,
         cuenta: tipoItem === 'gasto' && usaTarjeta && !efectivoExplicito ? 'tarjeta' : 'efectivo',
-      });
+      };
+      // ¿La palabra es ambigua? (una cola: ¿antojo o para la casa?; unos auriculares: ¿para el trabajo?) → se pregunta UNA vez y se aprende.
+      if (cat && cat.pregunta && !c.aprendido && tipoItem === 'gasto' && (!cat.ambiguas || (palabraCat && cat.ambiguas.includes(palabraCat)))) {
+        item.duda = { texto: cat.pregunta.texto, opciones: cat.pregunta.opciones.map((o) => Object.assign({}, o)), palabra: palabraCat || palabraNueva };
+      }
+      // ¿Monto raro para lo que se compró? (una hamburguesa de $350 casi siempre es $3,50 mal oído)
+      if (cat && cat.montoMax && tipoItem === 'gasto' && Number.isInteger(item.monto) && item.monto > cat.montoMax * 2 && item.monto / 100 >= 0.5 && item.monto / 100 <= cat.montoMax && !toks[elegido].n.includes(',') && !toks[elegido].n.includes('.')) {
+        item.dudaMonto = [U.r2(item.monto / 100), item.monto];
+      }
+      items.push(item);
     });
 
     if (!items.length) {
@@ -1075,7 +1192,8 @@
     ctx = Object.assign({ hoy: U.hoyISO(), categorias: AF.PLAN.categorias, dicc: {}, tarjetas: [] }, ctx || {});
     const crudo = String(texto || '').trim();
     if (!crudo) return { tipo: 'desconocido', texto: '' };
-    const toks = tokenizar(crudo);
+    const depurado = depurar(U.norm(crudo).replace(/[¿?¡!]/g, ' ').replace(/\s+/g, ' ')) || crudo;
+    const toks = tokenizar(depurado === U.norm(crudo).replace(/[¿?¡!]/g, ' ').replace(/\s+/g, ' ').trim() ? crudo : depurado + (/\?\s*$/.test(crudo) ? '?' : ''));
     const n = toks.map((t) => t.n);
     const txt = n.join(' ');
     if (/^(ayuda|que puedes hacer|como funciona|que haces)\b/.test(txt)) return { tipo: 'ayuda', texto: txt };
@@ -1095,7 +1213,7 @@
     return { tipo: 'desconocido', texto: txt, partes: partes(toks, new Array(toks.length).fill('')) };
   }
 
-  AF.parser = { interpretar, tokenizar, clasificar, leerPeriodo, leerFecha };
+  AF.parser = { interpretar, tokenizar, clasificar, leerPeriodo, leerFecha, depurar, detectarPagoTarjeta };
   if (typeof module === 'object' && module.exports) module.exports = AF.parser;
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
@@ -2444,22 +2562,70 @@
   const enRango = (m, desde, hasta) => m.fecha >= desde && m.fecha <= hasta;
 
   /* ------------------------------------------------------------------------ Totales */
-  function totales(d, desde, hasta) {
-    let ingresos = 0, gastos = 0;
+  // opciones.sinTarjeta: no cuenta las compras hechas con tarjeta de crédito.
+  function totales(d, desde, hasta, opciones) {
+    const sinTarjeta = !!(opciones && opciones.sinTarjeta);
+    let ingresos = 0, gastos = 0, pagosTarjeta = 0, conTarjeta = 0, veces = 0;
     const cat = {}, nec = { N: 0, G: 0, sin: 0 };
     d.movs.forEach((m) => {
       if (!enRango(m, desde, hasta)) return;
       if (m.tipo === 'ingreso') ingresos += m.monto;
+      else if (m.tipo === 'pago_tarjeta') pagosTarjeta += m.monto;
       else if (m.tipo === 'gasto') {
-        gastos += m.monto;
+        if (m.cuenta === 'tarjeta') { conTarjeta += m.monto; if (sinTarjeta) return; }
+        gastos += m.monto; veces++;
         cat[m.cat] = (cat[m.cat] || 0) + m.monto;
-        const c = catDe(d, m.cat); const n = m.nec !== undefined ? m.nec : c.nec;
+        const c = catDe(d, m.cat); const n = m.nec !== undefined && m.nec !== null ? m.nec : c.nec;
         nec[n === 'N' ? 'N' : n === 'G' ? 'G' : 'sin'] += m.monto;
       }
     });
     const lista = Object.entries(cat).map(([id, total]) => ({ id, total: r2(total), cat: catDe(d, id) })).sort((a, b) => b.total - a.total);
     lista.forEach((x) => { x.pct = gastos ? x.total / gastos : 0; });
-    return { ingresos: r2(ingresos), gastos: r2(gastos), balance: r2(ingresos - gastos), porCategoria: lista, nec: { N: r2(nec.N), G: r2(nec.G), sin: r2(nec.sin) } };
+    return { ingresos: r2(ingresos), gastos: r2(gastos), veces, pagosTarjeta: r2(pagosTarjeta), conTarjeta: r2(conTarjeta), balance: r2(ingresos - gastos), porCategoria: lista, nec: { N: r2(nec.N), G: r2(nec.G), sin: r2(nec.sin) } };
+  }
+
+  /* --------------------------------------------------------------- Gastos innecesarios */
+  // Lo que fue gusto (no necesario) en el periodo, con lo que se repite. Para la tarjeta del Inicio, el filtro de Movimientos y las preguntas.
+  function innecesarios(d, desde, hasta) {
+    const lista = [];
+    const porNombre = {};
+    d.movs.forEach((m) => {
+      if (m.tipo !== 'gasto' || !enRango(m, desde, hasta)) return;
+      const c = catDe(d, m.cat); const n = m.nec !== undefined && m.nec !== null ? m.nec : c.nec;
+      if (n !== 'G') return;
+      lista.push(m);
+      const k = U.norm(m.desc || c.nombre).trim();
+      porNombre[k] = porNombre[k] || { nombre: m.desc || c.nombre, icono: c.icono, veces: 0, total: 0 };
+      porNombre[k].veces++; porNombre[k].total += m.monto;
+    });
+    const total = r2(lista.reduce((s, m) => s + m.monto, 0));
+    const porCat = {};
+    lista.forEach((m) => { porCat[m.cat] = (porCat[m.cat] || 0) + m.monto; });
+    const porCategoria = Object.entries(porCat).map(([id, t]) => ({ id, total: r2(t), cat: catDe(d, id) })).sort((a, b) => b.total - a.total);
+    const repetidos = Object.values(porNombre).filter((x) => x.veces >= 2).map((x) => Object.assign(x, { total: r2(x.total) })).sort((a, b) => b.total - a.total);
+    const mayor = lista.slice().sort((a, b) => b.monto - a.monto)[0] || null;
+    return { total, veces: lista.length, lista: lista.slice().sort((a, b) => (b.fecha === a.fecha ? b.monto - a.monto : b.fecha < a.fecha ? -1 : 1)), porCategoria, repetidos, mayor };
+  }
+  // Dos o tres consejos cortos y concretos, en palabras simples. Solo con datos reales.
+  function consejos(d, hoy) {
+    const out = [];
+    const desde = U.inicioMes(hoy), hasta = U.finMes(hoy);
+    const inn = innecesarios(d, desde, hasta);
+    const t = totales(d, desde, hasta);
+    if (!inn.veces) { if (t.gastos) out.push('Este mes todo lo que gastaste era necesario. Vas bien.'); return out; }
+    if (inn.porCategoria.length) {
+      const a = inn.porCategoria[0];
+      out.push('Lo que más se te va en gustos es ' + a.cat.nombre.toLowerCase() + ': ' + $(a.total) + ' este mes. Si lo bajas a la mitad, te quedan ' + $(r2(a.total / 2)) + ' más.');
+    }
+    if (inn.repetidos.length) {
+      const r = inn.repetidos[0];
+      out.push('«' + r.nombre + '» se repitió ' + r.veces + ' veces (' + $(r.total) + '). Es lo primero para recortar.');
+    }
+    const subs = (d.pagosFijos || []).filter((p) => p.activo !== false && catDe(d, p.cat).id === 'suscripciones');
+    const subsMovs = inn.lista.filter((m) => m.cat === 'suscripciones');
+    if (subs.length + subsMovs.length >= 2) out.push('Pagas varias suscripciones. Revisa cuál no usaste este mes y cancélala.');
+    if (inn.mayor && t.ingresos && inn.mayor.monto > t.ingresos * 0.2) out.push('Tu compra de gusto más grande fue «' + (inn.mayor.desc || catDe(d, inn.mayor.cat).nombre) + '» (' + $(inn.mayor.monto) + '). La próxima vez pregúntame «¿me conviene?» antes de comprar.');
+    return out.slice(0, 3);
   }
   function ingresosPorCategoria(d, desde, hasta) {
     const cat = {};
@@ -2491,11 +2657,37 @@
     if (c > hoy) c = m === 0 ? cand(y - 1, 11) : cand(y, m - 1);
     return c;
   };
+  // Cómo cobra la persona: ajustes.cobro = { modo: 'mensual'|'quincenal'|'semanal'|'variable', dia, dia2, diaSemana }.
+  // Si solo existe ajustes.diaCobro (cuentas viejas), se toma como mensual.
+  function cobroDe(d) {
+    const a = d.ajustes || {};
+    const c = a.cobro || {};
+    const modo = c.modo || 'mensual';
+    return { modo, dia: c.dia || a.diaCobro || 1, dia2: c.dia2 || null, diaSemana: c.diaSemana == null ? 5 : c.diaSemana };
+  }
+  // { inicio, proximo, dias, modo, etiqueta } — el periodo que va desde el último cobro hasta el próximo.
   function ciclo(d, hoy) {
-    const dia = d.ajustes.diaCobro || 1;
-    const inicio = ultimoDiaCobro(hoy, dia);
-    const proximo = U.proximoDia(U.sumarDias(hoy, 1), dia);
-    return { inicio, proximo, dias: Math.max(1, U.diasEntre(hoy, proximo)), diaCobro: dia };
+    const c = cobroDe(d);
+    let inicio, proximo, etiqueta;
+    if (c.modo === 'variable') {
+      inicio = U.inicioMes(hoy); proximo = U.sumarDias(U.finMes(hoy), 1); etiqueta = 'fin de mes';
+    } else if (c.modo === 'semanal') {
+      const f = U.deISO(hoy); const dif = (f.getDay() - c.diaSemana + 7) % 7;
+      inicio = U.sumarDias(hoy, -dif); proximo = U.sumarDias(inicio, 7); etiqueta = 'el ' + U.DIAS_BONITOS[c.diaSemana];
+    } else if (c.modo === 'quincenal' && c.dia2) {
+      const dias = [c.dia, c.dia2].sort((a, b) => a - b);
+      const cands = [];
+      [-1, 0, 1].forEach((k) => { const base = U.sumarMeses(U.inicioMes(hoy), k); dias.forEach((dd) => cands.push(U.proximoDia(base, Math.min(dd, Number(U.finMes(base).slice(8)))))); });
+      const orden = Array.from(new Set(cands)).sort();
+      inicio = orden.filter((x) => x <= hoy).pop() || orden[0];
+      proximo = orden.find((x) => x > hoy) || U.sumarMeses(inicio, 1);
+      etiqueta = 'el ' + U.deISO(proximo).getDate() + ' de ' + U.nombreMes(proximo);
+    } else {
+      inicio = ultimoDiaCobro(hoy, c.dia);
+      proximo = U.proximoDia(U.sumarDias(hoy, 1), c.dia);
+      etiqueta = 'el ' + U.deISO(proximo).getDate() + ' de ' + U.nombreMes(proximo);
+    }
+    return { inicio, proximo, dias: Math.max(1, U.diasEntre(hoy, proximo)), diaCobro: c.dia, modo: c.modo, etiqueta };
   }
 
   function fijosPendientes(d, cic, hoy) {
@@ -2510,34 +2702,46 @@
     return { total: r2(total), lista };
   }
 
-  // modo 'simple' (Gratis): ingresos − pagos fijos − gastos.  modo 'completo' (Pro): además cuotas de tarjeta y metas.
-  function puedesGastarHoy(d, hoy, modo) {
+  // Lo que te queda hasta tu cobro. UNA sola cuenta para todos:
+  //   ingresos del periodo (o tu sueldo si aún no registras el cobro)
+  //   − lo gastado en efectivo o débito       − lo que pagaste a tus tarjetas
+  //   − pagos fijos que aún no pagas           − cuotas de tarjeta que vencen antes del cobro (apartadas)
+  //   − lo que apartas para metas
+  // Las compras con tarjeta no salen de tu bolsillo hoy: se apartan sus cuotas. Si la tarjeta no tiene fechas, la compra cuenta como gasto de una vez.
+  function puedesGastarHoy(d, hoy) {
     const cic = ciclo(d, hoy);
-    const completo = modo === 'completo';
     let ingresos = 0, estimado = false;
     d.movs.forEach((m) => { if (m.tipo === 'ingreso' && enRango(m, cic.inicio, hoy)) ingresos += m.monto; });
-    if (ingresos === 0 && d.ajustes.sueldo) { ingresos = d.ajustes.sueldo; estimado = true; }
-    const cuenta = (m) => m.tipo === 'gasto' && (!completo || m.cuenta !== 'tarjeta');
-    let antes = 0, hoyG = 0;
-    d.movs.forEach((m) => { if (!cuenta(m)) return; if (enRango(m, cic.inicio, U.sumarDias(hoy, -1))) antes += m.monto; else if (m.fecha === hoy) hoyG += m.monto; });
+    if (ingresos === 0 && d.ajustes.sueldo && cic.modo !== 'variable') { ingresos = d.ajustes.sueldo; estimado = true; }
+    const tarjetasConFechas = new Set((d.tarjetas || []).filter((t) => t.diaCorte && t.diaVencimiento).map((t) => t.id));
+    const esEfectivo = (m) => m.tipo === 'gasto' && !(m.cuenta === 'tarjeta' && tarjetasConFechas.has(m.tarjetaId));
+    let antes = 0, hoyG = 0, pagosTarjeta = 0, conTarjeta = 0;
+    d.movs.forEach((m) => {
+      if (m.tipo === 'pago_tarjeta' && enRango(m, cic.inicio, hoy)) { pagosTarjeta += m.monto; return; }
+      if (m.tipo === 'gasto' && m.cuenta === 'tarjeta' && tarjetasConFechas.has(m.tarjetaId) && enRango(m, cic.inicio, hoy)) conTarjeta += m.monto;
+      if (!esEfectivo(m)) return;
+      if (enRango(m, cic.inicio, U.sumarDias(hoy, -1))) antes += m.monto; else if (m.fecha === hoy) hoyG += m.monto;
+    });
     const fijos = fijosPendientes(d, cic, hoy);
     let cuotas = 0, metas = 0;
-    if (completo) {
-      (d.tarjetas || []).forEach((t) => {
-        const e = AF.tarjetas.estado(t, d.movs, hoy);
-        e.pendientes.forEach((q) => { if (q.vence < cic.proximo) cuotas += q.pendiente; });
-      });
-      // Lo que ya aportaste este ciclo es plata apartada (sale de lo disponible), y lo que falta para tu aporte mensual también.
-      (d.metas || []).forEach((mt) => {
-        const aportado = (mt.aportes || []).filter((a) => a.fecha >= cic.inicio).reduce((s, a) => s + a.monto, 0);
-        metas += aportado + Math.max(0, (mt.aporteMensual || 0) - aportado);
-      });
-    }
-    const disponible = r2(ingresos - antes - fijos.total - cuotas - metas);
-    const porDia = r2(disponible / cic.dias);
-    const hoyDisponible = r2(porDia - hoyG);
-    return Object.assign({ ingresos: r2(ingresos), estimado, gastadoAntes: r2(antes), gastadoHoy: r2(hoyG), fijos: fijos.total, fijosLista: fijos.lista,
-      cuotas: r2(cuotas), metas: r2(metas), disponible, porDia, hoyDisponible, resto: r2(disponible - hoyG), pasado: hoyDisponible < 0, modo: completo ? 'completo' : 'simple' }, cic);
+    (d.tarjetas || []).forEach((t) => {
+      if (!tarjetasConFechas.has(t.id)) return;
+      const e = AF.tarjetas.estado(t, d.movs, hoy);
+      e.pendientes.forEach((q) => { if (q.vence < cic.proximo) cuotas += q.pendiente; });
+    });
+    (d.metas || []).forEach((mt) => {
+      const aportado = (mt.aportes || []).filter((a) => a.fecha >= cic.inicio).reduce((s, a) => s + a.monto, 0);
+      metas += aportado + Math.max(0, (mt.aporteMensual || 0) - aportado);
+    });
+    const gastado = r2(antes + hoyG + pagosTarjeta);
+    const apartado = r2(fijos.total + cuotas + metas);
+    const resto = r2(ingresos - gastado - apartado);
+    const porDia = r2(Math.max(0, resto) / cic.dias);
+    return Object.assign({
+      ingresos: r2(ingresos), estimado, gastadoAntes: r2(antes), gastadoHoy: r2(hoyG), pagosTarjeta: r2(pagosTarjeta), comprasConTarjeta: r2(conTarjeta),
+      fijos: fijos.total, fijosLista: fijos.lista, cuotas: r2(cuotas), metas: r2(metas), gastado, apartado,
+      disponible: r2(ingresos - antes - apartado - pagosTarjeta), resto, porDia, hoyDisponible: r2(porDia), pasado: resto < 0, modo: 'unico',
+    }, cic);
   }
 
   /* ------------------------------------------------------------------------ Presupuestos */
@@ -2642,13 +2846,56 @@
   }
 
   /* ---------------------------------------------------------- Respuestas del botón único */
-  // Devuelve { texto, voz, filas:[{icono, etiqueta, valor}], bloqueado?: funcion, ir?: pestaña }
+  // Devuelve { texto, voz, filas:[{icono, etiqueta, valor}], extras:[texto], bloqueado?: funcion, ir?: pestaña }
+  // Reglas: responder TODO lo que se preguntó (monto Y fecha si pidió las dos), con las palabras de la persona, y sin frases de relleno.
+  const fechaBonita = (iso) => U.deISO(iso).getDate() + ' de ' + U.nombreMes(iso);
+  function compraPorNombre(d, texto, hoy) {
+    // Busca una compra con tarjeta por su nombre (o por su categoría: «pantalones» → ropa).
+    const n = U.norm(texto || '').trim();
+    if (!n) return [];
+    const palabras = n.split(/\s+/).filter((w) => w.length > 2);
+    const compras = d.movs.filter((m) => m.tipo === 'gasto' && m.cuenta === 'tarjeta');
+    const puntua = (m) => {
+      const desc = U.norm(m.desc || ''); const c = catDe(d, m.cat);
+      let sc = 0;
+      palabras.forEach((w) => {
+        if (desc.includes(w)) sc += 3;
+        if (U.norm(c.nombre).includes(w)) sc += 2;
+        if ((c.palabras || []).some((pw) => pw === w || pw.split(' ').includes(w))) sc += 2;
+        const sing = w.endsWith('es') ? w.slice(0, -2) : w.endsWith('s') ? w.slice(0, -1) : w;
+        if (sing !== w && (desc.includes(sing) || (c.palabras || []).some((pw) => pw.includes(sing)))) sc += 1;
+      });
+      return sc;
+    };
+    return compras.map((m) => ({ m, sc: puntua(m) })).filter((x) => x.sc > 0).sort((a, b) => b.sc - a.sc || (b.m.fecha < a.m.fecha ? -1 : 1)).map((x) => x.m);
+  }
+  function respuestaCuotas(d, m, hoy) {
+    const t = (d.tarjetas || []).find((x) => x.id === m.tarjetaId);
+    const nombre = m.desc || catDe(d, m.cat).nombre;
+    if (!t) return { texto: 'La compra «' + nombre + '» no tiene tarjeta asociada.', filas: [] };
+    const plan = AF.tarjetas.planCompra(m, t);
+    if (plan.faltanDatos.includes('fechas')) return { texto: 'Para decirte cuándo pagas «' + nombre + '» necesito el día de corte y el día de pago de ' + t.nombre + '. Están en Tarjetas.', filas: [], ir: 'tarjetas' };
+    const est = AF.tarjetas.estado(t, d.movs, hoy);
+    const cuotas = est.cuotas.filter((q) => q.compraId === m.id);
+    const pend = cuotas.filter((q) => q.pendiente > 0.004);
+    const prox = pend[0];
+    const n = cuotas.length;
+    const pagadas = n - pend.length;
+    const filas = pend.slice(0, 12).map((q) => ({ icono: '🗓️', etiqueta: 'Cuota ' + q.n + ' de ' + q.de + ' · ' + fechaBonita(q.vence), valor: $(q.pendiente) }));
+    if (!prox) return { texto: '«' + nombre + '» ya está pagada por completo.', filas: [] };
+    const faltan = r2(pend.reduce((s, q) => s + q.pendiente, 0));
+    let texto;
+    if (n === 1) texto = '«' + nombre + '» (' + $(m.monto) + ') se paga de una vez: vence el ' + fechaBonita(prox.vence) + ' con tu ' + t.nombre + '.';
+    else texto = '«' + nombre + '»: ' + n + ' cuotas de ' + $(cuotas[0].monto) + ', una cada mes' + (t.diaVencimiento ? ' el ' + t.diaVencimiento : '') + '. ' + (pagadas ? 'Ya pagaste ' + pagadas + '; ' : '') + 'la próxima es la ' + prox.n + ' y vence el ' + fechaBonita(prox.vence) + '. Te faltan ' + pend.length + ' (' + $(faltan) + ').' + (plan.interesTotal ? ' Intereses en total: ' + $(plan.interesTotal) + '.' : ' Sin intereses.') + ' Con tu ' + t.nombre + '.';
+    return { texto, filas, ir: 'tarjetas' };
+  }
+
   function responder(q, d, hoy, esPro) {
     const per = q.periodo || { desde: U.inicioMes(hoy), hasta: U.finMes(hoy), etiqueta: 'este mes' };
     const filasCat = (lista, n) => lista.slice(0, n || 8).map((x) => ({ icono: x.cat.icono, etiqueta: x.cat.nombre, valor: $(x.total) }));
-    const quitaSimbolo = (t) => t.replace(/\$/g, '').replace(/−/g, 'menos ');
     const res = (texto, extra) => Object.assign({ texto, voz: texto.replace(/\$([\d.,]+)/g, (_, n) => n.replace(/\./g, '').replace(',', ' con ') + ' dólares') }, extra);
     const dinero = (v) => $(v);
+    const nombreCat = (id) => (q.palabra ? q.palabra : catDe(d, id).nombre.toLowerCase());
 
     switch (q.tema) {
       case 'ingresos': {
@@ -2659,18 +2906,27 @@
         return res('Tus ingresos ' + per.etiqueta + ' son ' + dinero(t.ingresos) + detalle + '.', { filas: partes.map((p) => ({ icono: p.cat.icono, etiqueta: p.cat.nombre, valor: dinero(p.total) })) });
       }
       case 'gastos': {
-        const t = totales(d, per.desde, per.hasta);
+        const t = totales(d, per.desde, per.hasta, { sinTarjeta: !!q.sinTarjeta });
         if (q.cat) {
-          const x = t.porCategoria.find((c) => c.id === q.cat);
-          const nombre = catDe(d, q.cat).nombre.toLowerCase();
-          return res(x ? 'En ' + nombre + ' gastaste ' + dinero(x.total) + ' ' + per.etiqueta + '.' : 'No tienes gastos en ' + nombre + ' ' + per.etiqueta + '.');
+          const movs = d.movs.filter((m) => m.tipo === 'gasto' && m.cat === q.cat && enRango(m, per.desde, per.hasta) && !(q.sinTarjeta && m.cuenta === 'tarjeta')).sort((a, b) => (a.fecha < b.fecha ? -1 : 1));
+          const nombre = nombreCat(q.cat);
+          if (!movs.length) return res('No tienes gastos en ' + nombre + ' ' + per.etiqueta + '.');
+          const total = r2(movs.reduce((s, m) => s + m.monto, 0));
+          const filas = movs.slice(-10).map((m) => ({ icono: catDe(d, m.cat).icono, etiqueta: (m.desc || catDe(d, m.cat).nombre) + ' · ' + fechaBonita(m.fecha), valor: dinero(m.monto) }));
+          if (q.cuando || movs.length === 1) {
+            if (movs.length === 1) return res('Pagaste ' + dinero(total) + ' de ' + nombre + ' el ' + fechaBonita(movs[0].fecha) + '.', { filas });
+            return res('En ' + nombre + ' pagaste ' + dinero(total) + ' ' + per.etiqueta + ', en ' + movs.length + ' pagos: ' + movs.map((m) => dinero(m.monto) + ' el ' + fechaBonita(m.fecha)).join(', ') + '.', { filas });
+          }
+          return res('En ' + nombre + ' gastaste ' + dinero(total) + ' ' + per.etiqueta + (movs.length > 1 ? ' (' + movs.length + ' pagos)' : '') + '.', { filas });
         }
-        return res('Has gastado ' + dinero(t.gastos) + ' ' + per.etiqueta + '.', { filas: filasCat(t.porCategoria, 5) });
+        if (!t.gastos) return res('No tienes gastos registrados ' + per.etiqueta + (q.sinTarjeta ? ' sin contar la tarjeta' : '') + '.' + (q.sinTarjeta && t.pagosTarjeta ? ' Pagaste ' + dinero(t.pagosTarjeta) + ' a tu tarjeta.' : '') + (q.sinTarjeta && t.conTarjeta ? ' Con tarjeta compraste ' + dinero(t.conTarjeta) + '.' : ''));
+        const extra = q.sinTarjeta && t.conTarjeta ? ' Con tarjeta aparte: ' + dinero(t.conTarjeta) + '.' : '';
+        return res('Gastaste ' + dinero(t.gastos) + ' ' + per.etiqueta + (q.sinTarjeta ? ' sin contar la tarjeta' : '') + ' en ' + t.veces + (t.veces === 1 ? ' movimiento' : ' movimientos') + '.' + extra, { filas: filasCat(t.porCategoria, 8) });
       }
       case 'desglose': {
-        const t = totales(d, per.desde, per.hasta);
+        const t = totales(d, per.desde, per.hasta, { sinTarjeta: !!q.sinTarjeta });
         if (!t.gastos) return res('No tienes gastos registrados ' + per.etiqueta + '.');
-        return res('Gastos ' + per.etiqueta + ': ' + dinero(t.gastos) + ' en total.', { filas: filasCat(t.porCategoria, 12), grafica: 'categorias' });
+        return res('Gastos ' + per.etiqueta + (q.sinTarjeta ? ' sin contar la tarjeta' : '') + ': ' + dinero(t.gastos) + ' en total.', { filas: filasCat(t.porCategoria, 12), grafica: 'categorias' });
       }
       case 'masgasto': {
         const t = totales(d, per.desde, per.hasta);
@@ -2686,11 +2942,19 @@
         const t = totales(d, per.desde, per.hasta);
         return res('Ingresos ' + dinero(t.ingresos) + ', gastos ' + dinero(t.gastos) + '. Balance ' + dinero(t.balance) + ' ' + per.etiqueta + '.', { filas: [{ icono: '💼', etiqueta: 'Ingresos', valor: dinero(t.ingresos) }, { icono: '🧾', etiqueta: 'Gastos', valor: dinero(t.gastos) }, { icono: '⚖️', etiqueta: 'Balance', valor: dinero(t.balance) }] });
       }
-      case 'necesario_gusto': {
-        const t = totales(d, per.desde, per.hasta);
-        const tot = t.nec.N + t.nec.G + t.nec.sin;
-        if (!tot) return res('Aún no hay gastos ' + per.etiqueta + '.');
-        return res('De tus gastos ' + per.etiqueta + ', ' + Math.round((t.nec.N / tot) * 100) + ' % es necesario (' + dinero(t.nec.N) + ') y ' + Math.round((t.nec.G / tot) * 100) + ' % es gusto (' + dinero(t.nec.G) + ').');
+      case 'necesario_gusto':
+      case 'innecesarios': {
+        const inn = innecesarios(d, per.desde, per.hasta);
+        if (!inn.veces) return res('No tienes gastos innecesarios ' + per.etiqueta + '. Muy bien.');
+        const filas = inn.lista.slice(0, 10).map((m) => ({ icono: catDe(d, m.cat).icono, etiqueta: (m.desc || catDe(d, m.cat).nombre) + ' · ' + U.fechaCorta(m.fecha, hoy), valor: dinero(m.monto) }));
+        const extras = per.clave === 'mes' || !per.clave ? consejos(d, hoy).slice(0, 2) : [];
+        return res('Gastos innecesarios ' + per.etiqueta + ': ' + dinero(inn.total) + ' en ' + inn.veces + (inn.veces === 1 ? ' compra' : ' compras') + '.', { filas, extras, ir: 'movimientos', filtro: 'innecesarios' });
+      }
+      case 'consejo': {
+        const c = consejos(d, hoy);
+        const inn = innecesarios(d, U.inicioMes(hoy), U.finMes(hoy));
+        if (!c.length) return res('Aún no tengo suficientes gastos este mes para darte un consejo. Registra lo que gastas y te aviso.');
+        return res(c[0], { extras: c.slice(1), filas: inn.lista.slice(0, 6).map((m) => ({ icono: catDe(d, m.cat).icono, etiqueta: m.desc || catDe(d, m.cat).nombre, valor: dinero(m.monto) })) });
       }
       case 'hormiga': {
         const h = hormiga(d, per.desde, per.hasta);
@@ -2703,37 +2967,62 @@
         return res(t.balance >= 0 ? 'Has ahorrado ' + dinero(t.balance) + ' ' + per.etiqueta + '.' : 'Gastaste ' + dinero(-t.balance) + ' más de lo que ganaste ' + per.etiqueta + '.');
       }
       case 'disponible': {
-        const p = puedesGastarHoy(d, hoy, esPro ? 'completo' : 'simple');
-        if (!p.ingresos) return res('Aún no tengo tus ingresos de este periodo. Registra tu sueldo y te digo cuánto puedes gastar.');
-        return res(p.pasado ? 'Hoy ya te pasaste ' + dinero(-p.hoyDisponible) + ' de lo que podías gastar.' : 'Hoy puedes gastar ' + dinero(p.hoyDisponible) + '. Hasta tu cobro te quedan ' + dinero(p.resto) + ' en ' + p.dias + ' días.', { ir: 'inicio' });
+        const p = puedesGastarHoy(d, hoy);
+        if (!p.ingresos) return res(p.modo === 'variable' ? 'Aún no registras ingresos este mes. Dime cuánto cobraste y te digo cuánto te queda.' : 'Aún no tengo tus ingresos de este periodo. Registra tu sueldo y te digo cuánto te queda.');
+        if (p.resto <= 0) return res('Ya no te queda dinero hasta ' + p.etiqueta + ': gastaste ' + dinero(p.gastado) + ' de ' + dinero(p.ingresos) + '.', { ir: 'inicio' });
+        return res('Te quedan ' + dinero(p.resto) + ' hasta ' + p.etiqueta + ' (' + p.dias + (p.dias === 1 ? ' día' : ' días') + ').', { ir: 'inicio' });
+      }
+      case 'cuota_compra': {
+        const cands = compraPorNombre(d, q.compra, hoy);
+        if (!cands.length) {
+          // ¿es un pago fijo? («cuándo me toca pagar el arriendo», «cuándo pago la luz»)
+          const nq = U.norm(q.compra);
+          const fijo = (d.pagosFijos || []).find((p) => { const np = U.norm(p.nombre); return np.includes(nq) || nq.includes(np) || nq.split(' ').some((w) => w.length > 3 && np.includes(w)); });
+          if (fijo) {
+            const ef = estadoFijo(d, fijo, hoy);
+            const cuando = ef.diasPara === 0 ? 'hoy' : ef.diasPara === 1 ? 'mañana' : 'el ' + fechaBonita(ef.proxima) + ' (en ' + ef.diasPara + ' días)';
+            return res((ef.pagado ? 'El pago de ' + fijo.nombre.toLowerCase() + ' de este periodo ya está hecho. El siguiente, ' + dinero(fijo.monto) + ', toca ' + cuando + '.' : (ef.atrasado ? 'El pago de ' + fijo.nombre.toLowerCase() + ' (' + dinero(fijo.monto) + ') venció el ' + fechaBonita(ef.proxima) + ' y aún no lo registras.' : fijo.nombre + ': ' + dinero(fijo.monto) + ', toca ' + cuando + '.')), { filas: [{ icono: '🔁', etiqueta: fijo.nombre + ' · el ' + fijo.dia + ' de cada mes', valor: dinero(fijo.monto) }] });
+          }
+          // ¿es un gasto normal que ya pagó? («cuándo pagué el internet»)
+          const movsNombre = d.movs.filter((m) => m.tipo === 'gasto' && m.desc && U.norm(m.desc).includes(nq)).sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
+          if (movsNombre.length) { const m = movsNombre[0]; return res('«' + m.desc + '» lo pagaste el ' + fechaBonita(m.fecha) + ': ' + dinero(m.monto) + '. No está en cuotas.', { filas: movsNombre.slice(0, 5).map((x) => ({ icono: catDe(d, x.cat).icono, etiqueta: x.desc + ' · ' + fechaBonita(x.fecha), valor: dinero(x.monto) })) }); }
+          const ts = d.tarjetas || [];
+          if (!ts.length) return res('No tienes tarjetas ni compras a cuotas registradas.', { ir: 'tarjetas' });
+          return res('No encuentro una compra con tarjeta que se llame «' + q.compra + '». Mira en Tarjetas lo que viene.', { ir: 'tarjetas' });
+        }
+        const r = respuestaCuotas(d, cands[0], hoy);
+        const extra = cands.length > 1 ? { extras: ['También encontré: ' + cands.slice(1, 4).map((m) => '«' + (m.desc || catDe(d, m.cat).nombre) + '»').join(', ') + '.'] } : {};
+        return res(r.texto, Object.assign({ filas: r.filas, ir: r.ir }, extra));
       }
       case 'tarjeta': {
         const ts = d.tarjetas || [];
-        if (!ts.length) return res('Aún no tienes tarjetas. Agrégala en la pestaña Tarjetas y te calculo lo que debes pagar.', { ir: 'tarjetas' });
+        if (!ts.length) return res('Aún no tienes tarjetas. Agrégala en la pestaña Tarjetas y te digo cuánto y cuándo pagar.', { ir: 'tarjetas' });
+        if (q.compra) { const cands = compraPorNombre(d, q.compra, hoy); if (cands.length) { const r = respuestaCuotas(d, cands[0], hoy); return res(r.texto, { filas: r.filas, ir: r.ir }); } }
         const lista = q.tarjetaId ? ts.filter((t) => t.id === q.tarjetaId) : ts;
-        const filas = []; let total = 0; let masProx = null;
+        const filas = []; let total = 0; let masProx = null, deuda = 0;
         lista.forEach((t) => {
           const e = AF.tarjetas.estado(t, d.movs, hoy);
-          total += e.aPagarProximo;
+          total += e.aPagarProximo; deuda += e.deudaTotal;
           if (e.proximoVence && (!masProx || e.proximoVence < masProx)) masProx = e.proximoVence;
-          filas.push({ icono: '💳', etiqueta: t.nombre + (e.proximoVence ? ' (vence ' + U.fechaCorta(e.proximoVence, hoy) + ')' : ''), valor: dinero(e.aPagarProximo) });
+          filas.push({ icono: '💳', etiqueta: t.nombre + (e.proximoVence ? ' · vence el ' + fechaBonita(e.proximoVence) : ''), valor: dinero(e.aPagarProximo) });
         });
-        if (!total) return res('No debes pagar nada de ' + (lista.length === 1 ? lista[0].nombre : 'tus tarjetas') + ' por ahora.', { filas });
-        return res('Debes pagar ' + dinero(total) + (masProx ? ' hasta el ' + U.deISO(masProx).getDate() + ' de ' + U.nombreMes(masProx) : '') + '. Es un estimado: ajústalo con tu estado de cuenta.', { filas, ir: 'tarjetas' });
+        if (q.deuda) return res(deuda ? 'Debes ' + dinero(r2(deuda)) + ' en total en ' + (lista.length === 1 ? lista[0].nombre : 'tus tarjetas') + '.' : 'No debes nada en ' + (lista.length === 1 ? lista[0].nombre : 'tus tarjetas') + '.', { filas, ir: 'tarjetas' });
+        if (!total) return res('No tienes nada por pagar de ' + (lista.length === 1 ? lista[0].nombre : 'tus tarjetas') + ' por ahora.', { filas });
+        return res('Debes pagar ' + dinero(r2(total)) + (masProx ? ' hasta el ' + fechaBonita(masProx) : '') + (lista.length === 1 ? ' de tu ' + lista[0].nombre : '') + '.', { filas, ir: 'tarjetas' });
       }
       case 'meconviene': {
         if (!esPro) {
-          const p = puedesGastarHoy(d, hoy, 'simple');
-          return res('Esta respuesta es de Pro.', { bloqueado: 'meConviene', gancho: q.monto ? 'Una compra de ' + dinero(q.monto) + ' es el ' + (p.disponible > 0 ? Math.round((q.monto / p.disponible) * 100) : 100) + ' % de lo que te queda hasta el cobro. Pro te dice si te conviene.' : 'Pro te dice si te alcanza sin descuadrar el mes.' });
+          const p = puedesGastarHoy(d, hoy);
+          return res('Esta respuesta es de Pro.', { bloqueado: 'meConviene', gancho: q.monto ? 'Una compra de ' + dinero(q.monto) + ' es el ' + (p.resto > 0 ? Math.round((q.monto / p.resto) * 100) : 100) + ' % de lo que te queda hasta tu cobro. Pro te dice si te conviene.' : 'Pro te dice si te alcanza sin descuadrar el mes.' });
         }
         if (!q.monto) return res('¿De cuánto es la compra? Dime el monto y te digo si te alcanza.');
-        const p = puedesGastarHoy(d, hoy, 'completo');
+        const p = puedesGastarHoy(d, hoy);
         const queda = r2(p.resto - q.monto);
-        if (queda >= 0) return res('Sí te alcanza: después de ' + dinero(q.monto) + ' te quedarían ' + dinero(queda) + ' hasta tu cobro, unos ' + dinero(Math.floor(queda / p.dias)) + ' por día.');
+        if (queda >= 0) return res('Sí te alcanza: después de ' + dinero(q.monto) + ' te quedarían ' + dinero(queda) + ' hasta tu cobro.');
         return res('No te alcanza este periodo: te faltarían ' + dinero(-queda) + ' antes de tu cobro. Si la difieres, la cuota pesa menos; mira el simulador.');
       }
       default:
-        return res('No entendí qué quieres saber. Prueba con «cuánto gasté este mes» o «desglósame mis gastos».');
+        return res('No entendí qué quieres saber. Prueba con «cuánto gasté este mes» o «cuánto me queda».');
     }
   }
 
@@ -2840,7 +3129,7 @@
     return lista.sort((a, b) => (b.fecha === a.fecha ? b.creado - a.creado : b.fecha < a.fecha ? -1 : 1))[0] || null;
   }
 
-  AF.informes = { totales, ingresosPorCategoria, hormiga, ciclo, ultimoDiaCobro, puedesGastarHoy, presupuestos, alertas, sri, serieMensual, csv, resumenCompartir, responder, objetivoDeCorreccion, catDe,
+  AF.informes = { totales, ingresosPorCategoria, hormiga, ciclo, cobroDe, ultimoDiaCobro, puedesGastarHoy, disponible: puedesGastarHoy, innecesarios, consejos, presupuestos, alertas, sri, serieMensual, csv, resumenCompartir, responder, objetivoDeCorreccion, catDe,
     estadoFijo, suscripcionesDetectadas, pendientePrestamo, prestamosResumen, reto, conciliar };
   if (typeof module === 'object' && module.exports) module.exports = AF.informes;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -3471,17 +3760,20 @@
   async function existe(ns) { return !!(await leerJSON(await clave(ns, 'boveda'))); }
   async function longitudPin(ns) { const b = await leerJSON(await clave(ns, 'boveda')); return (b && b.len) || S().pinMin; }
 
-  async function crear(ns, pin) {
-    if (!pinValido(pin)) throw new Error('PIN_INVALIDO');
+  async function crear(ns, pin, opciones) {
+    const sinPin = !!(opciones && opciones.sinPin);
+    if (!sinPin && !pinValido(pin)) throw new Error('PIN_INVALIDO');
     const raw = azar(32);
     const salt = azar(16), iter = S().pbkdf2Iteraciones;
     const kPin = await claveDePin(pin, salt, iter);
-    const boveda = { v: 1, salt: b64(salt), iter, len: String(pin).length, pin: await cifrar(kPin, raw), bio: null };
+    const boveda = { v: 1, salt: b64(salt), iter, len: sinPin ? 0 : String(pin).length, sinPin, pin: await cifrar(kPin, raw), bio: null };
     await escribirJSON(await clave(ns, 'boveda'), boveda);
     await limpiarIntentos(ns);
     K = await importarAes(raw); Kraw = raw; nsActual = ns;
     return true;
   }
+  // ¿La cuenta tiene PIN puesto por la persona? (false = entra directo con la llave interna)
+  async function tienePin(ns) { const b = await leerJSON(await clave(ns, 'boveda')); return !!(b && !b.sinPin); }
 
   // Devuelve { ok } o { ok:false, motivo:'espera'|'incorrecto'|'sin_boveda', espera, restantes }
   async function abrirConPin(ns, pin) {
@@ -3502,13 +3794,28 @@
     }
   }
 
-  async function cambiarPin(ns, pinNuevo) {
+  async function cambiarPin(ns, pinNuevo, opciones) {
     if (!K || !Kraw) throw new Error('BLOQUEADA');
-    if (!pinValido(pinNuevo)) throw new Error('PIN_INVALIDO');
+    const sinPin = !!(opciones && opciones.sinPin);
+    if (!sinPin && !pinValido(pinNuevo)) throw new Error('PIN_INVALIDO');
     const b = await leerJSON(await clave(ns, 'boveda'));
     const salt = azar(16);
-    b.salt = b64(salt); b.len = String(pinNuevo).length; b.pin = await cifrar(await claveDePin(pinNuevo, salt, b.iter), Kraw);
+    b.salt = b64(salt); b.len = sinPin ? 0 : String(pinNuevo).length; b.sinPin = sinPin; b.pin = await cifrar(await claveDePin(pinNuevo, salt, b.iter), Kraw);
     await escribirJSON(await clave(ns, 'boveda'), b);
+    await limpiarIntentos(ns);
+    return true;
+  }
+  // La persona pone un PIN (desde Ajustes): la bóveda pasa a abrirse solo con ese PIN y la llave interna se borra.
+  async function ponerPin(ns, pin) {
+    await cambiarPin(ns, pin, { sinPin: false });
+    borrarAutoPin(ns);
+    return true;
+  }
+  // La persona quita el PIN: vuelve la llave interna (entra directo).
+  async function quitarPin(ns) {
+    const llave = nuevaLlave();
+    await cambiarPin(ns, llave, { sinPin: true });
+    guardarAutoPin(ns, llave);
     return true;
   }
 
@@ -3556,19 +3863,26 @@
   async function marcaDatos(ns) { const r = await leerJSON(await clave(ns, 'datos')); return r ? r.ts : null; }
 
   // Para copia en la nube: todo sale YA cifrado (la nube nunca ve nada legible).
+  // Sin PIN, la copia lleva la llave interna: así se recupera en otro teléfono con solo entrar con la misma cuenta.
+  // (La copia vive en la carpeta privada de la app en el Drive de la persona: solo su cuenta de Google llega a ella.)
   async function paqueteRespaldo(ns) {
-    return { app: 'asistente-financiero', v: 1, ts: Date.now(), boveda: await leerJSON(await clave(ns, 'boveda')), datos: await leerJSON(await clave(ns, 'datos')) };
+    const boveda = await leerJSON(await clave(ns, 'boveda'));
+    const p = { app: 'asistente-financiero', v: 2, ts: Date.now(), boveda, datos: await leerJSON(await clave(ns, 'datos')) };
+    if (boveda && boveda.sinPin) { const l = obtenerAutoPin(ns); if (l) p.llave = l; }
+    return p;
   }
   async function restaurarPaquete(ns, p) {
     if (!p || p.app !== 'asistente-financiero' || !p.boveda || !p.datos) throw new Error('PAQUETE_INVALIDO');
     await escribirJSON(await clave(ns, 'boveda'), Object.assign({}, p.boveda, { bio: null }));   // la huella es del teléfono: se vuelve a activar
     await escribirJSON(await clave(ns, 'datos'), p.datos);
+    if (p.boveda.sinPin && p.llave) guardarAutoPin(ns, p.llave); else borrarAutoPin(ns);
     bloquear();
   }
 
   /* ------------------------------------------------------------------ borrados */
   async function borrarCuenta(ns, secretos) {
     bloquear();
+    borrarAutoPin(ns);
     for (const p of ['boveda', 'datos', 'intentos']) await almacen.del(await clave(ns, p));
     try { if (secretos && secretos.borrar) await secretos.borrar(ns); } catch (e) { /* nada que borrar */ }
   }
@@ -3585,24 +3899,29 @@
   function marcarSalida(ahora) { ultimaSalida = ahora || Date.now(); }
   function debeBloquear(segundos, ahora) {
     if (!K) return true;
+    if (nsActual && obtenerAutoPin(nsActual)) return false;        // sin PIN: nunca se bloquea
     if (!ultimaSalida) return false;
-    return ((ahora || Date.now()) - ultimaSalida) / 1000 >= (segundos == null ? S().bloquearTrasSegundos : segundos);
+    const seg = segundos == null ? S().bloquearTrasSegundos : segundos;
+    if (seg === 0) return false;                                   // 0 = solo al abrir la app de nuevo (minimizar no cuenta)
+    return ((ahora || Date.now()) - ultimaSalida) / 1000 >= seg;
   }
   function marcarEntrada() { ultimaSalida = 0; }
 
-  // Crea la bóveda con un PIN interno generado automáticamente (modo sin PIN).
-  // El "auto-PIN" se guarda en localStorage; si se borra, el usuario deberá reiniciar la cuenta.
+  /* ------------------------------------------------------------ modo sin PIN */
+  // Sin PIN, la bóveda se abre con una llave interna al azar (192 bits) que vive en el teléfono (y en la copia de Drive).
+  // Si la persona pone un PIN después, la llave se borra y solo sirve el PIN.
+  const nuevaLlave = () => b64(azar(24));
+  const claveAuto = (ns) => 'af_clave_' + ns;
+  function guardarAutoPin(ns, llave) { try { g.localStorage.setItem(claveAuto(ns), llave); } catch (e) { mem[claveAuto(ns)] = llave; } }
+  function borrarAutoPin(ns) { try { g.localStorage.removeItem(claveAuto(ns)); } catch (e) { /* nada */ } delete mem[claveAuto(ns)]; }
+  function obtenerAutoPin(ns) { try { return g.localStorage.getItem(claveAuto(ns)) || mem[claveAuto(ns)] || null; } catch (e) { return mem[claveAuto(ns)] || null; } }
   async function crearSinPin(ns) {
-    const autoPin = String(Math.floor(100000 + Math.random() * 900000));
-    try { localStorage.setItem('af_clave_' + ns, autoPin); } catch (e) { /* private mode */ }
-    return crear(ns, autoPin);
-  }
-  // Devuelve el PIN interno si existe (modo sin PIN), o null.
-  function obtenerAutoPin(ns) {
-    try { return localStorage.getItem('af_clave_' + ns); } catch (e) { return null; }
+    const llave = nuevaLlave();
+    guardarAutoPin(ns, llave);
+    return crear(ns, llave, { sinPin: true });
   }
 
-  AF.seguridad = { usarAlmacen, pinValido, pinDebil, existe, longitudPin, crear, crearSinPin, obtenerAutoPin, abrirConPin, cambiarPin, bloquear, estaAbierta, estadoIntentos,
+  AF.seguridad = { usarAlmacen, pinValido, pinDebil, existe, longitudPin, crear, crearSinPin, obtenerAutoPin, tienePin, ponerPin, quitarPin, abrirConPin, cambiarPin, bloquear, estaAbierta, estadoIntentos,
     activarHuella, huellaActiva, desactivarHuella, abrirConHuella, guardarDatos, leerDatos, marcaDatos, paqueteRespaldo, restaurarPaquete,
     borrarCuenta, sesion, guardarSesion, cerrarSesion, espacioDe, marcarSalida, marcarEntrada, debeBloquear, b64, deB64 };
   if (typeof module === 'object' && module.exports) module.exports = AF.seguridad;
@@ -3784,20 +4103,23 @@
     const W = g.SpeechRecognition || g.webkitSpeechRecognition;
     if (!W) throw err('sin_voz', 'Este equipo no tiene reconocimiento de voz. Escribe lo que quieres registrar.');
     const rec = new W(); rec.lang = idiomaVoz(); rec.interimResults = true; rec.maxAlternatives = 1; rec.continuous = true;
-    let ultimo = '', parado = false;
+    let ultimo = '', base = '', parado = false;
     const terminado = new Promise((res, rej) => {
       rec.onresult = (e) => {
-        // En modo continuo, acumular todos los resultados (finales e intermedios)
+        // En modo continuo, acumular todos los resultados (finales e intermedios). `base` guarda lo dicho antes de un reinicio.
         let acum = '';
-        for (let i = 0; i < e.results.length; i++) acum += e.results[i][0].transcript;
-        ultimo = acum.trim();
+        for (let i = 0; i < e.results.length; i++) acum += e.results[i][0].transcript + ' ';
+        ultimo = (base + acum).replace(/\s+/g, ' ').trim();
         if (alParcial) alParcial(ultimo);
       };
       rec.onerror = (e) => {
-        if (e.error === 'no-speech') return; // en continuo, el silencio no es error — seguir escuchando
+        if (e.error === 'no-speech' || e.error === 'aborted') return; // el silencio no es error; quien escucha decide cuándo terminar
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { parado = true; rej(err('permiso', 'Sin permiso del micrófono no puedo escucharte. Puedes escribir.')); return; }
+        if (e.error === 'network') { parado = true; rej(err('sin_voz', 'El reconocimiento de voz necesita internet. Puedes escribir.')); return; }
         rej(err('sin_voz', 'No pude escuchar (' + e.error + ').'));
       };
-      rec.onend = () => { if (!parado) { try { rec.start(); } catch (er) { res(ultimo); } } else res(ultimo); };
+      // Android corta la escucha cada pocos segundos: se reinicia sin perder lo dicho hasta que quien escucha llame a parar()
+      rec.onend = () => { if (!parado) { base = ultimo ? ultimo + ' ' : ''; try { rec.start(); } catch (er) { res(ultimo); } } else res(ultimo); };
     });
     rec.start();
     return { parar: async () => { parado = true; try { rec.stop(); } catch (e) { /* nada */ } }, terminado };
@@ -3957,6 +4279,8 @@
     try { token = await tokenDrive(esNativo() ? undefined : false); } catch (e) { if (silencioso) return null; throw e; }
     const f = await driveBuscar(token); return f ? { id: f.id, fecha: f.modifiedTime } : null;
   }
+  // ¿Hay permiso de Drive a mano sin abrir ventanas? (web: el permiso que dio al entrar con Google, mientras no caduque)
+  const drivePermisoAMano = () => !esNativo() && !!(tokenGoogle && tokenGoogle.drive && tokenGoogle.vence > Date.now() + 60000);
   async function respaldoBajar() {
     const token = await tokenDrive(); const f = await driveBuscar(token);
     if (!f) return null;
@@ -4009,7 +4333,7 @@
 
   AF.nativo = { esNativo, esLocal, plugin, almacenNativo, proveedorListo, iniciarSesion, cerrarSesionSocial, huellaDisponible, secretosHuella, vozDisponible, escuchar, hablar, callar,
     leerTextoDeImagen, escucharCompartidos, permisoAvisos, programarAvisos, compartirTexto, entregarArchivo, comprarPro, restaurarCompras,
-    respaldoSubir, respaldoInfo, respaldoBajar, respaldoBorrar, precargarWeb, prepararWeb, instalacion, vibrar, alVolverAPrimerPlano, alAbrirEnlace, botonAtras, salir, espera };
+    respaldoSubir, respaldoInfo, respaldoBajar, respaldoBorrar, drivePermisoAMano, precargarWeb, prepararWeb, instalacion, vibrar, alVolverAPrimerPlano, alAbrirEnlace, botonAtras, salir, espera };
   if (typeof module === 'object' && module.exports) module.exports = AF.nativo;
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
@@ -4079,7 +4403,9 @@
   /* ----------------------------------------------------------------------- movimientos */
   const catDe = (id) => AF.store.categoria(id);
   function subDeMov(m, hoy) {
-    const c = catDe(m.cat), partes = [c.nombre];
+    const c = catDe(m.cat), partes = [];
+    // si el movimiento no tiene nombre propio, el título ya es la categoría: no repetirla
+    if (m.desc) partes.push(c.nombre); else if (m.tipo === 'ingreso') partes.push('Ingreso'); else if (m.nec === 'G' || (m.nec == null && c.nec === 'G')) partes.push('Innecesario');
     if (m.cuenta === 'tarjeta') {
       const t = AF.store.buscar('tarjetas', m.tarjetaId);
       partes.push(t ? t.nombre : 'Tarjeta');
@@ -4091,7 +4417,7 @@
   function filaMov(m, hoy, onclick, conFecha) {
     if (m.tipo === 'pago_tarjeta') {
       const t = AF.store.buscar('tarjetas', m.tarjetaId);
-      return fila({ icono: '💳', titulo: 'Pago de ' + (t ? t.nombre : 'tarjeta'), sub: U.fechaCorta(m.fecha, hoy), derecha: h('span', { class: 'monto' }, $(m.monto)), onclick });
+      return fila({ icono: '💳', titulo: 'Pago de ' + (t ? t.nombre : 'tarjeta'), sub: 'Baja tu deuda' + (conFecha && hoy ? ' · ' + U.fechaCorta(m.fecha, hoy) : ''), derecha: h('span', { class: 'monto pago' }, '−' + $(m.monto)), onclick });
     }
     const c = catDe(m.cat);
     return fila({
@@ -4105,7 +4431,7 @@
     movs.forEach((m) => { (mapa[m.fecha] = mapa[m.fecha] || []).push(m); });
     return Object.keys(mapa).sort().reverse().map((f) => {
       const lista = mapa[f].sort((a, b) => b.creado - a.creado);
-      const total = lista.reduce((s, m) => s + (m.tipo === 'gasto' ? -m.monto : m.tipo === 'ingreso' ? m.monto : 0), 0);
+      const total = lista.reduce((s, m) => s + (m.tipo === 'gasto' || m.tipo === 'pago_tarjeta' ? -m.monto : m.tipo === 'ingreso' ? m.monto : 0), 0);
       return { fecha: f, titulo: U.cap(U.fechaCorta(f, hoy)), total, movs: lista };
     });
   }
@@ -4166,17 +4492,29 @@
     const m0 = Object.assign({ tipo: 'gasto', monto: '', cat: null, desc: '', fecha: hoy, cuenta: 'efectivo', nec: undefined }, o.inicial || {}, o.mov || {});
     const e = { tipo: m0.tipo, cat: m0.cat, nec: m0.nec === undefined ? 'auto' : m0.nec === null ? 'auto' : m0.nec, cuenta: m0.cuenta || 'efectivo', tarjetaId: m0.tarjetaId || null,
       modo: (m0.credito && m0.credito.modo) || 'corriente', conInteres: m0.credito ? m0.credito.interes !== false : false, meses: (m0.credito && m0.credito.meses) || 6, cuota: (m0.credito && m0.credito.cuota) || '' };
-    if (!e.cat) e.cat = AF.store.categorias(e.tipo).find((c) => c.id === (e.tipo === 'gasto' ? 'otros' : 'sueldo')).id;
+    const tarjetasTodas = AF.store.d.tarjetas;
+    if (e.tipo === 'pago_tarjeta' && !e.tarjetaId && tarjetasTodas.length) e.tarjetaId = tarjetasTodas[0].id;
+    if (!e.cat && e.tipo !== 'pago_tarjeta') e.cat = AF.store.categorias(e.tipo).find((c) => c.id === (e.tipo === 'gasto' ? 'otros' : 'sueldo')).id;
     const monto = h('input', { class: 'entrada grande', inputmode: 'decimal', placeholder: '0', value: m0.monto === '' ? '' : String(m0.monto).replace('.', ','), 'aria-label': 'Monto' });
+    const simbolo = (PLAN.monedas[AF.store.d.ajustes.moneda] || PLAN.monedas.USD).simbolo;
+    const montoCaja = h('div', { class: 'dinero-campo' }, h('span', { class: 'simbolo', 'aria-hidden': 'true' }, simbolo), monto);
     const desc = h('input', { class: 'entrada', placeholder: 'Detalle (opcional)', value: m0.desc || '', maxlength: 80 });
     const fecha = h('input', { class: 'entrada', type: 'date', value: m0.fecha, max: U.sumarDias(hoy, 366) });
-    const zonaTipo = h('div'), zonaCat = h('div'), zonaNec = h('div'), zonaCuenta = h('div'), err = h('div', { class: 'ayuda', estilo: { color: 'var(--gasto)', minHeight: '18px', marginTop: '8px' } });
+    const zonaTipo = h('div'), zonaCat = h('div'), zonaNec = h('div'), zonaCuenta = h('div'), zonaDesc = h('div'), err = h('div', { class: 'ayuda', estilo: { color: 'var(--gasto)', minHeight: '18px', marginTop: '8px' } });
 
     function pintar() {
-      AF.ui.vaciar(zonaTipo); AF.ui.vaciar(zonaCat); AF.ui.vaciar(zonaNec); AF.ui.vaciar(zonaCuenta);
-      zonaTipo.appendChild(h('div', { class: 'segmentos' }, [['gasto', 'Gasto'], ['ingreso', 'Ingreso']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': e.tipo === k ? 'true' : 'false', onclick: () => {
-        if (e.tipo !== k) { e.tipo = k; e.cat = AF.store.categorias(k)[0].id; if (k === 'ingreso') e.cuenta = 'efectivo'; pintar(); }
+      AF.ui.vaciar(zonaTipo); AF.ui.vaciar(zonaCat); AF.ui.vaciar(zonaNec); AF.ui.vaciar(zonaCuenta); AF.ui.vaciar(zonaDesc);
+      const tipos = [['gasto', 'Gasto'], ['ingreso', 'Ingreso']];
+      if (tarjetasTodas.length || e.tipo === 'pago_tarjeta') tipos.push(['pago_tarjeta', 'Pago de tarjeta']);
+      zonaTipo.appendChild(h('div', { class: 'segmentos' }, tipos.map(([k, t]) => h('button', { type: 'button', 'aria-pressed': e.tipo === k ? 'true' : 'false', onclick: () => {
+        if (e.tipo !== k) { e.tipo = k; if (k === 'pago_tarjeta') { e.cat = null; if (!e.tarjetaId && tarjetasTodas.length) e.tarjetaId = tarjetasTodas[0].id; } else { e.cat = AF.store.categorias(k)[0].id; if (k === 'ingreso') e.cuenta = 'efectivo'; } pintar(); }
       } }, t))));
+      if (e.tipo === 'pago_tarjeta') {
+        if (!tarjetasTodas.length) zonaCuenta.appendChild(h('p', { class: 'texto-sm suave' }, 'Primero agrega tu tarjeta en la pestaña Tarjetas.'));
+        else zonaCuenta.appendChild(campo('¿A qué tarjeta?', h('select', { class: 'entrada', onchange: (ev) => { e.tarjetaId = ev.target.value; } }, tarjetasTodas.map((t) => h('option', { value: t.id, selected: t.id === e.tarjetaId }, t.nombre))), 'Este pago le baja la deuda a la tarjeta. No es un gasto nuevo.'));
+        return;
+      }
+      zonaDesc.appendChild(campo('Detalle', desc));
       zonaCat.appendChild(campo('Categoría', selectorCategoria(e.tipo, e.cat, (id) => { e.cat = id; })));
       if (e.tipo === 'gasto') {
         zonaNec.appendChild(campo('¿Necesario o gusto?', h('div', { class: 'segmentos' }, [['auto', 'Automático'], ['N', 'Necesario'], ['G', 'Gusto']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': e.nec === k ? 'true' : 'false', onclick: () => { e.nec = k; pintar(); } }, t)))));
@@ -4200,12 +4538,17 @@
     pintar();
 
     const cuerpo = h('div', null, zonaTipo,
-      campo('Monto', monto), zonaCat, campo('Detalle', desc), campo('Fecha', fecha), zonaNec, zonaCuenta, err);
+      campo('Monto', montoCaja), zonaCat, zonaDesc, campo('Fecha', fecha), zonaNec, zonaCuenta, err);
 
     function leer() {
       const v = U.parseNumero(monto.value);
       if (!(v > 0)) { err.textContent = 'Escribe un monto mayor que cero.'; monto.focus(); return null; }
       if (!fecha.value) { err.textContent = 'Elige la fecha.'; return null; }
+      if (e.tipo === 'pago_tarjeta') {
+        const t = AF.store.buscar('tarjetas', e.tarjetaId);
+        if (!t) { err.textContent = 'Elige la tarjeta.'; return null; }
+        return { tipo: 'pago_tarjeta', monto: U.r2(v), fecha: fecha.value, tarjetaId: t.id, cat: null, desc: 'Pago ' + t.nombre };
+      }
       const m = { tipo: e.tipo, monto: U.r2(v), cat: e.cat, desc: desc.value.trim(), fecha: fecha.value };
       if (e.tipo === 'gasto') {
         const c = catDe(e.cat);
@@ -4226,8 +4569,12 @@
   // Guardar / editar / borrar con aviso y "Deshacer"
   function guardarMov(m, existente) {
     const S = AF.store;
-    if (existente) { S.editar('movs', existente.id, m, 'Cambié un movimiento'); aviso('Cambios guardados', { texto: 'Deshacer', onclick: () => S.deshacer() }); }
-    else { S.agregar('movs', m, 'Agregué un movimiento'); aviso('Guardado', { texto: 'Deshacer', onclick: () => S.deshacer() }); }
+    if (existente) {
+      const patch = Object.assign({}, m);
+      // si cambió el tipo, limpiar lo que ya no aplica (una compra con tarjeta que pasa a ser pago, por ejemplo)
+      if (existente.tipo !== m.tipo) ['nec', 'cuenta', 'tarjetaId', 'credito'].forEach((k) => { if (!(k in patch)) patch[k] = undefined; });
+      S.editar('movs', existente.id, patch, 'Cambié un movimiento'); aviso('Cambios guardados', { texto: 'Deshacer', onclick: () => S.deshacer() });
+    } else { S.agregar('movs', m, 'Agregué un movimiento'); aviso('Guardado', { texto: 'Deshacer', onclick: () => S.deshacer() }); }
   }
   function borrarMov(m) { AF.store.borrar('movs', m.id, 'Borré un movimiento'); aviso('Movimiento borrado', { texto: 'Deshacer', onclick: () => AF.store.deshacer() }); }
   function editarMov(m) {
@@ -4239,7 +4586,7 @@
 ;
 
 /* ===== js/vistas/acceso-pantallas.js ===== */
-/* Primera pantalla (Google / Facebook), bienvenida, creación de PIN, huella y pantalla de bloqueo. */
+/* Primera pantalla (Google / Facebook / sin cuenta), bienvenida de UNA pantalla, PIN opcional y pantalla de bloqueo. */
 (function (g) {
   'use strict';
   const AF = (g.AF = g.AF || {});
@@ -4247,6 +4594,7 @@
   const U = AF.util, PLAN = AF.PLAN, Sg = () => AF.seguridad, N = () => AF.nativo;
   const V = (AF.vistas = AF.vistas || {});
   const d = g.document;
+  const $ = (n) => U.dinero(n);
 
   /* ------------------------------------------------------------------- teclado de PIN */
   // o = { titulo, sub, len, alCompletar(pin) -> Promise<{ok, mensaje}>, huella: fn|null, arriba: Node, pie: [Node] }
@@ -4294,25 +4642,32 @@
   }
 
   /* ---------------------------------------------------------------------- portada */
-  // Una sola pantalla continua: logo grande, nombre, una línea de qué hace, y los botones. Sin tarjetas ni dibujos.
+  // Una sola pantalla: logo, nombre, qué hace, y las formas de entrar. Si Google o Facebook aún no están configurados,
+  // sus botones no aparecen (nunca un mensaje técnico): entra directo con «Empezar».
   function portada() {
     const app = AF.app;
     app.pantalla(null);
-    const mensaje = h('p', { class: 'texto-sm', role: 'alert', estilo: { color: '#FF9C9C', minHeight: '20px', textAlign: 'center' } });
+    const mensaje = h('p', { class: 'portada-error', role: 'alert' });
+    const listos = PLAN.sesion.proveedores.filter((p) => N().proveedorListo(p));
 
     async function entrar(prov, boton) {
       mensaje.textContent = '';
       boton.disabled = true;
       try { await app.iniciarSesion(await N().iniciarSesion(prov)); }
-      catch (e) { if (e.codigo !== 'cancelado') mensaje.textContent = e.message || 'No pude iniciar sesión.'; boton.disabled = false; }
+      catch (e) {
+        if (e.codigo !== 'cancelado') mensaje.textContent = e.codigo === 'sin_red' ? 'No hay internet. Revisa tu conexión e inténtalo otra vez.' : 'No pude entrar con ' + (prov === 'google' ? 'Google' : 'Facebook') + '. Inténtalo otra vez o entra sin cuenta.';
+        boton.disabled = false;
+      }
     }
     const bG = h('button', { class: 'btn btn-bloque btn-google', type: 'button', onclick: () => entrar('google', bG) }, AF.ui.logoGoogle(), 'Continuar con Google');
     const bF = h('button', { class: 'btn btn-bloque', type: 'button', estilo: { background: '#1877F2', color: '#fff' }, onclick: () => entrar('facebook', bF) }, h('span', { estilo: { display: 'grid', placeItems: 'center', width: '22px', height: '22px', background: '#fff', borderRadius: '50%' } }, AF.ui.logoFacebook()), 'Continuar con Facebook');
-    const botones = PLAN.sesion.proveedores.map((p) => (p === 'google' ? bG : bF));
-    const demo = (PLAN.sesion.permitirSinCuenta || N().esLocal()) && !N().esNativo()
-      ? h('button', { class: 'btn-texto', type: 'button', onclick: () => app.iniciarSesion({ proveedor: 'demo', id: 'local', nombre: '', email: '' }) }, 'Probar sin cuenta') : null;
-    N().precargarWeb();                                  // deja listas las ventanas de Google/Facebook para el toque del botón
-    // Instalar como app (solo en el navegador; si ya está instalada no aparece)
+    const botones = listos.map((p) => (p === 'google' ? bG : bF));
+    const sinCuenta = () => app.iniciarSesion({ proveedor: 'demo', id: 'local', nombre: '', email: '' });
+    const puedeSinCuenta = (PLAN.sesion.permitirSinCuenta || N().esLocal()) && !N().esNativo();
+    const local = !listos.length
+      ? h('button', { class: 'btn btn-bloque btn-primario', type: 'button', onclick: sinCuenta }, 'Empezar')
+      : puedeSinCuenta ? h('button', { class: 'btn-texto', type: 'button', onclick: sinCuenta }, 'Usar sin cuenta') : null;
+    N().precargarWeb();
     const instalar = h('div', { estilo: { textAlign: 'center' } });
     const pintarInstalar = () => {
       AF.ui.vaciar(instalar);
@@ -4323,128 +4678,141 @@
     };
     pintarInstalar(); N().instalacion.alCambiar(() => { if (instalar.isConnected) pintarInstalar(); });
 
+    const legal = listos.length
+      ? 'Tus datos se guardan cifrados en tu teléfono' + (listos.includes('google') ? ' y en una carpeta privada de tu Google Drive' : '') + '. Entrar con tu cuenta solo sirve para reconocerte: no leemos tu banco ni tu correo.'
+      : 'Tus datos se guardan cifrados en este teléfono. Nadie más los ve.';
     const el = h('main', { class: 'portada' },
-      h('div', { class: 'portada-marca' }, AF.ui.logoApp(176), h('h1', { class: 'portada-nombre' }, PLAN.app.nombre),
-        h('p', { class: 'portada-sub' }, 'Dilo con tu voz. Lo registro, lo ordeno y te digo cuánto puedes gastar hoy.')),
-      h('div', { class: 'portada-acciones' }, botones, mensaje, demo, instalar,
-        h('p', { class: 'portada-legal' }, 'Tus datos se guardan cifrados en este teléfono. Entrar con tu cuenta solo sirve para reconocerte (con Google, además, para guardar tu copia en tu propio Drive); no leemos tu banco ni tu correo.')));
+      h('div', { class: 'portada-marca' }, AF.ui.logoApp(112), h('h1', { class: 'portada-nombre' }, PLAN.app.nombre),
+        h('p', { class: 'portada-sub' }, 'Dices lo que gastas y la app lo anota. Siempre sabes cuánto te queda hasta tu cobro.')),
+      h('div', { class: 'portada-acciones' }, botones, local, mensaje, instalar, h('p', { class: 'portada-legal' }, legal)));
     app.pantalla(el);
   }
 
+  /* --------------------------------------------------------------- país del teléfono */
+  const ZONAS = { Guayaquil: 'EC', Bogota: 'CO', Lima: 'PE', Mexico_City: 'MX', Cancun: 'MX', Monterrey: 'MX', Tijuana: 'MX', Buenos_Aires: 'AR', Cordoba: 'AR', Santiago: 'CL', Caracas: 'VE', La_Paz: 'BO', Asuncion: 'PY', Montevideo: 'UY', Guatemala: 'GT', Tegucigalpa: 'HN', El_Salvador: 'SV', Managua: 'NI', Costa_Rica: 'CR', Panama: 'PA', Havana: 'CU', Santo_Domingo: 'DO', Puerto_Rico: 'PR', Sao_Paulo: 'BR', Madrid: 'ES', New_York: 'US', Los_Angeles: 'US', Chicago: 'US', Denver: 'US', Phoenix: 'US', Miami: 'US' };
+  function paisDelTelefono() {
+    const codigos = PLAN.paises.map((p) => p.codigo);
+    try {
+      const idioma = (g.navigator && (g.navigator.language || (g.navigator.languages || [])[0])) || '';
+      const reg = (idioma.split('-')[1] || '').toUpperCase();
+      if (reg && codigos.includes(reg)) return reg;
+    } catch (e) { /* sin idioma */ }
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+      const ciudad = tz.split('/').pop();
+      if (ZONAS[ciudad] && codigos.includes(ZONAS[ciudad])) return ZONAS[ciudad];
+      if (/^America\/Argentina/.test(tz)) return 'AR';
+    } catch (e) { /* sin zona */ }
+    return PLAN.app.paisInicial;
+  }
+  // Hoja para elegir país (lista con buscador). alElegir(pais)
+  function elegirPais(actual, alElegir) {
+    let filtro = '';
+    const lista = h('div', { class: 'lista', estilo: { maxHeight: '50dvh', overflowY: 'auto', marginTop: '10px' } });
+    const inp = h('input', { class: 'entrada', type: 'search', placeholder: 'Buscar país', 'aria-label': 'Buscar país', oninput: (e) => { filtro = U.norm(e.target.value); pintar(); } });
+    let api;
+    const pintar = () => {
+      AF.ui.vaciar(lista);
+      PLAN.paises.filter((p) => !filtro || U.norm(p.nombre).includes(filtro)).forEach((p) => lista.appendChild(h('button', { class: 'fila fila-boton', type: 'button', onclick: () => { alElegir(p); api.cerrar(); } },
+        h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo', estilo: { fontWeight: p.codigo === actual ? '720' : '560', color: p.codigo === actual ? 'var(--acento)' : 'inherit' } }, p.nombre), h('div', { class: 'fila-sub' }, PLAN.monedas[p.moneda].nombre)),
+        p.codigo === actual ? ico('ok', 'chico') : null)));
+      if (!lista.children.length) lista.appendChild(h('p', { class: 'suave', estilo: { padding: '12px 0' } }, 'No lo encuentro. Prueba con «Otro país».'));
+    };
+    pintar();
+    api = hoja({ titulo: '¿En qué país vives?', cuerpo: h('div', null, h('p', { class: 'texto-sm suave', estilo: { marginTop: '2px' } }, 'Así uso tu moneda y las palabras de tu país.'), h('div', { estilo: { marginTop: '10px' } }, inp), lista) });
+    setTimeout(() => inp.focus(), 150);
+    return api;
+  }
+
+  /* ------------------------------------------------------------ campo de dinero con símbolo */
+  // Muestra el símbolo de la moneda y separa los miles mientras se escribe. alCambiar(numero|null)
+  function campoDinero(valor, moneda, alCambiar, etiqueta) {
+    const simbolo = (PLAN.monedas[moneda] || PLAN.monedas.USD).simbolo;
+    const sim = h('span', { class: 'simbolo', 'aria-hidden': 'true' }, simbolo);
+    const inp = h('input', { class: 'entrada grande', inputmode: 'decimal', placeholder: '0', 'aria-label': etiqueta || 'Monto', value: valor ? U.dinero(valor, { simbolo: '' }) : '' });
+    inp.addEventListener('input', () => {
+      const crudo = inp.value;
+      const n = U.parseNumero(crudo);
+      alCambiar(n && n > 0 ? n : null);
+    });
+    inp.addEventListener('blur', () => { const n = U.parseNumero(inp.value); inp.value = n && n > 0 ? U.dinero(n, { simbolo: '' }) : ''; });
+    return { el: h('div', { class: 'dinero-campo' }, sim, inp), input: inp, actualizarMoneda: (m) => { sim.textContent = (PLAN.monedas[m] || PLAN.monedas.USD).simbolo; } };
+  }
+
+  /* ------------------------------------------------------------ cómo y cuánto cobras */
+  // Componente compartido por la bienvenida y Ajustes. r = { cobro: {modo, dia, dia2, diaSemana}, sueldo, moneda }
+  function formCobro(r, alCambiar) {
+    const cont = h('div');
+    const modos = PLAN.bienvenida.modosCobro;
+    if (!r.cobro) r.cobro = { modo: 'mensual', dia: null, dia2: null, diaSemana: 5 };
+    const dias = () => {
+      const c = r.cobro;
+      const sel = (dd) => (c.modo === 'quincenal' ? [c.dia, c.dia2].includes(dd) : c.dia === dd);
+      return h('div', { class: 'calendario-dias', role: 'group', 'aria-label': 'Día del mes' },
+        Array.from({ length: 31 }, (_, i) => i + 1).map((dd) => h('button', { type: 'button', 'aria-pressed': sel(dd) ? 'true' : 'false', 'aria-label': 'Día ' + dd, onclick: () => {
+          if (c.modo === 'quincenal') {
+            if (c.dia === dd) { c.dia = c.dia2; c.dia2 = null; } else if (c.dia2 === dd) c.dia2 = null; else if (!c.dia) c.dia = dd; else if (!c.dia2) c.dia2 = dd; else { c.dia = c.dia2; c.dia2 = dd; }
+            if (c.dia && c.dia2 && c.dia > c.dia2) { const t = c.dia; c.dia = c.dia2; c.dia2 = t; }
+          } else c.dia = dd;
+          pintar(); alCambiar();
+        } }, String(dd))));
+    };
+    const pintar = () => {
+      AF.ui.vaciar(cont);
+      const c = r.cobro;
+      cont.appendChild(h('div', { class: 'opciones' }, modos.map((m) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': c.modo === m.id ? 'true' : 'false', onclick: () => { c.modo = m.id; if (m.id !== 'quincenal') c.dia2 = null; pintar(); alCambiar(); } }, m.nombre))));
+      if (c.modo === 'mensual') cont.appendChild(h('div', { class: 'campo' }, h('label', null, c.dia ? 'Cobras el día ' + c.dia + ' de cada mes' : '¿Qué día del mes te pagan? Tócalo'), dias()));
+      else if (c.modo === 'quincenal') cont.appendChild(h('div', { class: 'campo' }, h('label', null, c.dia && c.dia2 ? 'Cobras el ' + c.dia + ' y el ' + c.dia2 : 'Toca los dos días en que te pagan'), dias()));
+      else if (c.modo === 'semanal') cont.appendChild(h('div', { class: 'campo' }, h('label', null, '¿Qué día de la semana te pagan?'), h('div', { class: 'opciones' }, [1, 2, 3, 4, 5, 6, 0].map((n) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': c.diaSemana === n ? 'true' : 'false', onclick: () => { c.diaSemana = n; pintar(); alCambiar(); } }, U.cap(U.DIAS_BONITOS[n]))))));
+      else cont.appendChild(h('p', { class: 'texto-sm suave', estilo: { marginTop: '12px' } }, 'Perfecto. Te muestro cuánto te queda hasta fin de mes con los ingresos que vayas registrando. Cada vez que cobres, dímelo: «me pagaron 300».'));
+    };
+    pintar();
+    return cont;
+  }
+  const cobroListo = (c) => !c || c.modo === 'variable' || c.modo === 'semanal' || (c.modo === 'mensual' && c.dia) || (c.modo === 'quincenal' && c.dia && c.dia2);
+  const textoCobro = (c) => {
+    if (!c || c.modo === 'mensual') return 'El ' + ((c && c.dia) || '?') + ' de cada mes';
+    if (c.modo === 'quincenal') return 'El ' + c.dia + ' y el ' + c.dia2 + ' de cada mes';
+    if (c.modo === 'semanal') return 'Cada ' + U.DIAS_BONITOS[c.diaSemana];
+    return 'Sin día fijo';
+  };
+
   /* -------------------------------------------------------------------- bienvenida */
+  // UNA pantalla: cómo cobras y cuánto. El nombre viene de la cuenta; el país, del teléfono (se puede cambiar); sin PIN.
   function bienvenida(sesion) {
     const app = AF.app;
-    const p0 = PLAN.pais(PLAN.app.paisInicial);
-    const r = { nombre: (sesion && sesion.nombre) || '', pais: p0.codigo, moneda: p0.moneda, diaCobro: PLAN.bienvenida.diaCobroDefecto, sueldo: null, cargas: 0, tarjetas: [] };
-    const pasos = () => PLAN.bienvenida.preguntas.filter((k) => !(k === 'cargas' && PLAN.bienvenida.cargasSoloSiSRI && !PLAN.pais(r.pais).sri));
-    let k = 0;
+    const codigo = paisDelTelefono();
+    const p0 = PLAN.pais(codigo);
+    const r = { nombre: (sesion && sesion.nombre) || '', pais: p0.codigo, moneda: p0.moneda, cobro: { modo: 'mensual', dia: null, dia2: null, diaSemana: 5 }, sueldo: null, cargas: 0, tarjetas: [] };
+    const err = h('p', { class: 'ayuda', role: 'alert', estilo: { color: 'var(--gasto)', minHeight: '18px' } });
+    let dinero;
+    const paisLinea = h('button', { class: 'btn-texto', type: 'button', estilo: { padding: 0, minHeight: '32px' } });
+    const etiquetaSueldo = h('label', null);
+    const pintarPais = () => { AF.ui.vaciar(paisLinea); paisLinea.appendChild(h('span', { class: 'suave' }, 'País: ')); paisLinea.appendChild(h('strong', null, PLAN.pais(r.pais).nombre + ' · ' + PLAN.monedas[r.moneda].simbolo + ' ' + r.moneda)); paisLinea.appendChild(h('span', null, ' · Cambiar')); };
+    paisLinea.addEventListener('click', () => elegirPais(r.pais, (p) => { r.pais = p.codigo; r.moneda = p.moneda; pintarPais(); dinero.actualizarMoneda(r.moneda); }));
+    pintarPais();
+    const pintarEtiqueta = () => { etiquetaSueldo.textContent = r.cobro.modo === 'mensual' ? '¿Cuánto cobras al mes?' : r.cobro.modo === 'variable' ? '¿Cuánto cobras más o menos al mes?' : '¿Cuánto cobras cada vez?'; };
+    const form = formCobro(r, () => { pintarEtiqueta(); err.textContent = ''; });
+    pintarEtiqueta();
+    dinero = campoDinero(null, r.moneda, (v) => { r.sueldo = v; }, 'Cuánto cobras');
 
-    function mostrar() {
-      const lista = pasos(), clave = lista[k];
-      const total = lista.length + 1;                    // +1: crear PIN
-      const cabeza = h('div', { class: 'paso-cabeza' }, h('div', { class: 'pasos', 'aria-label': 'Paso ' + (k + 1) + ' de ' + total }, Array.from({ length: total }, (_, i) => h('i', { class: i <= k ? 'hecho' : '' }))));
-      let cuerpo, validar = () => true, opcional = false, titulo, sub, textoSiguiente = 'Siguiente', alSaltar = () => { r.sueldo = null; };
-      const siguiente = () => { if (!validar()) return; if (k + 1 >= lista.length) pasoPin(); else { k++; mostrar(); } };
-
-      if (clave === 'nombre') {
-        titulo = '¿Cómo te llamo?'; sub = 'Para saludarte. Solo se queda en tu teléfono.';
-        const inp = h('input', { class: 'entrada grande', value: r.nombre, placeholder: 'Tu nombre', autocomplete: 'given-name', maxlength: 30, oninput: (e) => { r.nombre = e.target.value; }, onkeydown: (e) => { if (e.key === 'Enter') siguiente(); } });
-        cuerpo = campo('Nombre', inp); setTimeout(() => inp.focus(), 80);
-        validar = () => { r.nombre = r.nombre.trim(); if (!r.nombre) { inp.focus(); return false; } return true; };
-      } else if (clave === 'pais') {
-        titulo = '¿Dónde vives?'; sub = 'Así uso las palabras de tu país (diferido, cuotas…) y tu moneda.';
-        const zona = h('div');
-        let filtroPais = '';
-        const inpBusca = h('input', { class: 'entrada', type: 'search', placeholder: '🔍 Buscar país…', 'aria-label': 'Buscar país', style: 'margin-top:8px', oninput: (e) => { filtroPais = U.norm(e.target.value); pint(); } });
-        const pint = () => {
-          AF.ui.vaciar(zona);
-          zona.appendChild(inpBusca);
-          const filtrados = PLAN.paises.filter((p) => !filtroPais || U.norm(p.nombre).includes(filtroPais));
-          const lista = h('div', { style: 'max-height:220px;overflow-y:auto;border:2px solid var(--linea);border-radius:12px;margin-top:8px' },
-            filtrados.map((p) => h('button', {
-              type: 'button',
-              style: 'display:flex;align-items:center;width:100%;padding:12px 16px;border:0;border-bottom:1px solid var(--linea);background:' + (r.pais === p.codigo ? 'var(--panel-suave)' : 'var(--hoja)') + ';color:' + (r.pais === p.codigo ? 'var(--acento)' : 'var(--texto)') + ';font-weight:' + (r.pais === p.codigo ? '700' : '400') + ';font-size:var(--t-md);text-align:left;cursor:pointer',
-              onclick: () => { r.pais = p.codigo; r.moneda = p.moneda; filtroPais = ''; inpBusca.value = ''; pint(); },
-            }, (r.pais === p.codigo ? '✓ ' : '') + p.nombre)));
-          zona.appendChild(lista);
-          zona.appendChild(campo('Moneda', h('div', { class: 'opciones', style: 'margin-top:4px' }, Object.keys(PLAN.monedas).map((m) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': r.moneda === m ? 'true' : 'false', onclick: () => { r.moneda = m; pint(); } }, PLAN.monedas[m].simbolo + ' ' + m)))));
-        };
-        pint(); cuerpo = zona;
-      } else if (clave === 'moneda') {
-        return (k++, mostrar());                          // ya se eligió junto con el país
-      } else if (clave === 'diaCobro') {
-        titulo = '¿Qué día te pagan?'; sub = 'Con esto calculo cuánto puedes gastar por día hasta tu próximo cobro.';
-        const inp = h('input', { class: 'entrada grande', inputmode: 'numeric', value: r.diaCobro, maxlength: 2, 'aria-label': 'Día del mes', oninput: (e) => { r.diaCobro = Number(e.target.value.replace(/\D/g, '')) || 0; } });
-        cuerpo = h('div', null, campo('Día del mes (1 a 31)', inp), h('div', { class: 'opciones', estilo: { marginTop: '12px' } }, [1, 5, 10, 15, 20, 25, 30].map((n) => h('button', { type: 'button', class: 'opcion', onclick: () => { r.diaCobro = n; inp.value = n; } }, 'Día ' + n))));
-        validar = () => { if (!(r.diaCobro >= 1 && r.diaCobro <= 31)) { inp.focus(); return false; } return true; };
-      } else if (clave === 'sueldo') {
-        titulo = '¿Cuánto cobras al mes?'; sub = 'Es opcional. Sirve para la primera cuenta de «cuánto puedes gastar hoy». Luego tus ingresos reales mandan.';
-        opcional = true;
-        const inp = h('input', { class: 'entrada grande', inputmode: 'decimal', placeholder: PLAN.monedas[r.moneda].simbolo + ' 0', value: r.sueldo || '', 'aria-label': 'Ingreso mensual', oninput: (e) => { r.sueldo = U.parseNumero(e.target.value); } });
-        cuerpo = campo('Ingreso mensual', inp);
-      } else if (clave === 'cargas') {
-        titulo = '¿Cuántas cargas familiares tienes?'; sub = 'Hijos u otras personas que dependen de ti. Con esto calculo la rebaja de impuestos (SRI) por gastos personales.';
-        cuerpo = h('div', { class: 'opciones', estilo: { marginTop: '12px' } }, [0, 1, 2, 3, 4, 5].map((n) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': r.cargas === n ? 'true' : 'false', onclick: (e) => { r.cargas = n; e.currentTarget.parentNode.querySelectorAll('.opcion').forEach((b, i) => b.setAttribute('aria-pressed', i === n ? 'true' : 'false')); } }, n === 5 ? '5 o más' : String(n))));
-      } else if (clave === 'tarjetas') {
-        titulo = '¿Tienes tarjeta de crédito?'; sub = 'Dime cuál es y te muestro lo que cobra el banco: avances, diferidos, renovación. Si no tienes, sigue.';
-        const zona = h('div', { estilo: { marginTop: '16px' } });
-        const pint = () => {
-          AF.ui.vaciar(zona);
-          const t = r.tarjetas[0];
-          if (t) {
-            const b = AF.bancos.buscar(t.bancoId);
-            zona.appendChild(h('div', { class: 'tarjeta-previa grande' }, AF.ui.insigniaBanco(b || { id: '', nombre: t.banco || t.nombre, corto: t.banco || '+' }, 52),
-              h('div', { class: 'tarjeta-previa-texto' }, h('strong', null, t.nombre), h('span', null, [t.banco, t.red, t.nivel].filter(Boolean).join(' · ')))));
-            zona.appendChild(h('div', { estilo: { display: 'flex', gap: '10px', marginTop: '12px' } },
-              h('button', { class: 'btn btn-borde', type: 'button', estilo: { flex: 1 }, onclick: () => abrir(t) }, 'Cambiar'),
-              h('button', { class: 'btn btn-borde', type: 'button', estilo: { flex: 1 }, onclick: () => { r.tarjetas = []; pint(); mostrarBoton(); } }, 'Quitar')));
-            zona.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '14px' } }, 'Las demás tarjetas las agregas desde la pestaña Tarjetas.'));
-          } else {
-            zona.appendChild(h('button', { class: 'btn btn-voz btn-bloque', type: 'button', onclick: () => abrir(null) }, 'Sí, agregar mi tarjeta'));
-            zona.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '14px' } }, 'Eliges el banco, la red (Visa, Mastercard…) y el nivel. Los datos del estado de cuenta los puedes poner ahora o después.'));
-          }
-        };
-        const abrir = (t) => AF.vistas.tarjetas.asistente({ pais: r.pais, tarjeta: t, textoGuardar: 'Listo', alGuardar: (o) => { r.tarjetas = [o]; pint(); mostrarBoton(); } });
-        const mostrarBoton = () => { const bt = document.querySelector('[data-siguiente]'); if (bt) bt.textContent = r.tarjetas.length ? 'Siguiente' : 'No tengo tarjeta'; };
-        pint(); cuerpo = zona; textoSiguiente = r.tarjetas.length ? 'Siguiente' : 'No tengo tarjeta'; alSaltar = () => { r.tarjetas = []; };
-      }
-      const pie = h('div', { estilo: { display: 'flex', flexDirection: 'column', gap: '8px', padding: '0 var(--margen) calc(20px + env(safe-area-inset-bottom))', marginTop: 'auto' } },
-        h('button', { class: 'btn btn-primario btn-bloque', type: 'button', 'data-siguiente': '', onclick: siguiente }, textoSiguiente),
-        opcional ? h('button', { class: 'btn-texto', type: 'button', onclick: () => { alSaltar(); k + 1 >= lista.length ? pasoPin() : (k++, mostrar()); } }, 'Saltar') : null);
-      const atras = k > 0 ? h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Atrás', onclick: () => { k = Math.max(0, k - 1); mostrar(); } }, ico('atras')) : null;
-      app.pantalla(h('main', { class: 'pantalla' }, cabeza,
-        h('div', { class: 'contenido-solo', estilo: { flex: 1 } }, atras, h('h1', { class: 'h1', estilo: { marginTop: '8px' } }, titulo), h('p', { class: 'suave', estilo: { marginTop: '8px' } }, sub), cuerpo), pie));
-    }
-
-    /* ---- crear PIN (último paso) */
-    function pasoPin() {
-      let len = PLAN.sesion.pinMin, primero = null;
-      const segm = h('div', { class: 'segmentos', estilo: { marginTop: '18px', width: '220px' } },
-        [PLAN.sesion.pinMin, PLAN.sesion.pinMax].map((n) => h('button', { type: 'button', 'aria-pressed': n === len ? 'true' : 'false', onclick: (e) => { len = n; vista.cambiarLargo(n); segm.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', b === e.currentTarget ? 'true' : 'false')); } }, n + ' dígitos')));
-      const vista = pantallaPin({
-        titulo: 'Crea tu PIN', sub: 'Opcional. Si no quieres PIN, entra sin él (tus datos siguen cifrados).', len, arriba: segm,
-        pie: [
-          h('button', { class: 'btn-texto', type: 'button', onclick: () => { k = pasos().length - 1; mostrar(); } }, 'Volver'),
-          h('button', { class: 'btn-texto', type: 'button', style: 'margin-top:4px;opacity:0.7', onclick: async () => {
-            try { await app.crearCuenta({ ajustes: r, pin: null }); }
-            catch (e) { /* ya se manejó */ }
-          } }, 'Continuar sin PIN'),
-        ],
-        alCompletar: async (pin) => {
-          if (primero === null) {
-            if (Sg().pinDebil(pin)) return { ok: false, mensaje: 'Ese PIN es muy fácil de adivinar. Prueba otro.' };
-            primero = pin; segm.classList.add('oculto');
-            vista.el.querySelector('h1').textContent = 'Repite tu PIN'; vista.limpiar(); return { ok: true };
-          }
-          if (pin !== primero) { primero = null; segm.classList.remove('oculto'); vista.el.querySelector('h1').textContent = 'Crea tu PIN'; return { ok: false, mensaje: 'No coinciden. Empieza de nuevo.' }; }
-          try { await app.crearCuenta({ ajustes: r, pin }); }
-          catch (e) { primero = null; return { ok: false, mensaje: 'No pude guardar tu PIN. Intenta otra vez.' }; }
-          return { ok: true };
-        },
-      });
-      app.pantalla(vista.el);
-    }
-    mostrar();
+    const saludo = r.nombre ? 'Hola, ' + r.nombre : 'Hola';
+    const siguiente = async (e) => {
+      if (!cobroListo(r.cobro)) { err.textContent = r.cobro.modo === 'quincenal' ? 'Toca los dos días en que te pagan.' : 'Toca el día en que te pagan.'; return; }
+      e.currentTarget.disabled = true;
+      try { await app.crearCuenta({ ajustes: r, pin: null }); }
+      catch (er) { err.textContent = 'No pude guardar. Inténtalo otra vez.'; e.currentTarget.disabled = false; }
+    };
+    const el = h('main', { class: 'pantalla' },
+      h('div', { class: 'paso-cabeza' }, h('div', { class: 'saludo' }, AF.ui.logoApp(36), h('div', { class: 'saludo-texto' }, saludo)),
+        h('h1', { class: 'h1', estilo: { marginTop: '14px' } }, 'Cuéntame cómo cobras'),
+        h('p', { class: 'suave', estilo: { marginTop: '6px' } }, 'Con esto te digo cuánto te queda hasta tu próximo cobro. Todo se puede cambiar después en Ajustes.')),
+      h('div', { class: 'bienvenida-cuerpo', estilo: { marginTop: '16px' } },
+        h('div', { class: 'tarjeta' }, h('div', { class: 'h3' }, '¿Cada cuánto te pagan?'), h('div', { estilo: { marginTop: '10px' } }, form)),
+        h('div', { class: 'tarjeta' }, h('div', { class: 'campo', estilo: { marginTop: 0 } }, etiquetaSueldo, dinero.el, h('div', { class: 'ayuda' }, 'Es opcional. Lo uso hasta que registres tu primer cobro; después mandan tus ingresos reales.'))),
+        h('div', { estilo: { textAlign: 'center' } }, paisLinea), err),
+      h('div', { class: 'bienvenida-pie' }, h('button', { class: 'btn btn-primario btn-bloque', type: 'button', onclick: siguiente }, 'Empezar')));
+    app.pantalla(el);
   }
 
   /* ------------------------------------------------------------- oferta de huella */
@@ -4456,7 +4824,7 @@
       const el = h('main', { class: 'pantalla-pin' }, AF.ui.logoApp(64),
         h('h1', { class: 'h1' }, '¿Entrar con tu huella?'),
         h('p', { class: 'suave' }, 'Abres la app con un toque. El PIN sigue sirviendo siempre.'),
-        h('div', { estilo: { margin: '36px 0 12px', color: 'var(--voz)' } }, ico('huella', 'grande')), msg,
+        h('div', { estilo: { margin: '30px 0 12px', color: 'var(--voz)' } }, ico('huella', 'grande')), msg,
         h('div', { estilo: { marginTop: 'auto', width: '100%', display: 'flex', flexDirection: 'column', gap: '8px' } },
           h('button', { class: 'btn btn-voz btn-bloque', type: 'button', onclick: async (e) => {
             e.currentTarget.disabled = true;
@@ -4464,7 +4832,7 @@
             catch (er) { msg.textContent = 'No pude activarla. Puedes hacerlo luego en Más → Ajustes.'; setTimeout(() => res(false), 1600); }
           } }, 'Activar huella'),
           h('button', { class: 'btn-texto', type: 'button', onclick: () => res(false) }, 'Ahora no')));
-      el.querySelector('.ico-svg').style.cssText = 'width:96px;height:96px;stroke-width:1.3';
+      el.querySelector('.ico-svg').style.cssText = 'width:84px;height:84px;stroke-width:1.3';
       app.pantalla(el);
     });
   }
@@ -4473,15 +4841,26 @@
   async function bloqueo() {
     const app = AF.app;
     const ns = app.ns;
-
-    // Cuenta creada sin PIN: entrar automáticamente con el auto-PIN guardado.
-    const autoPin = Sg().obtenerAutoPin(ns);
-    if (autoPin) {
-      const r = await Sg().abrirConPin(ns, autoPin);
+    // Cuenta sin PIN: entra directo con la llave interna.
+    const llave = Sg().obtenerAutoPin(ns);
+    if (llave) {
+      const r = await Sg().abrirConPin(ns, llave);
       if (r.ok) { await app.entrar(); return; }
-      // Si falló (localStorage borrado), mostrar pantalla de error limpia
     }
-
+    const tienePin = await Sg().tienePin(ns);
+    if (!tienePin && !llave) {
+      // La llave interna no está en este teléfono (datos borrados o teléfono nuevo sin copia): no hay cómo abrir.
+      app.pantalla(h('main', { class: 'pantalla-pin' }, AF.ui.logoApp(64), h('h1', { class: 'h1' }, 'No encuentro la llave de tus datos'),
+        h('p', { class: 'suave' }, 'Si entraste con Google, puedo recuperarlos de tu copia en Drive. Si no, puedes empezar de cero.'),
+        h('div', { estilo: { marginTop: 'auto', width: '100%', display: 'flex', flexDirection: 'column', gap: '8px' } },
+          app.sesion && app.sesion.proveedor === 'google' ? h('button', { class: 'btn btn-voz btn-bloque', type: 'button', onclick: async (e) => {
+            e.currentTarget.disabled = true;
+            try { const p = await N().respaldoBajar(); if (!p) throw new Error('sin copia'); await Sg().restaurarPaquete(ns, p); return bloqueo(); }
+            catch (er) { aviso('No encontré una copia en tu Drive.'); e.currentTarget.disabled = false; }
+          } }, 'Recuperar de Drive') : null,
+          h('button', { class: 'btn-texto', type: 'button', onclick: async () => { if (await V.comun.confirmar({ titulo: '¿Empezar de cero?', texto: 'Se borran los datos de esta cuenta en este teléfono.', si: 'Sí, empezar de cero', peligro: true })) await app.reiniciarCuenta(); } }, 'Empezar de cero'))));
+      return;
+    }
     const len = await Sg().longitudPin(ns);
     const nombre = (app.sesion && app.sesion.nombre) || '';
     const conHuella = (await Sg().huellaActiva(ns)) && (await N().huellaDisponible());
@@ -4495,7 +4874,7 @@
       if (e.espera > 0) vista.error('Demasiados intentos. Espera ' + e.espera + ' s.');
     }
     vista = pantallaPin({
-      titulo: nombre ? 'Hola, ' + nombre : 'Bienvenido de nuevo', sub: 'Escribe tu PIN para entrar.', len,
+      titulo: nombre ? 'Hola, ' + nombre : 'Hola de nuevo', sub: 'Escribe tu PIN para entrar.', len,
       huella: conHuella ? intentarHuella : null,
       pie: [h('button', { class: 'btn-texto', type: 'button', onclick: () => olvidePin() }, '¿Olvidaste tu PIN?')],
       alCompletar: async (pin) => {
@@ -4514,7 +4893,7 @@
     hoja({
       titulo: '¿Olvidaste tu PIN?',
       cuerpo: h('div', null,
-        h('p', { class: 'suave', estilo: { marginTop: '6px' } }, 'Tus datos están cifrados con tu PIN: nadie puede recuperarlos sin él, ni siquiera nosotros.'),
+        h('p', { class: 'suave', estilo: { marginTop: '6px' } }, 'Tus datos están protegidos con tu PIN: nadie puede abrirlos sin él, ni siquiera nosotros.'),
         h('p', { class: 'suave', estilo: { marginTop: '10px' } }, 'Si tenías copia en Google Drive, puedes empezar de nuevo y restaurarla (te pedirá el PIN que usabas cuando la hiciste).')),
       acciones: [
         { texto: 'Volver', clase: 'btn-borde' },
@@ -4525,12 +4904,13 @@
     });
   }
 
-  V.acceso = { portada, bienvenida, ofrecerHuella, bloqueo, pantallaPin };
+  V.acceso = { portada, bienvenida, ofrecerHuella, bloqueo, pantallaPin, formCobro, cobroListo, textoCobro, elegirPais, paisDelTelefono, campoDinero };
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
 
 /* ===== js/vistas/inicio.js ===== */
-/* Inicio: «cuánto puedes gastar hoy», alertas, necesario vs gusto, hormiga y últimos movimientos. */
+/* Inicio: cuánto te queda hasta tu cobro, avisos, gastos innecesarios, tarjetas por pagar y últimos movimientos.
+   Una sola cifra manda: lo que te queda. Nada de «gasto diario» ni «te pasaste». */
 (function (g) {
   'use strict';
   const AF = (g.AF = g.AF || {});
@@ -4540,100 +4920,88 @@
   const $ = (n) => U.dinero(n);
   const C = () => V.comun;
 
-  const SUGERENCIAS = ['Pagué 30 dólares de luz', 'Me pagaron el sueldo, 1.200', 'Cuánto gasté este mes'];
+  const SUGERENCIAS = ['Pagué 30 de luz', 'Me pagaron 500', 'Gasté 4 en un almuerzo'];
+  const fechaBonita = (iso) => U.deISO(iso).getDate() + ' de ' + U.nombreMes(iso);
 
-  function horizonte(D, hoy) {
-    const modo = AF.acceso.tiene('puedesGastarHoyCompleto') ? 'completo' : 'simple';
-    const p = AF.informes.puedesGastarHoy(D, hoy, modo);
+  /* ------------------------------------------------------------------ cabecera */
+  function cabecera(D) {
     const nombre = D.ajustes.nombre || '';
     const hora = new Date().getHours();
-    const saludo = (hora < 12 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches') + (nombre ? ', ' + nombre : '') + (hora < 6 ? ' 🌙' : hora < 12 ? ' ☀️' : hora < 19 ? ' 🌤️' : ' 🌙');
-    const cab = h('div', { class: 'saludo' },
-      h('div', { class: 'avatar', 'aria-hidden': 'true' }, (nombre || '·').charAt(0).toUpperCase()),
+    const saludo = (hora < 12 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches') + (nombre ? ', ' + nombre : '');
+    return h('header', { class: 'barra-superior' },
+      h('div', { class: 'avatar', 'aria-hidden': 'true' }, (nombre || PLAN.app.nombreCorto).charAt(0).toUpperCase()),
       h('div', { class: 'saludo-texto' }, saludo),
       h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Ajustes', onclick: () => AF.app.abrir('Ajustes', (c) => V.mas.ajustes(c)) }, ico('ajustes')));
-    const el = h('section', { class: 'horizonte', 'aria-label': 'Resumen financiero' }, cab);
+  }
 
+  /* ------------------------------------------------------------------ lo que te queda */
+  function saldo(D, hoy) {
+    const p = AF.informes.puedesGastarHoy(D, hoy);
+    const cont = h('section', { class: 'hero', 'aria-label': 'Cuánto te queda' });
     if (!p.ingresos) {
-      el.appendChild(h('div', { class: 'cifra-bloque' },
-        h('div', { class: 'cifra-etiqueta' }, 'Sin ingreso registrado'),
-        h('div', { class: 'cifra' }, '—'),
-        h('p', { class: 'cifra-pie suave' }, 'Registra tu sueldo y te digo cuánto te queda hasta tu cobro.'),
-        h('button', { class: 'btn btn-voz', type: 'button', estilo: { marginTop: '18px' }, onclick: () => C().formMovimiento({ inicial: { tipo: 'ingreso', cat: 'sueldo', monto: D.ajustes.sueldo || '' }, alGuardar: (m) => C().guardarMov(m) }) }, 'Registrar mi sueldo')));
-      return el;
+      cont.appendChild(h('div', { class: 'tarjeta' },
+        h('div', { class: 'hero-etiqueta' }, p.modo === 'variable' ? 'Este mes aún no registras ingresos' : 'Aún no registras tu cobro'),
+        h('div', { class: 'cifra hero-cifra suave' }, '—'),
+        h('p', { class: 'hero-meta' }, 'Dime cuánto cobraste («me pagaron 800») y te digo cuánto te queda' + (p.modo === 'variable' ? ' hasta fin de mes.' : ' hasta tu cobro.')),
+        h('div', { estilo: { marginTop: '12px' } }, h('button', { class: 'btn btn-suave btn-chico', type: 'button', onclick: () => C().formMovimiento({ inicial: { tipo: 'ingreso', cat: 'sueldo', monto: D.ajustes.sueldo || '' }, alGuardar: (m) => C().guardarMov(m) }) }, 'Registrar mi cobro'))));
+      return cont;
     }
-
-    // Número principal: lo que queda hasta el cobro (siempre positivo o cero)
-    const cobro = U.deISO(p.proximo).getDate() + ' de ' + U.nombreMes(p.proximo);
-    const restoPositivo = Math.max(0, p.resto);
+    const resto = Math.max(0, p.resto);
     const sinDinero = p.resto <= 0;
-    const usado = p.ingresos > 0 ? Math.min(1, Math.max(0, (p.gastadoAntes + p.gastadoHoy + p.fijos + p.cuotas + p.metas) / p.ingresos)) : 0;
-    const diasTexto = p.dias === 1 ? '1 día' : p.dias + ' días';
-
-    el.appendChild(h('div', { class: 'cifra-bloque' },
-      h('div', { class: 'cifra-etiqueta' }, sinDinero ? 'Sin saldo hasta el cobro' : 'Disponible hasta el ' + cobro),
-      h('div', { class: 'cifra' + (sinDinero ? ' pasado' : ''), 'aria-live': 'polite' }, h('span', { class: 'cambio-cifra' }, $(restoPositivo))),
-      h('p', { class: 'cifra-pie suave' }, sinDinero
-        ? 'Tu cobro es el ' + cobro + '.'
-        : diasTexto + (p.dias > 0 ? ' · ' + $(Math.round(restoPositivo / p.dias)) + ' por día' : ''))));
-
-    // Barra de progreso
-    el.appendChild(h('div', { class: 'avance' + (usado > 0.85 ? ' alerta' : ''), role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(usado * 100), 'aria-label': 'Del ingreso usado' }, h('i', { estilo: { width: Math.round(usado * 100) + '%' } })));
-
-    // Fila ingresos / gastos
-    el.appendChild(h('div', { class: 'dos-datos' },
-      h('div', null, h('div', { class: 'dato-etiqueta suave' }, 'Ingresos'), h('div', { class: 'dato-valor' }, $(p.ingresos))),
-      h('div', null, h('div', { class: 'dato-etiqueta suave' }, 'Gastos'), h('div', { class: 'dato-valor' }, $(p.gastadoAntes + p.gastadoHoy)))));
-
-    // Notas pequeñas (pagos fijos, cuotas, metas)
-    if (p.fijos || p.cuotas || p.metas) {
-      const notas = [];
-      if (p.fijos) notas.push($(p.fijos) + ' en pagos fijos');
-      if (p.cuotas) notas.push($(p.cuotas) + ' en cuotas');
-      if (p.metas) notas.push($(p.metas) + ' para metas');
-      el.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '10px' } }, 'Ya aparté: ' + notas.join(' · ') + '.'));
-    }
-    return el;
+    const usado = p.ingresos > 0 ? Math.min(1, Math.max(0, (p.gastado + p.apartado) / p.ingresos)) : 0;
+    const hasta = p.modo === 'variable' ? 'hasta fin de mes' : 'hasta ' + p.etiqueta;
+    const dias = p.dias === 1 ? 'mañana es tu cobro' : 'faltan ' + p.dias + ' días';
+    const datos = [['Ingresos', $(p.ingresos), p.estimado ? 'según tu sueldo' : null], ['Gastado', $(p.gastado), null]];
+    if (p.apartado > 0) datos.push(['Apartado', $(p.apartado), 'cuotas y fijos']);
+    cont.appendChild(h('div', { class: 'tarjeta' },
+      h('div', { class: 'hero-etiqueta' }, sinDinero ? 'Ya no te queda dinero ' + hasta : 'Te queda ' + hasta),
+      h('div', { class: 'cifra hero-cifra' + (sinDinero ? ' pasado' : ''), 'aria-live': 'polite' }, h('span', { class: 'cambio-cifra' }, sinDinero ? '−' + $(-p.resto) : $(resto))),
+      h('p', { class: 'hero-meta' }, sinDinero ? 'Gastaste ' + $(p.gastado + p.apartado) + ' de ' + $(p.ingresos) + '. Tu cobro: ' + p.etiqueta.replace(/^el /, '') + '.' : U.cap(dias) + (p.modo === 'variable' ? '' : ' · cobras ' + p.etiqueta)),
+      h('div', { class: 'avance' + (usado > 0.85 ? ' alerta' : ''), role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(usado * 100), 'aria-label': 'Parte del ingreso ya usada' }, h('i', { estilo: { width: Math.round(usado * 100) + '%' } })),
+      h('div', { class: datos.length === 3 ? 'tres-datos' : 'dos-datos' }, datos.map(([t, v, nota]) => h('div', null, h('div', { class: 'dato-etiqueta' }, t + (nota ? ' · ' + nota : '')), h('div', { class: 'dato-valor' }, v))))));
+    return cont;
   }
 
-  function seccionResumenMes(D, hoy) {
-    // Resumen compacto del mes: necesario vs gusto, solo si hay datos
+  /* --------------------------------------------------------------- avisos */
+  function avisos(D, hoy) {
+    const lista = AF.informes.alertas(D, hoy, AF.acceso.tiene('alertasPredictivas')).slice(0, 2);
+    if (!lista.length) return null;
+    return h('div', { estilo: { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '14px' } }, lista.map((a) => h('button', { class: 'nota', type: 'button', estilo: { width: '100%', textAlign: 'left' }, role: 'status', onclick: () => AF.app.ir(a.accion || 'inicio') }, ico('alerta'), h('span', null, a.texto))));
+  }
+
+  /* --------------------------------------------------------------- gastos innecesarios del mes */
+  function innecesarios(D, hoy) {
+    const inn = AF.informes.innecesarios(D, U.inicioMes(hoy), U.finMes(hoy));
+    if (!inn.veces) return null;
     const t = AF.informes.totales(D, U.inicioMes(hoy), U.finMes(hoy));
-    const tot = t.nec.N + t.nec.G + t.nec.sin;
-    if (!tot) return null;
-    const pc = (v) => tot > 0 ? Math.round((v / tot) * 100) : 0;
+    const pct = t.gastos ? Math.round((inn.total / t.gastos) * 100) : 0;
+    const chips = inn.lista.slice(0, 4).map((m) => h('span', { class: 'chip gusto' }, (m.desc || AF.informes.catDe(D, m.cat).nombre) + ' ' + $(m.monto)));
     return h('section', { class: 'seccion' },
-      h('div', { class: 'seccion-cabeza' },
-        h('h2', { class: 'h2' }, 'Este mes'),
-        h('button', { class: 'enlace', type: 'button', onclick: () => AF.app.ir('movimientos') }, 'Ver detalle')),
-      h('div', { class: 'barra-dividida', role: 'img', 'aria-label': 'Necesario ' + pc(t.nec.N) + '%, gusto ' + pc(t.nec.G) + '%' },
-        t.nec.N ? h('i', { class: 'seg-nec', estilo: { flex: t.nec.N } }) : null,
-        t.nec.G ? h('i', { class: 'seg-gus', estilo: { flex: t.nec.G } }) : null,
-        t.nec.sin ? h('i', { class: 'seg-sin', estilo: { flex: t.nec.sin } }) : null),
-      h('div', { class: 'dos-datos', estilo: { marginTop: '10px' } },
-        h('div', null,
-          h('div', { class: 'dato-etiqueta suave' }, '🔵 Necesario'),
-          h('div', { class: 'dato-valor' }, $(t.nec.N) + ' · ' + pc(t.nec.N) + '%')),
-        h('div', null,
-          h('div', { class: 'dato-etiqueta suave' }, '🟠 Gusto'),
-          h('div', { class: 'dato-valor' }, $(t.nec.G) + ' · ' + pc(t.nec.G) + '%'))));
+      h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Gastos innecesarios este mes'), h('button', { class: 'enlace', type: 'button', onclick: () => AF.app.ir('movimientos', { tipo: 'innecesarios' }) }, 'Ver todos')),
+      h('button', { class: 'tarjeta', type: 'button', estilo: { width: '100%', textAlign: 'left' }, onclick: () => AF.app.ir('movimientos', { tipo: 'innecesarios' }) },
+        h('div', { estilo: { display: 'flex', alignItems: 'baseline', gap: '10px' } }, h('div', { class: 'cifra-peq', estilo: { color: 'var(--gasto)' } }, $(inn.total)), h('div', { class: 'texto-sm suave' }, inn.veces + (inn.veces === 1 ? ' compra' : ' compras') + (pct ? ' · ' + pct + ' % de lo que compraste' : ''))),
+        h('div', { class: 'innecesarios-chips' }, chips, inn.veces > 4 ? h('span', { class: 'chip' }, '+' + (inn.veces - 4)) : null)));
   }
 
-  function seccionHormiga(D, hoy) {
-    const hm = AF.informes.hormiga(D, U.inicioMes(hoy), U.finMes(hoy));
-    if (!hm.veces) return null;
-    const pro = AF.acceso.tiene('hormigaDetalle');
+  /* --------------------------------------------------------------- tarjetas por pagar */
+  function tarjetas(D, hoy) {
+    if (!D.tarjetas.length) return null;
+    const pagos = D.tarjetas.map((t) => ({ t, e: V.tarjetas.visto(t, hoy) })).filter((x) => x.e.proximoVence && x.e.aPagarProximo).sort((a, b) => (a.e.proximoVence < b.e.proximoVence ? -1 : 1));
+    if (!pagos.length) return null;
     return h('section', { class: 'seccion' },
-      h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Gastos hormiga')),
-      fila({ icono: '🐜', titulo: $(hm.total) + ' este mes', sub: hm.veces + (hm.veces === 1 ? ' compra pequeña' : ' compras pequeñas') + ' · al año serían ' + $(hm.alAnio), derecha: pro ? ico('derecha') : AF.ui.chipPro(),
-        onclick: () => (pro ? AF.app.abrir('Gastos hormiga', (c) => V.informesUI.hormiga(c)) : C().pedirPro('hormigaDetalle')) }));
+      h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Tarjetas'), h('button', { class: 'enlace', type: 'button', onclick: () => AF.app.ir('tarjetas') }, 'Ver')),
+      h('div', { class: 'lista' }, pagos.slice(0, 2).map(({ t, e }) => fila({ icono: '💳', titulo: t.nombre, sub: 'Pagar el ' + fechaBonita(e.proximoVence) + (e.diasParaVencer <= 3 ? (e.diasParaVencer <= 0 ? ' · hoy' : e.diasParaVencer === 1 ? ' · mañana' : ' · en ' + e.diasParaVencer + ' días') : '') + (e.deudaTotal > e.aPagarProximo ? ' · debes ' + $(e.deudaTotal) : ''), derecha: h('span', { class: 'monto' }, $(e.aPagarProximo)), onclick: () => AF.app.ir('tarjetas') }))));
   }
 
-  function seccionUltimos(D, hoy) {
+  /* --------------------------------------------------------------- últimos movimientos / primera vez */
+  function ultimos(D, hoy) {
     const movs = D.movs.slice().sort((a, b) => (b.fecha === a.fecha ? b.creado - a.creado : b.fecha < a.fecha ? -1 : 1)).slice(0, 5);
     if (!movs.length) {
-      return h('section', { class: 'seccion' }, h('div', { class: 'vacio' }, h('strong', null, 'Aquí aparecerán tus movimientos'), 'Toca el micrófono y dilo como lo dirías:',
-        h('div', { class: 'opciones', estilo: { marginTop: '14px' } }, SUGERENCIAS.map((s) => h('button', { class: 'opcion', type: 'button', onclick: () => V.voz.abrir({ modo: 'texto', texto: s }) }, '«' + s + '»')))));
+      return h('section', { class: 'seccion' },
+        h('div', { class: 'tarjeta primeros-pasos' },
+          h('div', { class: 'h2' }, 'Empieza con tu primer gasto'),
+          h('p', { class: 'texto-sm suave', estilo: { marginTop: '6px' } }, 'Toca el micrófono o escribe abajo, como se lo dirías a alguien. Yo lo anoto en su categoría y te digo cuánto te queda.'),
+          h('div', { class: 'opciones' }, SUGERENCIAS.map((s) => h('button', { class: 'opcion', type: 'button', onclick: () => V.voz.abrir({ texto: s }) }, '«' + s + '»')))));
     }
     return h('section', { class: 'seccion' },
       h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Últimos movimientos'), h('button', { class: 'enlace', type: 'button', onclick: () => AF.app.ir('movimientos') }, 'Ver todo')),
@@ -4642,16 +5010,14 @@
 
   function render(cont) {
     const D = AF.store.d, hoy = AF.app.hoy();
-    cont.appendChild(horizonte(D, hoy));
+    cont.appendChild(cabecera(D));
+    cont.appendChild(saldo(D, hoy));
     const cuerpo = h('div', { class: 'contenido' });
+    [avisos(D, hoy), innecesarios(D, hoy), tarjetas(D, hoy), ultimos(D, hoy)].forEach((s) => s && cuerpo.appendChild(s));
     const st = AF.acceso.estado(hoy);
-    if (st.tipo === 'prueba') cuerpo.appendChild(h('button', { class: 'nota pro', type: 'button', estilo: { width: '100%', textAlign: 'left', marginTop: '20px' }, onclick: () => AF.app.abrir('Pro', (c) => V.pro.render(c)) },
-      ico('estrella', 'relleno'), h('span', null, h('strong', null, 'Pro gratis: ' + (st.diasPrueba === 1 ? 'te queda 1 día' : 'te quedan ' + st.diasPrueba + ' días') + '. '), 'Mira qué conservas después.')));
-    AF.informes.alertas(D, hoy, AF.acceso.tiene('alertasPredictivas')).slice(0, 2).forEach((a) => {
-      cuerpo.appendChild(h('div', { class: 'nota', estilo: { marginTop: '16px' }, role: 'status' }, ico('alerta'), h('span', null, a.texto)));
-    });
-    [seccionResumenMes(D, hoy), seccionHormiga(D, hoy), seccionUltimos(D, hoy)].forEach((s) => s && cuerpo.appendChild(s));
-    cuerpo.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '28px', textAlign: 'center' } }, PLAN.app.avisoLegal));
+    if (st.tipo !== 'pro') cuerpo.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '24px', textAlign: 'center' } },
+      h('button', { class: 'enlace', type: 'button', estilo: { fontSize: 'var(--t-xs)', minHeight: '0' }, onclick: () => AF.app.abrir('Gratis y Pro', (c) => V.pro.render(c)) }, st.tipo === 'prueba' ? 'Estás probando Pro: ' + (st.diasPrueba === 1 ? 'queda 1 día' : 'quedan ' + st.diasPrueba + ' días') + ' · ¿Qué es Pro?' : 'Estás en Gratis · ¿Qué es Pro?')));
+    cuerpo.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '8px', textAlign: 'center' } }, PLAN.app.avisoLegal));
     cont.appendChild(cuerpo);
   }
 
@@ -4660,7 +5026,8 @@
 ;
 
 /* ===== js/vistas/voz.js ===== */
-/* El botón único: habla o escribe. Muestra lo que entendió ANTES de guardar, responde preguntas, corrige y aprende. */
+/* El asistente: habla o escribe. Es un PANEL que sube desde abajo (no una pantalla completa).
+   Muestra lo que entendió ANTES de guardar, responde preguntas, corrige y aprende. El micrófono termina solo al callar. */
 (function (g) {
   'use strict';
   const AF = (g.AF = g.AF || {});
@@ -4671,10 +5038,11 @@
   const $ = (n) => U.dinero(n);
   const S = () => AF.store, N = () => AF.nativo, C = () => V.comun;
 
-  let capa = null, escucha = null, vivo = false;
+  let capa = null, telon = null, escucha = null, vivo = false;
 
-  const ctx = () => ({ hoy: AF.app.hoy(), categorias: S().categorias(), dicc: S().d.diccionario, tarjetas: S().d.tarjetas });
+  const ctx = () => ({ hoy: AF.app.hoy(), categorias: S().categorias(), dicc: S().d.diccionario, tarjetas: S().d.tarjetas, bancos: AF.bancos ? AF.bancos.lista(S().d.ajustes.pais) : [] });
   const hablar = (t) => { if (S().d.ajustes.respuestaVoz) N().hablar(t); };
+  const fechaBonita = (iso) => U.deISO(iso).getDate() + ' de ' + U.nombreMes(iso);
 
   /* ------------------------------------------------------------- diálogos pequeños */
   function dialogo(titulo, construir, acciones) {
@@ -4688,11 +5056,12 @@
   const elegirCategoria = (tipo, actual) => dialogo('¿En qué categoría va?', (fin, cierra) => h('div', { estilo: { marginTop: '12px' } }, C().selectorCategoria(tipo, actual, (id) => { fin(id); cierra(); })));
   function pedirNumero(titulo, actual, ayuda) {
     return dialogo(titulo, (fin, cierra) => {
-      const inp = h('input', { class: 'entrada grande', inputmode: 'decimal', value: actual == null ? '' : String(actual).replace('.', ','), 'aria-label': titulo });
-      setTimeout(() => inp.focus(), 120);
+      const dinero = V.acceso.campoDinero(actual, S().d.ajustes.moneda, () => {}, titulo);
+      const inp = dinero.input;
+      setTimeout(() => { inp.focus(); inp.select(); }, 120);
       const ok = () => { const v = U.parseNumero(inp.value); if (v > 0) { fin(v); cierra(); } else inp.focus(); };
       inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok(); });
-      return h('div', null, h('div', { class: 'campo' }, inp, ayuda ? h('div', { class: 'ayuda' }, ayuda) : null), h('div', { class: 'hoja-acciones' }, h('button', { class: 'btn btn-primario', type: 'button', onclick: ok }, 'Aceptar')));
+      return h('div', null, h('div', { class: 'campo' }, dinero.el, ayuda ? h('div', { class: 'ayuda' }, ayuda) : null), h('div', { class: 'hoja-acciones' }, h('button', { class: 'btn btn-primario', type: 'button', onclick: ok }, 'Aceptar')));
     });
   }
   const elegirFecha = (actual) => dialogo('¿De qué día?', (fin, cierra) => {
@@ -4709,11 +5078,12 @@
     });
   }
 
-  /* ----------------------------------------------------------------------- capa */
+  /* ----------------------------------------------------------------------- panel */
   function crearCapa() {
     cerrar();
-    capa = h('div', { class: 'voz', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Asistente de voz' });
-    d.getElementById('app').appendChild(capa); vivo = true;
+    telon = h('div', { class: 'telon', onclick: cerrar });
+    capa = h('div', { class: 'voz', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Asistente' });
+    const raiz = d.getElementById('app'); raiz.appendChild(telon); raiz.appendChild(capa); vivo = true;
     return capa;
   }
   function cerrar() {
@@ -4721,62 +5091,73 @@
     if (escucha) { try { escucha.parar(); } catch (e) { /* nada */ } escucha = null; }
     N().callar();
     if (capa) { capa.remove(); capa = null; }
+    if (telon) { telon.remove(); telon = null; }
   }
   const cabeza = (izq) => h('div', { class: 'voz-cabeza' }, h('div', { class: 'suave' }, izq || ''), h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Cerrar', onclick: cerrar }, ico('cerrar')));
   function pintar(partes) {
     if (!capa) return;
     AF.ui.vaciar(capa);
+    capa.appendChild(h('div', { class: 'hoja-asa', estilo: { marginTop: '10px', marginBottom: '0' } }));
     partes.forEach((p) => p && capa.appendChild(p));
     const foco = capa.querySelector('[data-foco]'); if (foco) setTimeout(() => foco.focus(), 60);
   }
+  const Salir = (extra, acciones) => pintar([cabeza(), h('div', { class: 'voz-cuerpo' }, extra), h('div', { class: 'voz-pie' }, acciones)]);
+  const btnPrim = (t, f, cls) => h('button', { class: 'btn ' + (cls || 'btn-primario') + ' btn-bloque', type: 'button', onclick: f }, t);
+  const btnTxt = (t, f) => h('button', { class: 'btn-texto', type: 'button', onclick: f }, t);
 
   /* ------------------------------------------------------------------ escuchando */
+  // Termina sola: tras PLAN.voz.silencioSeg de silencio después de la última palabra. Antes de la primera palabra espera
+  // PLAN.voz.esperaInicialSeg (tiene que dejar hablar). El botón solo sirve para terminar antes.
   async function escuchar() {
-    const vivoLocal = {}; let ultimo = '';
-    const trans = h('p', { class: 'transcripcion', 'aria-live': 'polite' }, h('span', { class: 'tenue' }, 'Habla ahora…'));
-    const onda = h('div', { class: 'onda escuchando', 'aria-hidden': 'true' }, Array.from({ length: 15 }, () => h('i')));
-    const estado = h('div', { class: 'voz-estado' }, 'Te escucho');
-    const btn = h('button', { class: 'mic-grande escuchando', type: 'button', 'aria-label': 'Terminar', onclick: () => { if (escucha) escucha.parar(); } }, ico('mic'));
-    pintar([cabeza(), h('div', { class: 'voz-cuerpo' }, estado, trans, onda), h('div', { class: 'voz-pie' }, btn, h('button', { class: 'btn-texto', type: 'button', style: 'color:var(--sobre-panel)', onclick: () => { if (escucha) { escucha.parar(); escucha = null; } mostrarTexto(ultimo); } }, 'Prefiero escribir'))]);
+    let ultimo = '', tSilencio = 0, tInicial = 0, tMax = 0;
+    const trans = h('p', { class: 'transcripcion', 'aria-live': 'polite' }, h('span', { class: 'tenue' }, 'Te escucho. Di lo que gastaste o pregúntame algo.'));
+    const estado = h('div', { class: 'escucha' }, h('span', { class: 'punto-escucha', 'aria-hidden': 'true' }), h('span', { class: 'voz-estado' }, 'Escuchando…'));
+    const terminarYa = () => { if (escucha) escucha.parar(); };
+    pintar([cabeza('Hablar'), h('div', { class: 'voz-cuerpo' }, estado, trans),
+      h('div', { class: 'voz-pie' }, h('button', { class: 'mic-grande escuchando', type: 'button', 'aria-label': 'Terminar', onclick: terminarYa }, ico('mic')),
+        h('p', { class: 'texto-xs suave', estilo: { textAlign: 'center' } }, 'Cuando termines de hablar, se cierra solo. O toca el micrófono.'),
+        btnTxt('Prefiero escribir', () => { cerrar(); escribirEnBarra(ultimo); }))]);
+    const limpiar = () => { clearTimeout(tSilencio); clearTimeout(tInicial); clearTimeout(tMax); };
     try {
-      const e = await N().escuchar((t) => { ultimo = t; AF.ui.vaciar(trans); trans.appendChild(d.createTextNode(t)); });
-      escucha = e; vivoLocal.e = e;
+      const e = await N().escuchar((t) => {
+        ultimo = t; AF.ui.vaciar(trans); trans.appendChild(d.createTextNode(t));
+        clearTimeout(tInicial); clearTimeout(tSilencio);
+        tSilencio = setTimeout(terminarYa, (PLAN.voz.silencioSeg || 2.5) * 1000);
+      });
+      escucha = e;
+      tInicial = setTimeout(terminarYa, (PLAN.voz.esperaInicialSeg || 12) * 1000);
+      tMax = setTimeout(terminarYa, (PLAN.voz.maximoSeg || 60) * 1000);
       const final = await e.terminado;
-      if (escucha !== e) return;                       // cambió de pantalla mientras tanto
+      limpiar();
+      if (escucha !== e) return;
       escucha = null;
       if (!vivo) return;
       if (!final || !final.trim()) return sinAudio();
       procesar(final.trim());
     } catch (er) {
-      escucha = null;
+      limpiar(); escucha = null;
       if (!vivo) return;
-      mostrarTexto('', er && er.message);
+      sinAudio(er && er.message);
     }
   }
-  function sinAudio() {
-    pintar([cabeza(), h('div', { class: 'voz-cuerpo' }, h('p', { class: 'transcripcion' }, 'No te escuché.'), h('p', { class: 'voz-estado' }, 'Habla más cerca o escribe lo que quieres registrar.')),
-      h('div', { class: 'voz-pie' }, h('button', { class: 'btn btn-voz btn-bloque', type: 'button', onclick: escuchar }, ico('mic'), 'Intentar otra vez'), h('button', { class: 'btn-texto', type: 'button', style: 'color:var(--sobre-panel)', onclick: () => mostrarTexto('') }, 'Escribir'))]);
+  function sinAudio(motivo) {
+    Salir([h('p', { class: 'transcripcion' }, 'No te escuché.'), h('p', { class: 'voz-estado', estilo: { marginTop: '6px' } }, motivo || 'Habla más cerca del teléfono, o escríbelo abajo.')],
+      [btnPrim('Intentar otra vez', escuchar, 'btn-voz'), btnTxt('Escribir', () => { cerrar(); escribirEnBarra(''); })]);
   }
-
-  /* --------------------------------------------------------------------- escribir */
-  function mostrarTexto(valor, aviso2) {
-    const ta = h('textarea', { class: 'texto-voz', rows: 3, placeholder: 'Ej.: pagué 30 de luz', 'data-foco': '1', 'aria-label': 'Lo que quieres registrar o preguntar', value: valor || '' });
-    const enviar = () => { const t = ta.value.trim(); if (t) procesar(t); };
-    ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviar(); } });
-    pintar([cabeza(), h('div', { class: 'voz-cuerpo' },
-      h('p', { class: 'transcripcion' }, 'Escríbelo como lo dirías'),
-      aviso2 ? h('p', { class: 'voz-estado', estilo: { marginTop: '8px' } }, aviso2) : null,
-      h('div', { estilo: { marginTop: '18px' } }, ta),
-      h('div', { class: 'opciones', estilo: { marginTop: '14px' } }, ['Pagué 30 de luz', 'Me pagaron 1.200', 'Cuánto gasté este mes'].map((s) => h('button', { class: 'opcion', type: 'button', style: 'background:rgba(255,255,255,.08);border-color:transparent;color:var(--sobre-panel)', onclick: () => { ta.value = s; enviar(); } }, s)))),
-      h('div', { class: 'voz-pie' }, h('button', { class: 'btn btn-voz btn-bloque', type: 'button', onclick: enviar }, ico('enviar'), 'Enviar'), h('button', { class: 'btn-texto', type: 'button', style: 'color:var(--sobre-panel)', onclick: escuchar }, 'Hablar en vez de escribir'))]);
+  // Escribir es en la barra de abajo (no en otra pantalla)
+  function escribirEnBarra(texto) {
+    const inp = AF.app.compositorInput;
+    if (!inp) return;
+    inp.value = texto || ''; inp.dispatchEvent(new Event('input')); setTimeout(() => inp.focus(), 60);
   }
 
   /* --------------------------------------------------------------------- procesar */
   async function procesar(texto) {
+    if (!capa) crearCapa();
     let r = AF.parser.interpretar(texto, ctx());
     const dudoso = r.tipo === 'desconocido' || (r.tipo === 'registrar' && r.items && r.items.length && r.items.every((i) => i.catConfianza === 'ninguna') && !r.items.some((i) => i.palabraNueva === null));
     if (dudoso && AF.ia && AF.acceso.tiene('entenderFraseLibreIA') && AF.acceso.iaDisponible()) {
-      pintar([cabeza(), h('div', { class: 'voz-cuerpo' }, h('p', { class: 'transcripcion' }, texto), h('p', { class: 'voz-estado', estilo: { marginTop: '14px' } }, 'Pensando…'))]);
+      pintar([cabeza(), h('div', { class: 'voz-cuerpo' }, h('p', { class: 'frase' }, texto), h('p', { class: 'voz-estado', estilo: { marginTop: '12px' } }, 'Pensando…'))]);
       const x = await AF.ia.interpretar(texto, ctx());
       if (x) r = x;
       if (!vivo) return;
@@ -4795,75 +5176,125 @@
     }
   }
 
-  const Salir = (texto, acciones, extra) => pintar([cabeza(), h('div', { class: 'voz-cuerpo' }, extra), h('div', { class: 'voz-pie' }, acciones)]);
-  const btnPrim = (t, f, cls) => h('button', { class: 'btn ' + (cls || 'btn-voz') + ' btn-bloque', type: 'button', onclick: f }, t);
-  const btnTxt = (t, f) => h('button', { class: 'btn-texto', type: 'button', style: 'color:var(--sobre-panel)', onclick: f }, t);
-
   /* ------------------------------------------------------------------- registrar */
   function vistaRegistrar(r, texto) {
     if (!r.items || !r.items.length) {
-      const t0 = r.falta === 'monto' ? 'No escuché cuánto fue.' : 'No pude armar un movimiento con eso.';
-      return Salir(null, [btnPrim('Completar a mano', () => { cerrar(); C().formMovimiento({ inicial: { desc: texto }, alGuardar: (m) => C().guardarMov(m) }); }), btnTxt('Intentar otra vez', () => mostrarTexto(texto))],
-        [h('p', { class: 'transcripcion' }, t0), r.partes && r.partes.length ? C().fraseAnotada(r.partes, null, false) : null]);
+      const t0 = r.falta === 'monto' ? 'Entendí qué fue, pero no cuánto. ¿De cuánto fue?' : 'No pude armar un movimiento con eso.';
+      return Salir([h('p', { class: 'frase' }, '«' + texto + '»'), h('p', { class: 'voz-respuesta' }, t0)],
+        [btnPrim('Completar a mano', () => { cerrar(); C().formMovimiento({ inicial: { desc: texto }, alGuardar: (m) => C().guardarMov(m) }); }), btnTxt('Decirlo otra vez', escuchar)]);
     }
-    const items = r.items.map((i) => Object.assign({}, i, { credito: i.credito ? Object.assign({}, i.credito) : i.credito }));
+    const items = r.items.map((i) => Object.assign({}, i, { credito: i.credito ? Object.assign({}, i.credito) : i.credito, duda: i.duda ? Object.assign({}, i.duda) : null }));
+    // monto raro: por defecto el más probable (el chico); la persona puede tocar el otro
+    items.forEach((it) => { if (it.dudaMonto) { it.montoOriginal = it.monto; it.monto = it.dudaMonto[0]; } });
     const tarjetas = S().d.tarjetas;
-    const E = { tarjetaDuda: !!r.tarjetaDuda, sinTarjetas: !!r.sinTarjetas, dudas: (r.dudas || []).slice() };
-    const hablaTexto = (it) => it.tipo === 'ingreso' ? 'Ingreso de ' + $(it.monto) + ' en ' + it.catNombre : 'Gasto de ' + $(it.monto) + ' en ' + it.catNombre;
+    let abierto = items.length === 1 ? 0 : -1;
+    const etiquetaNec = (it) => (it.nec === 'G' ? 'Gasto innecesario' : it.nec === 'N' ? 'Gasto necesario' : 'Sin clasificar');
+
+    function filasDetalle(it) {
+      const fil = (etiqueta, valor, onclick, extraClase) => h('button', { class: 'entendido-fila', type: 'button', onclick }, h('span', { class: 'entendido-etiqueta' }, etiqueta), h('span', { class: 'entendido-valor ' + (extraClase || '') }, valor, ico('derecha', 'chico')));
+      const filas = [];
+      if (it.tipo === 'pago_tarjeta') {
+        filas.push(fil('Pago de', $(it.monto), async () => { const v = await pedirNumero('Monto', it.monto); if (v) { it.monto = v; dibujar(); } }, 'monto-grande'));
+        const t = tarjetas.find((x) => x.id === it.tarjetaId);
+        filas.push(fil('A la tarjeta', t ? t.nombre : tarjetas.length ? '¿Cuál tarjeta?' : 'Sin tarjeta guardada', async () => {
+          if (!tarjetas.length) { cerrar(); V.tarjetas.formTarjeta(null); return; }
+          const v = await elegirOpcion('¿A cuál tarjeta?', tarjetas.map((x) => [x.id, x.nombre])); if (v) { it.tarjetaId = v; dibujar(); }
+        }, t ? '' : 'duda'));
+        filas.push(fil('Fecha', U.cap(U.fechaCorta(it.fecha, AF.app.hoy())), async () => { const f = await elegirFecha(it.fecha); if (f) { it.fecha = f; dibujar(); } }));
+        return filas;
+      }
+      filas.push(fil(it.tipo === 'ingreso' ? 'Ingreso de' : 'Gasto de', $(it.monto), async () => { const v = await pedirNumero('Monto', it.monto); if (v) { it.monto = v; it.dudaMonto = null; dibujar(); } }, 'monto-grande'));
+      filas.push(fil('Nombre', it.desc || h('span', { class: 'suave' }, 'Ponerle nombre'), async () => {
+        const v = await dialogo('Nombre del movimiento', (fin, cierra) => {
+          const inp = h('input', { class: 'entrada', value: it.desc || '', maxlength: 80, placeholder: 'Ej. Arriendo, Internet, Hamburguesa' });
+          setTimeout(() => { inp.focus(); inp.select(); }, 120);
+          const ok = () => { fin(inp.value.trim()); cierra(); };
+          inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok(); });
+          return h('div', null, h('div', { class: 'campo' }, inp), h('div', { class: 'hoja-acciones' }, h('button', { class: 'btn btn-primario', type: 'button', onclick: ok }, 'Aceptar')));
+        });
+        if (v !== null) { it.desc = v; dibujar(); }
+      }));
+      filas.push(fil('Categoría', (it.catIcono || '') + ' ' + it.catNombre, async () => {
+        const id = await elegirCategoria(it.tipo, it.cat);
+        if (!id) return;
+        const c = S().categoria(id); it.cat = id; it.catNombre = c.nombre; it.catIcono = c.icono; it.catConfianza = 'alta'; it.duda = null; if (it.tipo === 'gasto') it.nec = c.nec || null;
+        const palabra = it.palabraNueva || it.palabraCat || (it.desc ? U.norm(it.desc) : null);
+        if (palabra) { S().aprender(palabra, id); it.palabraNueva = null; }
+        dibujar();
+      }));
+      if (it.tipo === 'gasto') filas.push(fil('Cuenta como', etiquetaNec(it), () => { it.nec = it.nec === 'G' ? 'N' : 'G'; if (it.palabraCat || it.palabraNueva) S().aprender(it.palabraCat || it.palabraNueva, { cat: it.cat, nec: it.nec }); dibujar(); }));
+      filas.push(fil('Fecha', U.cap(U.fechaCorta(it.fecha, AF.app.hoy())), async () => { const f = await elegirFecha(it.fecha); if (f) { it.fecha = f; dibujar(); } }));
+      if (it.tipo === 'gasto' && (tarjetas.length || it.cuenta === 'tarjeta')) {
+        let txt = 'Efectivo o débito';
+        if (it.cuenta === 'tarjeta') {
+          const t = tarjetas.find((x) => x.id === it.tarjetaId);
+          txt = t ? t.nombre : '¿Cuál tarjeta?';
+          if (it.credito && it.credito.modo === 'diferido') txt += ' · ' + (it.credito.meses ? it.credito.meses + ' cuotas' : '¿cuántos meses?') + (it.credito.interes === false ? ' sin intereses' : '');
+        }
+        filas.push(fil('Pagado con', txt, async () => {
+          const opc = [['efectivo', 'Efectivo o débito']].concat(tarjetas.map((t) => [t.id, t.nombre]));
+          const v = await elegirOpcion('¿Con qué pagaste?', opc);
+          if (!v) return;
+          if (v === 'efectivo') { it.cuenta = 'efectivo'; delete it.tarjetaId; delete it.credito; }
+          else { it.cuenta = 'tarjeta'; it.tarjetaId = v; it.credito = it.credito || { modo: 'corriente' }; }
+          dibujar();
+        }, it.cuenta === 'tarjeta' && !it.tarjetaId ? 'duda' : ''));
+        if (it.cuenta === 'tarjeta' && it.credito && it.credito.modo === 'diferido' && !it.credito.meses) {
+          filas.push(fil('Meses', '¿A cuántos?', async () => { const v = await elegirOpcion('¿A cuántos meses?', PLAN.tarjetas.mesesComunes.map((n) => [n, n + ' meses'])); if (v) { it.credito.meses = v; dibujar(); } }, 'duda'));
+        }
+      }
+      return filas;
+    }
+    // Preguntas de duda: monto raro, palabra ambigua
+    function dudas(it) {
+      const out = [];
+      if (it.dudaMonto) out.push(h('div', { class: 'duda-caja' }, h('p', null, '¿Fue ' + $(it.dudaMonto[0]) + ' o ' + $(it.dudaMonto[1]) + '?'),
+        h('div', { class: 'opciones' }, it.dudaMonto.map((v) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': it.monto === v ? 'true' : 'false', onclick: () => { it.monto = v; it.dudaMonto = null; dibujar(); } }, $(v))))));
+      if (it.duda) out.push(h('div', { class: 'duda-caja' }, h('p', null, it.duda.texto),
+        h('div', { class: 'opciones' }, it.duda.opciones.map((o) => h('button', { type: 'button', class: 'opcion', onclick: () => {
+          const c = S().categoria(o.cat); it.cat = c.id; it.catNombre = c.nombre; it.catIcono = c.icono; it.catConfianza = 'alta';
+          it.nec = o.nec !== undefined ? o.nec : (c.nec || null);
+          if (it.duda.palabra) S().aprender(it.duda.palabra, { cat: c.id, nec: it.nec });
+          it.duda = null; dibujar();
+        } }, o.texto)))));
+      return out;
+    }
 
     function dibujar() {
-      const bloques = items.map((it, idx) => {
-        const duda = it.catConfianza === 'ninguna';
-        const fil = (etiqueta, valor, onclick, extraClase) => h('button', { class: 'entendido-fila', type: 'button', onclick }, h('span', { class: 'entendido-etiqueta' }, etiqueta), h('span', { class: 'entendido-valor ' + (extraClase || '') }, valor, ico('derecha', 'chico')));
-        const filas = [
-          fil(it.tipo === 'ingreso' ? 'Ingreso de' : 'Gasto de', $(it.monto), async () => { const v = await pedirNumero('Monto', it.monto); if (v) { it.monto = v; dibujar(); } }, 'monto-grande'),
-          fil('Categoría', (it.catIcono || '') + ' ' + it.catNombre + (duda ? ' ·  ?' : ''), async () => {
-            const id = await elegirCategoria(it.tipo, it.cat);
-            if (!id) return;
-            const c = S().categoria(id); it.cat = id; it.catNombre = c.nombre; it.catIcono = c.icono; it.catConfianza = 'alta'; if (it.tipo === 'gasto') it.nec = c.nec || null;
-            if (it.palabraNueva) { S().aprender(it.palabraNueva, id); aviso('Aprendí que «' + it.palabraNueva + '» es ' + c.nombre.toLowerCase()); it.palabraNueva = null; }
-            dibujar();
-          }),
-        ];
-        if (it.tipo === 'gasto') filas.push(fil('¿Necesario o gusto?', it.nec === 'N' ? 'Necesario' : it.nec === 'G' ? 'Gusto' : 'Sin clasificar', () => { it.nec = it.nec === 'N' ? 'G' : it.nec === 'G' ? null : 'N'; dibujar(); }));
-        filas.push(fil('Fecha', U.cap(U.fechaCorta(it.fecha, AF.app.hoy())), async () => { const f = await elegirFecha(it.fecha); if (f) { it.fecha = f; dibujar(); } }));
-        if (it.tipo === 'gasto' && (tarjetas.length || it.cuenta === 'tarjeta')) {
-          let txt = 'Efectivo o débito';
-          if (it.cuenta === 'tarjeta') {
-            const t = tarjetas.find((x) => x.id === it.tarjetaId);
-            txt = t ? t.nombre : '¿Cuál tarjeta?';
-            if (it.credito && it.credito.modo === 'diferido') txt += ' · ' + (it.credito.meses ? it.credito.meses + ' cuotas' : '¿cuántos meses?') + (it.credito.interes === false ? ' sin intereses' : '');
-          }
-          filas.push(fil('Pagado con', txt, async () => {
-            const opc = [['efectivo', 'Efectivo o débito']].concat(tarjetas.map((t) => [t.id, t.nombre]));
-            const v = await elegirOpcion('¿Con qué pagaste?', opc);
-            if (!v) return;
-            if (v === 'efectivo') { it.cuenta = 'efectivo'; delete it.tarjetaId; delete it.credito; }
-            else { it.cuenta = 'tarjeta'; it.tarjetaId = v; it.credito = it.credito || { modo: 'corriente' }; }
-            dibujar();
-          }, it.cuenta === 'tarjeta' && !it.tarjetaId ? 'duda' : ''));
-          if (it.cuenta === 'tarjeta' && it.credito && it.credito.modo === 'diferido' && !it.credito.meses) {
-            filas.push(fil('Meses', '¿A cuántos?', async () => { const v = await elegirOpcion('¿A cuántos meses?', PLAN.tarjetas.mesesComunes.map((n) => [n, n + ' meses'])); if (v) { it.credito.meses = v; dibujar(); } }, 'duda'));
-          }
-        }
-        return h('div', { class: 'entendido' }, items.length > 1 ? h('div', { class: 'entendido-etiqueta', estilo: { padding: '12px 0 0' } }, 'Movimiento ' + (idx + 1) + ' de ' + items.length) : null, filas);
-      });
+      const cuerpo = [C().fraseAnotada(r.partes, items[0].tipo, false)];
+      if (items.length === 1) {
+        const it = items[0];
+        cuerpo.push(dudas(it));
+        cuerpo.push(h('div', { class: 'entendido' }, filasDetalle(it)));
+      } else {
+        // varios: una línea por movimiento; se toca una para cambiarla
+        cuerpo.push(h('div', { class: 'entendido' }, items.map((it, idx) => {
+          const c = it.tipo === 'pago_tarjeta' ? { icono: '💳', nombre: 'Pago de tarjeta' } : { icono: it.catIcono, nombre: it.catNombre };
+          const linea = h('button', { class: 'entendido-item', type: 'button', 'aria-expanded': abierto === idx ? 'true' : 'false', onclick: () => { abierto = abierto === idx ? -1 : idx; dibujar(); } },
+            h('div', { class: 'ico' }, c.icono), h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, it.desc || c.nombre), h('div', { class: 'fila-sub' }, c.nombre + (it.tipo === 'gasto' && it.nec === 'G' ? ' · innecesario' : ''))),
+            h('span', { class: 'monto ' + (it.tipo === 'ingreso' ? 'ingreso' : it.tipo === 'pago_tarjeta' ? 'pago' : 'gasto') }, (it.tipo === 'ingreso' ? '+' : '−') + $(it.monto)));
+          return abierto === idx ? h('div', null, linea, dudas(it), h('div', { estilo: { paddingLeft: '8px' } }, filasDetalle(it))) : h('div', null, linea, it.duda || it.dudaMonto ? dudas(it) : null);
+        })));
+      }
       const avisos = [];
-      if (E.sinTarjetas && items.some((i) => i.cuenta === 'tarjeta' && !tarjetas.length)) avisos.push('Aún no tienes tarjetas guardadas. Lo guardo como pago normal; agrégala en la pestaña Tarjetas.');
-      items.forEach((it) => {
-        if (it.cuenta === 'tarjeta' && it.credito && it.credito.modo === 'diferido' && !AF.acceso.tiene('tarjetaDiferidoCuotas')) avisos.push('Con Pro calculo las cuotas de «' + (it.desc || it.catNombre) + '». Ahora lo guardo como compra con tarjeta.');
-      });
-      pintar([cabeza('Esto entendí'), h('div', { class: 'voz-cuerpo' }, C().fraseAnotada(r.partes, items[0].tipo, true), bloques,
-        avisos.map((a) => h('p', { class: 'texto-sm', estilo: { color: 'var(--sobre-panel2)', marginTop: '12px' } }, a))),
-      h('div', { class: 'voz-pie' }, btnPrim(items.length > 1 ? 'Guardar los ' + items.length : 'Guardar', guardar), btnTxt('Cancelar', cerrar))]);
+      if (r.sinTarjetas && items.some((i) => i.tipo === 'pago_tarjeta')) avisos.push('Aún no tienes tarjetas guardadas. Si la agregas, el pago le baja la deuda; si no, lo guardo como pago de deuda.');
+      if (r.sinTarjetas && items.some((i) => i.cuenta === 'tarjeta' && !tarjetas.length)) avisos.push('Aún no tienes tarjetas guardadas. Lo guardo como pago normal; agrégala en la pestaña Tarjetas.');
+      items.forEach((it) => { if (it.cuenta === 'tarjeta' && it.credito && it.credito.modo === 'diferido' && !AF.acceso.tiene('tarjetaDiferidoCuotas')) avisos.push('Con Pro calculo las cuotas de «' + (it.desc || it.catNombre) + '». Ahora lo guardo como compra con tarjeta.'); });
+      pintar([cabeza('Esto entendí'), h('div', { class: 'voz-cuerpo' }, cuerpo, avisos.map((a) => h('p', { class: 'voz-extra' }, a))),
+        h('div', { class: 'voz-pie' }, btnPrim(items.length > 1 ? 'Guardar los ' + items.length : 'Guardar', guardar), btnTxt('Cancelar', cerrar))]);
     }
 
     async function guardar() {
-      if (!vivo) return;                              // si el usuario ya canceló, no guardar nada
-      const D = S().d, hoy = AF.app.hoy();
+      if (!vivo) return;
       const guardados = [];
       for (const it of items) {
-        const m = { tipo: it.tipo, monto: it.monto, cat: it.cat, desc: it.desc || '', fecha: it.fecha };
+        if (it.tipo === 'pago_tarjeta') {
+          const t = S().buscar('tarjetas', it.tarjetaId);
+          if (t) guardados.push(S().agregar('movs', { tipo: 'pago_tarjeta', monto: U.r2(it.monto), fecha: it.fecha, tarjetaId: t.id, cat: null, desc: 'Pago ' + t.nombre }, 'Pagué ' + t.nombre));
+          else guardados.push(S().agregar('movs', { tipo: 'gasto', monto: U.r2(it.monto), cat: 'deudas', desc: 'Pago de tarjeta', fecha: it.fecha, nec: 'N', cuenta: 'efectivo' }, 'Pago de tarjeta'));
+          continue;
+        }
+        const m = { tipo: it.tipo, monto: U.r2(it.monto), cat: it.cat, desc: it.desc || '', fecha: it.fecha };
         if (it.tipo === 'gasto') {
           m.nec = it.nec || null; m.cuenta = it.cuenta === 'tarjeta' && it.tarjetaId ? 'tarjeta' : 'efectivo';
           if (m.cuenta === 'tarjeta') {
@@ -4882,48 +5313,48 @@
       confirmacion(guardados);
     }
     dibujar();
-    hablar(items.length === 1 ? hablaTexto(items[0]) + '. ¿Lo guardo?' : 'Entendí ' + items.length + ' movimientos. ¿Los guardo?');
+    const it0 = items[0];
+    hablar(items.length === 1 ? (it0.tipo === 'pago_tarjeta' ? 'Pago de tarjeta de ' + $(it0.monto) : (it0.tipo === 'ingreso' ? 'Ingreso de ' : 'Gasto de ') + $(it0.monto) + ' en ' + it0.catNombre) + '. ¿Lo guardo?' : 'Entendí ' + items.length + ' movimientos. ¿Los guardo?');
   }
 
+  /* --------------------------------------------------------------- confirmación */
+  // Dice qué guardó y cuánto te queda hasta tu cobro (la misma cifra del Inicio). Nada de «te pasaste de tu presupuesto diario».
   function confirmacion(movs) {
     const D = S().d, hoy = AF.app.hoy();
     const total = movs.reduce((s, m) => s + m.monto, 0);
-    const c = S().categoria(movs[0].cat);
-    const linea = movs.length === 1 ? 'Guardé ' + $(movs[0].monto) + ' en ' + c.nombre.toLowerCase() + '.' : 'Guardé ' + movs.length + ' movimientos por ' + $(total) + '.';
+    const nombreDe = (m) => (m.tipo === 'pago_tarjeta' ? 'pago de ' + ((S().buscar('tarjetas', m.tarjetaId) || {}).nombre || 'tarjeta') : (m.tipo === 'ingreso' ? 'ingreso en ' : '') + S().categoria(m.cat).nombre.toLowerCase());
+    const linea = movs.length === 1 ? 'Guardado: ' + $(movs[0].monto) + ' · ' + nombreDe(movs[0]) + '.' : 'Guardados ' + movs.length + ' movimientos por ' + $(total) + '.';
     const extras = [];
-    const modo = AF.acceso.tiene('puedesGastarHoyCompleto') ? 'completo' : 'simple';
-    const p = AF.informes.puedesGastarHoy(D, hoy, modo);
-    if (movs.some((m) => m.tipo === 'gasto') && p.ingresos) {
-      if (p.hoyDisponible >= 0) extras.push('Hoy todavía puedes gastar ' + $(p.hoyDisponible) + '.');
-      else if (p.hoyDisponible < -1) extras.push('Hoy te pasaste ' + $(-p.hoyDisponible) + ' de tu presupuesto diario.');
-    }
+    const p = AF.informes.puedesGastarHoy(D, hoy);
+    if (p.ingresos) extras.push(p.resto > 0 ? 'Te quedan ' + $(p.resto) + ' hasta ' + p.etiqueta + '.' : 'Ya no te queda dinero hasta ' + p.etiqueta + '.');
     AF.informes.presupuestos(D, hoy).forEach((b) => {
       if (movs.some((m) => m.tipo === 'gasto' && (!b.cat || b.cat === m.cat))) {
-        if (b.nivel === 'detente') extras.push('Detente: llegaste al límite de ' + b.nombre.toLowerCase() + '.');
-        else if (b.nivel === 'aviso') extras.push('Ojo: vas en ' + Math.round(b.pct * 100) + ' % del límite de ' + b.nombre.toLowerCase() + '.');
+        if (b.nivel === 'detente') extras.push('Llegaste al límite de ' + b.nombre.toLowerCase() + '.');
+        else if (b.nivel === 'aviso') extras.push('Vas en ' + Math.round(b.pct * 100) + ' % del límite de ' + b.nombre.toLowerCase() + '.');
       }
     });
-    movs.forEach((m) => { if (m.cuenta === 'tarjeta') { const t = S().buscar('tarjetas', m.tarjetaId); if (t && !(t.diaCorte && t.diaVencimiento)) extras.push('Completa el corte y vencimiento de ' + t.nombre + ' para ver cuándo pagas.'); } });
-    pintar([cabeza(), h('div', { class: 'voz-cuerpo' },
-      h('div', { class: 'mic-grande', estilo: { background: 'var(--ingreso)', marginTop: '28px' }, 'aria-hidden': 'true' }, ico('ok')),
-      h('p', { class: 'voz-respuesta', estilo: { textAlign: 'center' } }, linea),
-      extras.map((t) => h('p', { class: 'texto-sm suave', estilo: { textAlign: 'center', marginTop: '8px' } }, t))),
+    movs.forEach((m) => { if (m.cuenta === 'tarjeta') { const t = S().buscar('tarjetas', m.tarjetaId); if (t && !(t.diaCorte && t.diaVencimiento)) extras.push('Completa el corte y el día de pago de ' + t.nombre + ' para calcular sus cuotas.'); } });
+    pintar([cabeza(), h('div', { class: 'voz-cuerpo', estilo: { alignItems: 'center', textAlign: 'center' } },
+      h('div', { class: 'mic-grande ok', 'aria-hidden': 'true' }, ico('ok')),
+      h('p', { class: 'voz-respuesta' }, linea),
+      extras.map((t) => h('p', { class: 'voz-extra' }, t))),
     h('div', { class: 'voz-pie' }, btnPrim('Listo', cerrar), btnTxt('Deshacer', () => { movs.forEach(() => S().deshacer()); cerrar(); aviso('Quité lo que acabas de guardar'); }))]);
     hablar(linea + ' ' + extras.join(' '));
-    if (!extras.length) setTimeout(() => { if (capa && vivo && capa.querySelector('.mic-grande')) cerrar(); }, 2600);
+    setTimeout(() => { if (capa && vivo && capa.querySelector('.mic-grande.ok')) cerrar(); }, 3200);
   }
 
   /* -------------------------------------------------------------------- preguntar */
   function vistaPregunta(q, texto) {
     const D = S().d, hoy = AF.app.hoy();
     const res = AF.informes.responder(q, D, hoy, AF.acceso.esPro());
-    const filas = (res.filas || []).map((f) => h('div', { class: 'entendido-fila' }, h('span', null, f.icono + ' ' + f.etiqueta), h('span', { class: 'entendido-valor' }, f.valor)));
+    const filas = (res.filas || []).map((f) => h('div', { class: 'entendido-fila' }, h('span', { class: 'texto-sm' }, f.icono + ' ' + f.etiqueta), h('span', { class: 'entendido-valor' }, f.valor)));
+    const irA = res.ir ? () => { cerrar(); AF.app.ir(res.ir, res.filtro ? { tipo: res.filtro } : undefined); } : null;
     pintar([cabeza('Tu pregunta'), h('div', { class: 'voz-cuerpo' },
-      h('p', { class: 'frase', estilo: { fontSize: '22px', color: 'var(--sobre-panel2)' } }, '«' + texto + '»'),
-      res.bloqueado ? h('div', null, h('p', { class: 'voz-respuesta' }, res.gancho || res.texto), h('p', { class: 'texto-sm suave', estilo: { marginTop: '10px' } }, res.texto))
-        : h('p', { class: 'voz-respuesta' }, res.texto),
+      h('p', { class: 'frase' }, '«' + texto + '»'),
+      res.bloqueado ? h('div', null, h('p', { class: 'voz-respuesta' }, res.gancho || res.texto), h('p', { class: 'voz-extra' }, res.texto)) : h('p', { class: 'voz-respuesta' }, res.texto),
+      (res.extras || []).map((t) => h('p', { class: 'voz-extra' }, t)),
       filas.length ? h('div', { class: 'entendido' }, filas) : null),
-    h('div', { class: 'voz-pie' }, res.bloqueado ? btnPrim('Ver Pro', () => { cerrar(); AF.app.abrir('Pro', (c) => V.pro.render(c)); }) : res.ir ? btnPrim('Ver ' + (res.ir === 'tarjetas' ? 'tarjetas' : 'inicio'), () => { cerrar(); AF.app.ir(res.ir); }) : btnPrim('Listo', cerrar),
+    h('div', { class: 'voz-pie' }, res.bloqueado ? btnPrim('Ver Pro', () => { cerrar(); AF.app.abrir('Gratis y Pro', (c) => V.pro.render(c)); }) : irA ? btnPrim('Ver ' + (res.ir === 'tarjetas' ? 'tarjetas' : res.ir === 'movimientos' ? 'movimientos' : 'inicio'), irA) : btnPrim('Listo', cerrar),
       btnTxt('Preguntar otra cosa', escuchar))]);
     hablar(res.voz);
   }
@@ -4932,10 +5363,10 @@
   function vistaCorregir(r, texto) {
     const D = S().d;
     const fin = (linea, deshacerPasos) => {
-      pintar([cabeza(), h('div', { class: 'voz-cuerpo' }, h('div', { class: 'mic-grande', estilo: { background: 'var(--ingreso)', marginTop: '28px' } }, ico('ok')), h('p', { class: 'voz-respuesta', estilo: { textAlign: 'center' } }, linea)),
+      pintar([cabeza(), h('div', { class: 'voz-cuerpo', estilo: { alignItems: 'center', textAlign: 'center' } }, h('div', { class: 'mic-grande ok' }, ico('ok')), h('p', { class: 'voz-respuesta' }, linea)),
         h('div', { class: 'voz-pie' }, btnPrim('Listo', cerrar), deshacerPasos ? btnTxt('Deshacer', () => { for (let i = 0; i < deshacerPasos; i++) S().deshacer(); cerrar(); aviso('Lo dejé como estaba'); }) : null)]);
       hablar(linea);
-      setTimeout(() => { if (capa && vivo && capa.querySelector('.mic-grande')) cerrar(); }, 3200);
+      setTimeout(() => { if (capa && vivo && capa.querySelector('.mic-grande.ok')) cerrar(); }, 3200);
     };
     if (r.accion === 'deshacer') {
       const nota = S().deshacer();
@@ -4953,7 +5384,7 @@
       return fin('Listo, cambié ' + nombre + ' a ' + c.nombre.toLowerCase() + '.' + (m.desc ? ' Ya sé que «' + m.desc.toLowerCase() + '» va ahí.' : ''), 1);
     }
     if (r.accion === 'monto') { S().editar('movs', m.id, { monto: r.monto }, 'Cambié el monto'); return fin('Listo, ahora son ' + $(r.monto) + '.', 1); }
-    if (r.accion === 'necesidad') { S().editar('movs', m.id, { nec: r.nec }, 'Cambié necesario/gusto'); return fin('Listo, ' + nombre + ' ahora es ' + (r.nec === 'N' ? 'necesario' : 'un gusto') + '.', 1); }
+    if (r.accion === 'necesidad') { S().editar('movs', m.id, { nec: r.nec }, 'Cambié necesario/innecesario'); return fin('Listo, ' + nombre + ' ahora cuenta como ' + (r.nec === 'N' ? 'necesario' : 'innecesario') + '.', 1); }
     if (r.accion === 'tipo') {
       const cat = S().categorias(r.nuevoTipo)[0].id;
       S().editar('movs', m.id, { tipo: r.nuevoTipo, cat, nec: null }, 'Cambié el tipo');
@@ -4973,11 +5404,11 @@
       if (!ya && !AF.acceso.puedeAgregar('presupuestos', D.presupuestos.length)) { cerrar(); return C().pedirLimite('presupuestos', 'límite de gasto', 'límites de gasto'); }
       if (ya) S().editar('presupuestos', ya.id, { monto: r.monto }, 'Cambié un límite'); else S().agregar('presupuestos', { cat: r.cat || null, monto: r.monto, periodo: 'mes' }, 'Puse un límite');
       const linea = 'Listo: límite de ' + $(r.monto) + ' al mes en ' + nombre.toLowerCase() + '.';
-      pintar([cabeza(), h('div', { class: 'voz-cuerpo' }, h('div', { class: 'mic-grande', estilo: { background: 'var(--ingreso)', marginTop: '28px' } }, ico('ok')), h('p', { class: 'voz-respuesta', estilo: { textAlign: 'center' } }, linea)),
+      pintar([cabeza(), h('div', { class: 'voz-cuerpo', estilo: { alignItems: 'center', textAlign: 'center' } }, h('div', { class: 'mic-grande ok' }, ico('ok')), h('p', { class: 'voz-respuesta' }, linea)),
         h('div', { class: 'voz-pie' }, btnPrim('Listo', cerrar), btnTxt('Deshacer', () => { S().deshacer(); cerrar(); }))]);
       hablar(linea);
     };
-    pintar([cabeza('Esto entendí'), h('div', { class: 'voz-cuerpo' }, h('p', { class: 'frase', estilo: { fontSize: '22px', color: 'var(--sobre-panel2)' } }, '«' + texto + '»'),
+    pintar([cabeza('Esto entendí'), h('div', { class: 'voz-cuerpo' }, h('p', { class: 'frase' }, '«' + texto + '»'),
       h('div', { class: 'entendido' },
         h('div', { class: 'entendido-fila' }, h('span', { class: 'entendido-etiqueta' }, 'Límite'), h('span', { class: 'entendido-valor monto-grande' }, $(r.monto))),
         h('div', { class: 'entendido-fila' }, h('span', { class: 'entendido-etiqueta' }, 'En'), h('span', { class: 'entendido-valor' }, r.cat ? S().categoria(r.cat).icono + ' ' + nombre : 'Todos los gastos')),
@@ -4988,16 +5419,25 @@
 
   /* --------------------------------------------------------------- ayuda / no entendí */
   const EJEMPLOS_AYUDA = [
-    ['Pagué 30 de luz', 'Registrar un gasto'], ['Me pagaron el sueldo, 1.200', 'Registrar un ingreso'], ['Pagué 30 de luz y 12 de internet', 'Varios a la vez'],
-    ['Cuánto gasté este mes', 'Preguntar'], ['Cuánto puedo gastar hoy', 'Tu día de hoy'], ['Cambia el último a salud', 'Corregir'], ['Borra el último', 'Borrar'], ['Ponme un límite de 100 en salidas', 'Poner un límite'],
+    ['Pagué 30 de luz', 'Registrar un gasto'], ['Me pagaron 500', 'Registrar un ingreso'], ['Pagué 30 de luz y 12 de internet', 'Varios a la vez'], ['Pagué la tarjeta 200', 'Pago a tu tarjeta'],
+    ['Cuánto gasté este mes', 'Preguntar'], ['Cuánto me queda', 'Lo que te queda'], ['Qué gastos innecesarios hice', 'Tus gustos del mes'], ['Cambia el último a salud', 'Corregir'], ['Borra el último', 'Borrar'],
   ];
   function vistaAyuda() {
-    pintar([cabeza('Qué puedo hacer'), h('div', { class: 'voz-cuerpo' }, h('p', { class: 'transcripcion' }, 'Háblame normal'), h('div', { class: 'entendido' }, EJEMPLOS_AYUDA.map(([f, t]) => h('button', { class: 'entendido-fila', type: 'button', onclick: () => procesar(f) }, h('span', null, '«' + f + '»'), h('span', { class: 'entendido-etiqueta' }, t))))), h('div', { class: 'voz-pie' }, btnPrim('Hablar', escuchar), btnTxt('Cerrar', cerrar))]);
+    pintar([cabeza('Qué puedo hacer'), h('div', { class: 'voz-cuerpo' }, h('p', { class: 'voz-respuesta' }, 'Háblame como le hablarías a alguien. Por ejemplo:'), h('div', { class: 'entendido' }, EJEMPLOS_AYUDA.map(([f, t]) => h('button', { class: 'entendido-fila', type: 'button', onclick: () => procesar(f) }, h('span', { class: 'texto-sm' }, '«' + f + '»'), h('span', { class: 'entendido-etiqueta' }, t))))), h('div', { class: 'voz-pie' }, btnPrim('Hablar', escuchar, 'btn-voz'), btnTxt('Cerrar', cerrar))]);
   }
+  // Si no entiende, propone lo más probable según lo que sí reconoció; nunca ejemplos al azar.
   function vistaNoEntendi(texto, mensaje) {
-    pintar([cabeza(), h('div', { class: 'voz-cuerpo' }, h('p', { class: 'transcripcion' }, mensaje || 'No lo entendí del todo.'), h('p', { class: 'voz-estado', estilo: { marginTop: '10px' } }, 'Dijiste: «' + texto + '»'),
-      h('div', { class: 'entendido' }, EJEMPLOS_AYUDA.slice(0, 4).map(([f, t]) => h('button', { class: 'entendido-fila', type: 'button', onclick: () => procesar(f) }, h('span', null, '«' + f + '»'), h('span', { class: 'entendido-etiqueta' }, t))))),
-    h('div', { class: 'voz-pie' }, btnPrim('Escribirlo de otra forma', () => mostrarTexto(texto)), btnTxt('Cerrar', cerrar))]);
+    const t = U.norm(texto);
+    const sug = [];
+    if (/innecesari|gusto|capricho|no era necesario/.test(t)) sug.push(['Qué gastos innecesarios hice este mes', 'Ver tus gastos innecesarios']);
+    if (/consejo|ahorr|recortar|evitar/.test(t)) sug.push(['Dame un consejo para ahorrar', 'Un consejo para ahorrar']);
+    if (/tarjeta|cuota|deuda/.test(t)) sug.push(['Cuánto debo en la tarjeta', 'Lo que debes de tu tarjeta']);
+    if (/gast|compr|pag/.test(t)) sug.push(['Cuánto gasté este mes', 'Tus gastos del mes']);
+    if (/queda|alcanza|disponible/.test(t)) sug.push(['Cuánto me queda', 'Lo que te queda hasta tu cobro']);
+    if (!sug.length) sug.push(EJEMPLOS_AYUDA[0], EJEMPLOS_AYUDA[4], EJEMPLOS_AYUDA[5]);
+    pintar([cabeza(), h('div', { class: 'voz-cuerpo' }, h('p', { class: 'frase' }, '«' + texto + '»'), h('p', { class: 'voz-respuesta' }, mensaje || 'No entendí bien. ¿Quisiste decir…?'),
+      h('div', { class: 'entendido' }, sug.slice(0, 3).map(([f, et]) => h('button', { class: 'entendido-fila', type: 'button', onclick: () => procesar(f) }, h('span', { class: 'texto-sm' }, et), ico('derecha', 'chico'))))),
+    h('div', { class: 'voz-pie' }, btnPrim('Decirlo de otra forma', escuchar, 'btn-voz'), btnTxt('Escribirlo', () => { cerrar(); escribirEnBarra(texto); }))]);
   }
 
   /* -------------------------------------------------------------------------- API */
@@ -5006,83 +5446,212 @@
     crearCapa();
     N().vibrar();
     if (o.texto) { procesar(o.texto); return; }
-    if (o.modo === 'texto') mostrarTexto(''); else escuchar();
+    if (o.modo === 'texto') { cerrar(); escribirEnBarra(''); return; }
+    escuchar();
   }
   V.voz = { abrir, cerrar, procesar };
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
 
 /* ===== js/vistas/movimientos.js ===== */
-/* Movimientos: lista por día con filtros y búsqueda, y la tabla para cargar y corregir muchos a la vez. */
+/* Movimientos: tus gastos e ingresos por día, semana, mes o año; solo gastos, solo ingresos, solo innecesarios o una
+   categoría; como lista, por categorías, como libro contable o como tabla para corregir muchos a la vez. */
 (function (g) {
   'use strict';
   const AF = (g.AF = g.AF || {});
-  const { h, ico } = AF.ui;
+  const { h, ico, hoja } = AF.ui;
   const U = AF.util, PLAN = AF.PLAN;
   const V = (AF.vistas = AF.vistas || {});
   const $ = (n) => U.dinero(n);
-  const C = () => V.comun, S = () => AF.store;
+  const C = () => V.comun, S = () => AF.store, N = () => AF.nativo;
 
-  const est = { mes: null, tipo: 'todos', texto: '', buscar: false, tabla: false, pagina: 1, cat: null };
+  // periodo: dia | semana | mes | anio · ref: fecha ISO dentro del periodo · tipo: todos | gasto | ingreso | innecesarios
+  // vista: lista | categorias | libro | tabla
+  const est = { periodo: 'mes', ref: null, tipo: 'todos', cat: null, texto: '', buscar: false, vista: 'lista', pagina: 1 };
 
+  /* ----------------------------------------------------------------------- periodo */
+  function rango() {
+    const r = est.ref;
+    if (est.periodo === 'dia') return { desde: r, hasta: r };
+    if (est.periodo === 'semana') { const d = U.inicioSemana(r); return { desde: d, hasta: U.sumarDias(d, 6) }; }
+    if (est.periodo === 'anio') return { desde: r.slice(0, 4) + '-01-01', hasta: r.slice(0, 4) + '-12-31' };
+    return { desde: U.inicioMes(r), hasta: U.finMes(r) };
+  }
+  function mover(n) {
+    if (est.periodo === 'dia') est.ref = U.sumarDias(est.ref, n);
+    else if (est.periodo === 'semana') est.ref = U.sumarDias(est.ref, 7 * n);
+    else if (est.periodo === 'anio') est.ref = (Number(est.ref.slice(0, 4)) + n) + '-01-01';
+    else est.ref = U.sumarMeses(U.inicioMes(est.ref), n);
+    est.pagina = 1;
+  }
+  function tituloPeriodo(hoy) {
+    const { desde, hasta } = rango();
+    if (est.periodo === 'dia') return desde === hoy ? 'Hoy' : desde === U.sumarDias(hoy, -1) ? 'Ayer' : U.cap(U.diaSemana(desde)) + ' ' + U.deISO(desde).getDate() + ' de ' + U.nombreMes(desde);
+    if (est.periodo === 'semana') { const a = U.deISO(desde), b = U.deISO(hasta); return (hoy >= desde && hoy <= hasta ? 'Esta semana · ' : '') + a.getDate() + (a.getMonth() === b.getMonth() ? '' : ' ' + U.MESES_CORTOS[a.getMonth()]) + ' al ' + b.getDate() + ' ' + U.MESES_CORTOS[b.getMonth()]; }
+    if (est.periodo === 'anio') return desde.slice(0, 4) + (desde.slice(0, 4) === hoy.slice(0, 4) ? ' · este año' : '');
+    return U.cap(U.nombreMes(desde)) + ' ' + desde.slice(0, 4) + (U.inicioMes(hoy) === desde ? ' · este mes' : '');
+  }
+  const esFuturo = (hoy) => rango().desde > hoy;
+
+  /* ----------------------------------------------------------------------- filtro */
+  const esInnecesario = (m) => m.tipo === 'gasto' && (m.nec === 'G' || (m.nec == null && S().categoria(m.cat).nec === 'G'));
   function filtrar(D) {
-    const desde = U.inicioMes(est.mes), hasta = U.finMes(est.mes);
+    const { desde, hasta } = rango();
     const q = U.norm(est.texto).trim();
     return D.movs.filter((m) => m.fecha >= desde && m.fecha <= hasta
-      && (est.tipo === 'todos' || (est.tipo === 'gasto' ? m.tipo === 'gasto' : est.tipo === 'ingreso' ? m.tipo === 'ingreso' : true))
+      && (est.tipo === 'todos' || (est.tipo === 'gasto' ? m.tipo === 'gasto' || m.tipo === 'pago_tarjeta' : est.tipo === 'ingreso' ? m.tipo === 'ingreso' : esInnecesario(m)))
       && (!est.cat || m.cat === est.cat)
-      && (!q || U.norm((m.desc || '') + ' ' + S().categoria(m.cat).nombre).includes(q)));
+      && (!q || U.norm((m.desc || '') + ' ' + (m.cat ? S().categoria(m.cat).nombre : 'pago de tarjeta')).includes(q)));
   }
 
-  function cabecera(cont) {
-    const hoy = AF.app.hoy();
-    if (!est.mes) est.mes = U.inicioMes(hoy);
-    const esActual = est.mes === U.inicioMes(hoy);
-    const nombre = U.cap(U.nombreMes(est.mes)) + ' ' + est.mes.slice(0, 4);
+  /* --------------------------------------------------------------------- cabecera */
+  function cabecera(cont, hoy) {
+    if (!est.ref) est.ref = hoy;
+    const redibujar = () => AF.app.redibujar();
     cont.appendChild(h('header', { class: 'barra-superior' },
       h('h1', { class: 'h2' }, 'Movimientos'),
-      h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Buscar', 'aria-pressed': est.buscar ? 'true' : 'false', onclick: () => { est.buscar = !est.buscar; if (!est.buscar) est.texto = ''; AF.app.redibujar(); } }, ico('buscar')),
-      h('button', { class: 'boton-icono', type: 'button', 'aria-label': est.tabla ? 'Ver lista' : 'Ver tabla', onclick: () => { est.tabla = !est.tabla; est.pagina = 1; AF.app.redibujar(); } }, ico(est.tabla ? 'movimientos' : 'archivo')),
+      h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Buscar', 'aria-pressed': est.buscar ? 'true' : 'false', onclick: () => { est.buscar = !est.buscar; if (!est.buscar) est.texto = ''; redibujar(); } }, ico('buscar')),
+      h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Exportar', onclick: exportar }, ico('archivo')),
       h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Agregar movimiento', onclick: () => C().formMovimiento({ alGuardar: (m) => C().guardarMov(m) }) }, ico('mas_'))));
     const sub = h('div', { class: 'contenido-solo', estilo: { paddingBottom: '0' } });
-    sub.appendChild(h('div', { estilo: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
-      h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Mes anterior', onclick: () => { est.mes = U.sumarMeses(est.mes, -1); est.pagina = 1; AF.app.redibujar(); } }, ico('atras')),
-      h('strong', { class: 'h2', estilo: { fontSize: '18px' } }, esActual ? nombre + ' · este mes' : nombre),
-      h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Mes siguiente', disabled: esActual, estilo: { opacity: esActual ? '.3' : '1' }, onclick: () => { if (!esActual) { est.mes = U.sumarMeses(est.mes, 1); est.pagina = 1; AF.app.redibujar(); } } }, ico('derecha'))));
+    // periodo
+    sub.appendChild(h('div', { class: 'segmentos' }, [['dia', 'Día'], ['semana', 'Semana'], ['mes', 'Mes'], ['anio', 'Año']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': est.periodo === k ? 'true' : 'false', onclick: () => { est.periodo = k; est.ref = hoy; est.pagina = 1; redibujar(); } }, t))));
+    const adelante = !esFuturo(hoy) && rango().hasta < hoy;
+    sub.appendChild(h('div', { class: 'periodo-nav' },
+      h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Anterior', onclick: () => { mover(-1); redibujar(); } }, ico('atras')),
+      h('button', { class: 'periodo-titulo', type: 'button', 'aria-label': 'Elegir fecha', onclick: () => elegirFecha(hoy) }, tituloPeriodo(hoy)),
+      h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Siguiente', disabled: !adelante, estilo: { opacity: adelante ? '1' : '.3' }, onclick: () => { if (adelante) { mover(1); redibujar(); } } }, ico('derecha'))));
     if (est.buscar) {
-      const inp = h('input', { class: 'entrada', type: 'search', placeholder: 'Buscar por detalle o categoría', value: est.texto, 'aria-label': 'Buscar movimientos',
-        oninput: (e) => { est.texto = e.target.value; clearTimeout(est.t); est.t = setTimeout(() => { AF.app.redibujar(); setTimeout(() => { const i = g.document.querySelector('input[type=search]'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 30); }, 260); } });
-      sub.appendChild(h('div', { estilo: { marginTop: '8px' } }, inp)); setTimeout(() => { if (!est.texto) inp.focus(); }, 40);
+      const inp = h('input', { class: 'entrada', type: 'search', placeholder: 'Buscar por nombre o categoría', value: est.texto, 'aria-label': 'Buscar movimientos',
+        oninput: (e) => { est.texto = e.target.value; clearTimeout(est.t); est.t = setTimeout(() => { redibujar(); setTimeout(() => { const i = g.document.querySelector('input[type=search]'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 30); }, 260); } });
+      sub.appendChild(h('div', { estilo: { marginTop: '10px' } }, inp)); setTimeout(() => { if (!est.texto) inp.focus(); }, 40);
     }
-    sub.appendChild(h('div', { class: 'segmentos', estilo: { marginTop: '12px' } }, [['todos', 'Todos'], ['gasto', 'Gastos'], ['ingreso', 'Ingresos']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': est.tipo === k ? 'true' : 'false', onclick: () => { est.tipo = k; est.pagina = 1; AF.app.redibujar(); } }, t))));
+    // tipo
+    sub.appendChild(h('div', { class: 'chips-filtro', role: 'group', 'aria-label': 'Qué ver' }, [['todos', 'Todo'], ['gasto', 'Gastos'], ['ingreso', 'Ingresos'], ['innecesarios', 'Innecesarios']].map(([k, t]) => h('button', { type: 'button', class: 'chip-filtro' + (k === 'innecesarios' ? ' gusto' : ''), 'aria-pressed': est.tipo === k ? 'true' : 'false', onclick: () => { est.tipo = k; est.pagina = 1; if (k === 'ingreso' && est.cat && S().categoria(est.cat).tipo !== 'ingreso') est.cat = null; redibujar(); } }, t))));
+    if (est.cat) {
+      const c = S().categoria(est.cat);
+      sub.appendChild(h('div', { class: 'chips-filtro' }, h('button', { type: 'button', class: 'chip-filtro activo', 'aria-label': 'Quitar filtro ' + c.nombre, onclick: () => { est.cat = null; redibujar(); } }, c.icono + ' ' + c.nombre, ico('cerrar', 'chico'))));
+    }
+    // vista
+    sub.appendChild(h('div', { class: 'segmentos chicos', estilo: { marginTop: '12px' } }, [['lista', 'Lista'], ['categorias', 'Categorías'], ['libro', 'Libro'], ['tabla', 'Tabla']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': est.vista === k ? 'true' : 'false', onclick: () => { est.vista = k; est.pagina = 1; redibujar(); } }, t))));
     cont.appendChild(sub);
   }
+  function elegirFecha(hoy) {
+    const inp = h('input', { class: 'entrada', type: 'date', value: est.ref, max: hoy });
+    const api = hoja({ titulo: 'Ir a una fecha', cuerpo: h('div', { class: 'campo' }, inp, h('div', { class: 'ayuda' }, 'Te llevo al ' + (est.periodo === 'dia' ? 'día' : est.periodo === 'semana' ? 'la semana' : est.periodo === 'anio' ? 'año' : 'mes') + ' de esa fecha.')),
+      acciones: [{ texto: 'Ir', clase: 'btn-primario', onclick: () => { if (!inp.value) return false; est.ref = inp.value; est.pagina = 1; AF.app.redibujar(); } }] });
+    return api;
+  }
 
+  /* ---------------------------------------------------------------------- resumen */
+  function sumas(lista) {
+    const ing = lista.filter((m) => m.tipo === 'ingreso').reduce((s, m) => s + m.monto, 0);
+    const gas = lista.filter((m) => m.tipo === 'gasto').reduce((s, m) => s + m.monto, 0);                       // todo lo que compraste (con tarjeta incluida)
+    const efectivo = lista.filter((m) => m.tipo === 'gasto' && m.cuenta !== 'tarjeta').reduce((s, m) => s + m.monto, 0);
+    const conTarjeta = gas - efectivo;
+    const pag = lista.filter((m) => m.tipo === 'pago_tarjeta').reduce((s, m) => s + m.monto, 0);
+    const inn = lista.filter(esInnecesario).reduce((s, m) => s + m.monto, 0);
+    // balance = lo que entró menos lo que salió de tu bolsillo (las compras con tarjeta salen cuando pagas la tarjeta)
+    return { ing, gas, efectivo, conTarjeta, pag, inn, balance: ing - efectivo - pag };
+  }
   function resumen(lista) {
-    const ing = lista.filter((m) => m.tipo === 'ingreso').reduce((s, m) => s + m.monto, 0), gas = lista.filter((m) => m.tipo === 'gasto').reduce((s, m) => s + m.monto, 0);
-    return h('div', { class: 'dos-datos', estilo: { marginTop: '16px' } },
-      h('div', null, h('div', { class: 'dato-etiqueta suave' }, 'Ingresos'), h('div', { class: 'dato-valor', estilo: { color: 'var(--ingreso)' } }, $(ing))),
-      h('div', null, h('div', { class: 'dato-etiqueta suave' }, 'Gastos'), h('div', { class: 'dato-valor', estilo: { color: 'var(--gasto)' } }, $(gas))));
+    const t = sumas(lista);
+    if (est.tipo === 'innecesarios') {
+      const n = lista.length;
+      return h('div', { class: 'resumen-tres', estilo: { marginTop: '16px' } },
+        h('div', null, h('div', { class: 'dato-etiqueta' }, 'Innecesarios'), h('div', { class: 'dato-valor', estilo: { color: 'var(--gasto)' } }, $(t.inn))),
+        h('div', null, h('div', { class: 'dato-etiqueta' }, 'Compras'), h('div', { class: 'dato-valor' }, String(n))),
+        h('div', null, h('div', { class: 'dato-etiqueta' }, 'Promedio'), h('div', { class: 'dato-valor' }, n ? $(t.inn / n) : '—')));
+    }
+    const datos = [['Ingresos', $(t.ing), 'var(--ingreso)'], ['Gastos', $(t.gas), 'var(--gasto)'], ['Balance', (t.balance < 0 ? '−' : '') + $(Math.abs(t.balance)), t.balance < 0 ? 'var(--gasto)' : 'inherit']];
+    const notas = [];
+    if (t.conTarjeta || t.pag) notas.push((t.conTarjeta ? 'Con tarjeta compraste ' + $(t.conTarjeta) + (t.pag ? ' y ' : '. ') : '') + (t.pag ? 'pagaste ' + $(t.pag) + ' a tu tarjeta. ' : '') + 'El balance resta solo lo que salió de tu bolsillo.');
+    return h('div', null,
+      h('div', { class: 'resumen-tres', estilo: { marginTop: '16px' } }, datos.map(([e, v, col]) => h('div', null, h('div', { class: 'dato-etiqueta' }, e), h('div', { class: 'dato-valor', estilo: { color: col } }, v)))),
+      notas.map((x) => h('p', { class: 'texto-xs suave', estilo: { marginTop: '6px' } }, x)),
+      t.inn && est.tipo !== 'ingreso' ? h('button', { class: 'enlace texto-sm', type: 'button', estilo: { marginTop: '4px' }, onclick: () => { est.tipo = 'innecesarios'; AF.app.redibujar(); } }, $(t.inn) + ' fueron gastos innecesarios · ver') : null);
   }
 
   /* ------------------------------------------------------------------------ lista */
+  function vacio() {
+    const txt = est.texto ? ['No encontré nada con «' + est.texto + '»', 'Prueba con otra palabra.']
+      : est.tipo === 'innecesarios' ? ['Ningún gasto innecesario en este periodo', 'Cuando algo cuente como gusto o antojo, aparece aquí.']
+        : est.tipo === 'ingreso' ? ['Sin ingresos en este periodo', 'Dime «me pagaron 500» y lo anoto.']
+          : ['Sin movimientos en este periodo', 'Toca el micrófono o el + para agregar uno.'];
+    return h('div', { class: 'vacio' }, h('strong', null, txt[0]), txt[1]);
+  }
   function lista(cont, D, hoy) {
     const movs = filtrar(D);
     const cuerpo = h('div', { class: 'contenido' });
     cuerpo.appendChild(resumen(movs));
-    if (!movs.length) {
-      cuerpo.appendChild(h('div', { class: 'vacio' }, h('strong', null, est.texto ? 'No encontré nada con «' + est.texto + '»' : 'Sin movimientos en este periodo'), est.texto ? 'Prueba con otra palabra.' : 'Toca el micrófono o el + para agregar uno.'));
-    } else {
-      const total = movs.length;
-      agrupar(movs, hoy).forEach((dia) => {
-        cuerpo.appendChild(h('div', { class: 'dia-titulo' }, h('span', null, dia.titulo), h('span', { class: 'num' }, (dia.total >= 0 ? '+' : '−') + $(Math.abs(dia.total)))));
-        cuerpo.appendChild(h('div', { class: 'lista' }, dia.movs.map((m) => C().filaMov(m, hoy, () => C().editarMov(m), false))));
+    if (!movs.length) cuerpo.appendChild(vacio());
+    else {
+      C().agruparPorDia(movs, hoy).forEach((dia) => {
+        if (est.periodo !== 'dia') cuerpo.appendChild(h('div', { class: 'dia-titulo' }, h('span', null, dia.titulo), h('span', { class: 'num' }, (dia.total >= 0 ? '+' : '−') + $(Math.abs(dia.total)))));
+        cuerpo.appendChild(h('div', { class: 'lista', estilo: est.periodo === 'dia' ? { marginTop: '14px' } : null }, dia.movs.map((m) => C().filaMov(m, hoy, () => C().editarMov(m), false))));
       });
-      cuerpo.appendChild(h('p', { class: 'texto-xs suave', estilo: { textAlign: 'center', marginTop: '24px' } }, total + (total === 1 ? ' movimiento' : ' movimientos')));
+      cuerpo.appendChild(h('p', { class: 'texto-xs suave', estilo: { textAlign: 'center', marginTop: '24px' } }, movs.length + (movs.length === 1 ? ' movimiento' : ' movimientos')));
     }
     cont.appendChild(cuerpo);
   }
-  const agrupar = (movs, hoy) => C().agruparPorDia(movs, hoy);
+
+  /* -------------------------------------------------------------------- categorías */
+  function categorias(cont, D, hoy) {
+    const movs = filtrar(D);
+    const cuerpo = h('div', { class: 'contenido' });
+    cuerpo.appendChild(resumen(movs));
+    const grupos = {}; let pagosT = 0, nPagosT = 0;
+    movs.forEach((m) => { if (m.tipo === 'pago_tarjeta') { pagosT += m.monto; nPagosT++; return; } const k = m.cat; const gr = (grupos[k] = grupos[k] || { k, total: 0, n: 0, tipo: m.tipo === 'ingreso' ? 'ingreso' : 'gasto' }); gr.total += m.monto; gr.n++; });
+    const arr = Object.values(grupos).sort((a, b) => b.total - a.total);
+    if (!arr.length && !pagosT) { cuerpo.appendChild(vacio()); cont.appendChild(cuerpo); return; }
+    // gastos e ingresos por separado: el porcentaje es sobre el total de su grupo
+    const bloque = (titulo, lista) => {
+      if (!lista.length) return null;
+      const max = lista[0].total, total = lista.reduce((s, x) => s + x.total, 0);
+      return h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, titulo), h('span', { class: 'texto-sm suave' }, $(total))),
+        h('div', { class: 'tarjeta' }, lista.map((x) => {
+          const c = x.k === '__pago' ? { icono: '💳', nombre: 'Pagos de tarjeta', color: '#6B7280' } : S().categoria(x.k);
+          const pct = total ? Math.round((x.total / total) * 100) : 0;
+          return h('button', { class: 'barra-cat', type: 'button', 'aria-label': c.nombre + ' ' + $(x.total), onclick: () => { if (x.k === '__pago') { est.tipo = 'gasto'; est.cat = null; est.texto = 'pago de tarjeta'; } else { est.cat = x.k; if (est.tipo === 'innecesarios') est.tipo = 'gasto'; } est.vista = 'lista'; AF.app.redibujar(); } },
+            h('div', { class: 'barra-cat-cab' }, h('span', null, c.icono + ' ' + c.nombre), h('span', { class: 'barra-cat-monto' }, $(x.total), h('span', { class: 'suave' }, ' · ' + pct + ' %'))),
+            h('div', { class: 'barra-cat-pista' }, h('i', { estilo: { width: Math.max(2, Math.round((x.total / max) * 100)) + '%', background: c.color || 'var(--acento)' } })),
+            h('div', { class: 'barra-cat-sub' }, x.n + (x.n === 1 ? ' movimiento' : ' movimientos') + ' · toca para verlos'));
+        })));
+    };
+    [bloque('Gastos por categoría', arr.filter((x) => x.tipo === 'gasto')), bloque('Ingresos por categoría', arr.filter((x) => x.tipo === 'ingreso'))].forEach((b) => b && cuerpo.appendChild(b));
+    if (pagosT) cuerpo.appendChild(h('button', { class: 'tarjeta', type: 'button', estilo: { width: '100%', textAlign: 'left', marginTop: '14px' }, onclick: () => { est.tipo = 'gasto'; est.cat = null; est.texto = 'pago de tarjeta'; est.vista = 'lista'; AF.app.redibujar(); } },
+      h('div', { class: 'barra-cat-cab' }, h('span', null, '💳 Pagos a tus tarjetas'), h('span', { class: 'barra-cat-monto' }, $(pagosT))),
+      h('div', { class: 'barra-cat-sub' }, nPagosT + (nPagosT === 1 ? ' pago' : ' pagos') + ' · no es un gasto nuevo: baja la deuda de compras que ya están arriba')));
+    cont.appendChild(cuerpo);
+  }
+
+  /* ------------------------------------------------------------------------ libro */
+  // Libro contable: fecha, concepto, ingreso, egreso y saldo acumulado dentro del periodo (los pagos de tarjeta son egresos).
+  function libro(cont, D, hoy) {
+    const movs = filtrar(D).sort((a, b) => (a.fecha === b.fecha ? a.creado - b.creado : a.fecha < b.fecha ? -1 : 1));
+    const cuerpo = h('div', { class: 'contenido' });
+    cuerpo.appendChild(resumen(movs));
+    if (!movs.length) { cuerpo.appendChild(vacio()); cont.appendChild(cuerpo); return; }
+    let saldo = 0, ing = 0, egr = 0, tarj = 0;
+    const filas = movs.map((m) => {
+      const esIng = m.tipo === 'ingreso', esTarj = m.tipo === 'gasto' && m.cuenta === 'tarjeta';
+      const nombre = m.tipo === 'pago_tarjeta' ? 'Pago ' + ((S().buscar('tarjetas', m.tarjetaId) || {}).nombre || 'tarjeta') : (m.desc || S().categoria(m.cat).nombre);
+      const catTxt = m.tipo === 'pago_tarjeta' ? 'Baja tu deuda' : S().categoria(m.cat).nombre;
+      if (esIng) { ing += m.monto; saldo += m.monto; } else if (esTarj) { tarj += m.monto; } else { egr += m.monto; saldo -= m.monto; }
+      const fechaTxt = U.deISO(m.fecha).getDate() + ' ' + U.MESES_CORTOS[U.deISO(m.fecha).getMonth()] + (est.periodo === 'anio' ? ' ' + m.fecha.slice(2, 4) : '');
+      return h('tr', { onclick: () => C().editarMov(m), estilo: { cursor: 'pointer' } },
+        h('td', { class: 'concepto' }, h('div', null, nombre), h('div', { class: 'texto-xs suave' }, fechaTxt + ' · ' + catTxt + (esTarj ? ' · con tarjeta' : '') + (esInnecesario(m) ? ' · innecesario' : ''))),
+        h('td', { class: 'der ing' }, esIng ? $(m.monto) : ''),
+        h('td', { class: 'der egr' + (esTarj ? ' tarjeta' : '') }, esIng ? '' : $(m.monto)),
+        h('td', { class: 'der saldo' + (saldo < 0 ? ' negativo' : '') }, esTarj ? h('span', { class: 'suave' }, '—') : (saldo < 0 ? '−' : '') + $(Math.abs(saldo))));
+    });
+    cuerpo.appendChild(h('p', { class: 'texto-sm suave', estilo: { marginTop: '14px' } }, 'El saldo suma los ingresos y resta lo que salió de tu bolsillo.' + (tarj ? ' Las compras con tarjeta (' + $(tarj) + ') salen en gris: se descuentan cuando pagas la tarjeta.' : '') + ' Toca una fila para corregirla.'));
+    cuerpo.appendChild(h('div', { class: 'libro-caja', estilo: { marginTop: '10px' } }, h('table', { class: 'tabla libro' },
+      h('thead', null, h('tr', null, h('th', { scope: 'col' }, 'Concepto'), h('th', { scope: 'col', class: 'der' }, 'Ingreso'), h('th', { scope: 'col', class: 'der' }, 'Egreso'), h('th', { scope: 'col', class: 'der' }, 'Saldo'))),
+      h('tbody', null, filas),
+      h('tfoot', null, h('tr', null, h('td', null, 'Totales'), h('td', { class: 'der ing' }, $(ing)), h('td', { class: 'der egr' }, $(egr)), h('td', { class: 'der saldo' + (saldo < 0 ? ' negativo' : '') }, (saldo < 0 ? '−' : '') + $(Math.abs(saldo))))))));
+    cont.appendChild(cuerpo);
+  }
 
   /* ------------------------------------------------------------------------ tabla */
   function tabla(cont, D, hoy) {
@@ -5098,8 +5667,8 @@
     const iTipo = h('select', { 'aria-label': 'Tipo nuevo', onchange: (e) => { n.tipo = e.target.value; AF.ui.vaciar(iCat); opcionesCat(n.tipo, null).forEach((o) => iCat.appendChild(o)); n.cat = iCat.value; } }, h('option', { value: 'gasto' }, 'Gasto'), h('option', { value: 'ingreso' }, 'Ingreso'));
     const iMonto = h('input', { inputmode: 'decimal', placeholder: '0,00', 'aria-label': 'Monto nuevo' });
     const iCat = h('select', { 'aria-label': 'Categoría nueva', onchange: (e) => { n.cat = e.target.value; } }, opcionesCat('gasto', 'otros'));
-    const iDesc = h('input', { placeholder: 'Detalle', 'aria-label': 'Detalle nuevo' });
-    const iNec = h('select', { 'aria-label': 'Necesario o gusto nuevo' }, h('option', { value: 'auto' }, 'Auto'), h('option', { value: 'N' }, 'Necesario'), h('option', { value: 'G' }, 'Gusto'));
+    const iDesc = h('input', { placeholder: 'Nombre', 'aria-label': 'Nombre nuevo' });
+    const iNec = h('select', { 'aria-label': 'Necesario o innecesario' }, h('option', { value: 'auto' }, 'Auto'), h('option', { value: 'N' }, 'Necesario'), h('option', { value: 'G' }, 'Innecesario'));
     function agregar() {
       const v = U.parseNumero(iMonto.value);
       if (!(v > 0)) { errorEl.textContent = 'Escribe un monto mayor que cero.'; iMonto.focus(); return; }
@@ -5118,33 +5687,58 @@
     /* filas existentes: se guardan al salir de la celda */
     const filas = visibles.map((m) => {
       const aplicar = (patch, nota) => { S().editar('movs', m.id, patch, nota || 'Edité un movimiento (tabla)'); };
-      const c0 = S().categoria(m.cat);
+      const c0 = m.cat ? S().categoria(m.cat) : null;
       const esPago = m.tipo === 'pago_tarjeta';
       return h('tr', { 'data-id': m.id },
         h('td', null, h('input', { type: 'date', value: m.fecha, max: U.sumarDias(hoy, 366), 'aria-label': 'Fecha', onchange: (e) => { if (e.target.value) aplicar({ fecha: e.target.value }); else e.target.value = m.fecha; } })),
         h('td', null, esPago ? h('span', { class: 'suave', estilo: { padding: '0 8px' } }, 'Pago tarjeta') : h('select', { 'aria-label': 'Tipo', onchange: (e) => { const t = e.target.value; aplicar({ tipo: t, cat: cats(t)[0].id, nec: null }); AF.app.redibujar(); } }, h('option', { value: 'gasto', selected: m.tipo === 'gasto' }, 'Gasto'), h('option', { value: 'ingreso', selected: m.tipo === 'ingreso' }, 'Ingreso'))),
         h('td', { class: 'num' }, h('input', { inputmode: 'decimal', value: String(m.monto).replace('.', ','), 'aria-label': 'Monto', onchange: (e) => { const v = U.parseNumero(e.target.value); if (v > 0) aplicar({ monto: U.r2(v) }); else e.target.value = String(m.monto).replace('.', ','); } })),
-        h('td', null, esPago ? null : h('select', { 'aria-label': 'Categoría', onchange: (e) => { const c = S().categoria(e.target.value); const p = { cat: c.id }; if (m.tipo === 'gasto' && (m.nec == null || m.nec === c0.nec)) p.nec = c.nec || null; aplicar(p); if (m.desc) S().aprender(m.desc, c.id); } }, opcionesCat(m.tipo, m.cat))),
-        h('td', null, h('input', { value: m.desc || '', maxlength: 80, 'aria-label': 'Detalle', onchange: (e) => aplicar({ desc: e.target.value.trim() }) })),
-        h('td', null, m.tipo === 'gasto' ? h('select', { 'aria-label': 'Necesario o gusto', onchange: (e) => aplicar({ nec: e.target.value === 'S' ? null : e.target.value }) }, h('option', { value: 'S', selected: m.nec == null }, '—'), h('option', { value: 'N', selected: m.nec === 'N' }, 'Necesario'), h('option', { value: 'G', selected: m.nec === 'G' }, 'Gusto')) : null),
+        h('td', null, esPago ? h('span', { class: 'suave', estilo: { padding: '0 8px' } }, (S().buscar('tarjetas', m.tarjetaId) || {}).nombre || '') : h('select', { 'aria-label': 'Categoría', onchange: (e) => { const c = S().categoria(e.target.value); const p = { cat: c.id }; if (m.tipo === 'gasto' && (m.nec == null || m.nec === c0.nec)) p.nec = c.nec || null; aplicar(p); if (m.desc) S().aprender(m.desc, c.id); } }, opcionesCat(m.tipo, m.cat))),
+        h('td', null, esPago ? null : h('input', { value: m.desc || '', maxlength: 80, 'aria-label': 'Nombre', onchange: (e) => aplicar({ desc: e.target.value.trim() }) })),
+        h('td', null, m.tipo === 'gasto' ? h('select', { 'aria-label': 'Necesario o innecesario', onchange: (e) => aplicar({ nec: e.target.value === 'S' ? null : e.target.value }) }, h('option', { value: 'S', selected: m.nec == null }, '—'), h('option', { value: 'N', selected: m.nec === 'N' }, 'Necesario'), h('option', { value: 'G', selected: m.nec === 'G' }, 'Innecesario')) : null),
         h('td', null, h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Borrar', estilo: { width: '40px', height: '40px', color: 'var(--gasto)' }, onclick: () => { C().borrarMov(m); AF.app.redibujar(); } }, ico('basura'))));
     });
-    const cab = ['Fecha', 'Tipo', 'Monto', 'Categoría', 'Detalle', 'Necesario o gusto', ''];
+    const cab = ['Fecha', 'Tipo', 'Monto', 'Categoría', 'Nombre', 'Necesario', ''];
     const caja = h('div', { class: 'tabla-caja', estilo: { marginTop: '14px' } }, h('table', { class: 'tabla' }, h('colgroup', null, ['c-fecha', 'c-tipo', 'c-monto', 'c-cat', 'c-detalle', 'c-nec', 'c-acc'].map((c) => h('col', { class: c }))), h('thead', null, h('tr', null, cab.map((t) => h('th', { scope: 'col' }, t)))), h('tbody', null, filaNueva, filas)));
     cont.appendChild(h('div', { class: 'contenido' }, resumen(todos), h('p', { class: 'texto-sm suave', estilo: { marginTop: '10px' } }, 'Escribe en la fila de arriba y pulsa Enter para agregar. Cambia cualquier celda y se guarda sola.'), errorEl, caja,
       todos.length > visibles.length ? h('button', { class: 'btn btn-borde btn-bloque', type: 'button', estilo: { marginTop: '16px' }, onclick: () => { est.pagina++; AF.app.redibujar(); } }, 'Ver más (' + (todos.length - visibles.length) + ')') : null,
       h('div', { estilo: { height: '30px' } })));
   }
 
-  function render(cont) {
-    const D = S().d, hoy = AF.app.hoy();
-    cabecera(cont);
-    if (est.tabla) { AF.app.noRefrescar = true; tabla(cont, D, hoy); } else { AF.app.noRefrescar = false; lista(cont, D, hoy); }
+  /* --------------------------------------------------------------------- exportar */
+  function exportar() {
+    const D = S().d, { desde, hasta } = rango();
+    const sello = desde === hasta ? desde : desde + '_' + hasta;
+    const hacer = async (fn, ok) => { try { await fn(); AF.ui.aviso(ok); } catch (e) { AF.ui.aviso((e && e.message) || 'No se pudo'); } };
+    hoja({ titulo: 'Exportar este periodo', cuerpo: h('div', null, h('p', { class: 'suave', estilo: { marginTop: '4px' } }, 'Se exporta lo que ves: ' + tituloPeriodo(AF.app.hoy()).toLowerCase() + '.'),
+      h('div', { estilo: { display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '14px' } },
+        h('button', { class: 'btn btn-borde btn-bloque', type: 'button', onclick: (e) => { hacer(() => N().entregarArchivo('movimientos-' + sello + '.csv', '﻿' + AF.informes.csv(D, desde, hasta), 'text/csv'), 'CSV listo'); e.currentTarget.closest('.hoja').previousSibling.click(); } }, 'CSV (se abre en cualquier hoja de cálculo)'),
+        h('button', { class: 'btn btn-borde btn-bloque', type: 'button', onclick: (e) => { if (!C().requiere('exportarExcel')) return; hacer(() => N().entregarArchivo('movimientos-' + sello + '.xlsx', AF.archivos.excelMovimientos(D, desde, hasta), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'), 'Excel listo'); e.currentTarget.closest('.hoja').previousSibling.click(); } }, 'Excel', AF.acceso.tiene('exportarExcel') ? null : AF.ui.chipPro()),
+        h('button', { class: 'btn btn-borde btn-bloque', type: 'button', onclick: (e) => { e.currentTarget.closest('.hoja').previousSibling.click(); AF.app.abrir('Resumen', (c) => V.informesUI.resumen(c)); } }, 'Ver resumen y reportes en PDF'))) });
   }
 
+  /* ----------------------------------------------------------------------- render */
+  function render(cont) {
+    const D = S().d, hoy = AF.app.hoy();
+    cabecera(cont, hoy);
+    AF.app.noRefrescar = est.vista === 'tabla';
+    if (est.vista === 'tabla') tabla(cont, D, hoy);
+    else if (est.vista === 'categorias') categorias(cont, D, hoy);
+    else if (est.vista === 'libro') libro(cont, D, hoy);
+    else lista(cont, D, hoy);
+  }
+
+  // Al entrar desde otra pantalla con opciones ({ tipo: 'innecesarios' }, { cat }, { periodo, ref }) se aplican y se limpian las demás.
+  function alEntrar(o) {
+    if (!o || !Object.keys(o).length) return;
+    est.tipo = o.tipo || 'todos'; est.cat = o.cat || null; est.texto = ''; est.buscar = false; est.pagina = 1;
+    if (o.periodo) est.periodo = o.periodo;
+    est.ref = o.ref || AF.app.hoy();
+    if (o.vista) est.vista = o.vista; else if (est.vista === 'tabla') est.vista = 'lista';
+  }
   // Abre la lista de movimientos en un mes (lo usa Resumen al tocar una barra o el botón «Ver movimientos»).
-  function irAMes(mesISO) { est.mes = U.inicioMes(mesISO); est.tipo = 'todos'; est.cat = null; est.texto = ''; est.buscar = false; est.pagina = 1; AF.app.ir('movimientos'); }
-  V.movimientos = { render, estado: est , irAMes };
+  function irAMes(mesISO) { est.periodo = 'mes'; est.ref = U.inicioMes(mesISO); est.tipo = 'todos'; est.cat = null; est.texto = ''; est.buscar = false; est.pagina = 1; est.vista = 'lista'; AF.app.ir('movimientos'); }
+  V.movimientos = { render, estado: est, irAMes, alEntrar };
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
 
@@ -5217,7 +5811,7 @@
     const cuerpo = h('div', { class: 'contenido' });
     if (!D.tarjetas.length) {
       cuerpo.appendChild(h('div', { class: 'vacio' }, h('strong', null, 'Agrega tu tarjeta de crédito'),
-        'Te digo cuánto pagar, cuándo, y cómo van tus ' + palabraCuotas() + '. Pones tú el corte, el pago y la tasa: no invento nada.',
+        'Te digo cuánto pagar, cuándo, y cómo van tus compras ' + (palabraCuotas() === 'diferido' ? 'diferidas' : 'en cuotas') + '. Pones tú el corte, el pago y la tasa: no invento nada.',
         h('div', { estilo: { marginTop: '16px' } }, h('button', { class: 'btn btn-voz', type: 'button', onclick: nueva }, 'Agregar tarjeta'))));
     } else {
       cuerpo.appendChild(h('div', { estilo: { display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '4px' } },
@@ -5417,21 +6011,71 @@
     // mínimo vs total (Pro)
     const mv = AF.tarjetas.minimoVsTotal(t, e);
     if (AF.acceso.tiene('asesorTarjeta')) {
-      if (mv) cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, '¿Mínimo o total?')),
+      if (mv && mv.queda > 0.5) cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, '¿Mínimo o total?')),
         h('div', { class: 'nota pro' }, ico('info'), h('span', null, 'Si pagas el total (' + $(mv.pagarTotal) + ') no pagas intereses. Si pagas solo el mínimo (' + $(mv.pagarMinimo) + '), quedan ' + $(mv.queda) + ' y te cobrarían unos ' + $(mv.interesEstimadoMes) + ' de interés en un mes (estimado).'))));
-      else if (e.aPagarProximo) cont.appendChild(h('div', { class: 'nota pro', estilo: { marginTop: '16px' } }, ico('info'), h('span', null, 'Para comparar mínimo y total necesito la tasa anual y el % de pago mínimo de tu tarjeta. ', h('button', { class: 'enlace', type: 'button', onclick: () => formTarjeta(t) }, 'Ponerlos'))));
+      else if (e.aPagarProximo && !mv) cont.appendChild(h('div', { class: 'nota pro', estilo: { marginTop: '16px' } }, ico('info'), h('span', null, 'Para comparar mínimo y total necesito la tasa anual y el % de pago mínimo de tu tarjeta. ', h('button', { class: 'enlace', type: 'button', onclick: () => formTarjeta(t) }, 'Ponerlos'))));
     } else if (e.aPagarProximo) cont.appendChild(h('div', { estilo: { marginTop: '16px' } }, C().gancho('Pro te dice si conviene pagar el mínimo o el total.', 'asesorTarjeta')));
 
-    // cuotas pendientes
-    const pend = e.pendientes.filter((q) => q.de > 1 || e.pendientes.length <= 8).slice(0, 24);
-    if (pend.length) {
-      cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Lo que viene')),
-        h('div', { class: 'lista' }, pend.map((q) => fila({ icono: q.de > 1 ? '🧾' : '🛒', titulo: q.desc || S().categoria(q.cat).nombre, sub: (q.de > 1 ? 'Cuota ' + q.n + ' de ' + q.de + ' · ' : '') + 'vence ' + fechaLarga(q.vence), derecha: h('span', { class: 'monto' }, $(q.pendiente)) })))));
-    }
+    loQueViene(cont, e, hoy);
     cont.appendChild(h('button', { class: 'btn btn-borde btn-bloque', type: 'button', estilo: { marginTop: '22px' }, onclick: () => ajustar(t) }, 'Ajustar con mi estado de cuenta'));
     cont.appendChild(h('button', { class: 'btn-texto btn-peligro', type: 'button', estilo: { marginTop: '8px', width: '100%' }, onclick: async () => {
       if (await C().confirmar({ titulo: '¿Quitar ' + t.nombre + '?', texto: 'Sus compras y pagos siguen en tus movimientos, pero ya no se calculan cuotas ni vencimientos.', si: 'Quitar tarjeta', peligro: true })) { S().borrar('tarjetas', t.id, 'Quité ' + t.nombre); AF.app.atras(); }
     } }, 'Quitar esta tarjeta'));
+  }
+
+  /* ------------------------------------------------------------------ lo que viene: una fila por compra */
+  // Cada compra en cuotas es UNA fila («PlayStation · 6 cuotas de $113 · vas en la 2») que se abre para ver sus cuotas.
+  // Las compras corrientes (sin cuotas) se agrupan por fecha de pago.
+  const abiertas = new Set();
+  function loQueViene(cont, e, hoy) {
+    if (!e.cuotas.length) return;
+    const porCompra = {};
+    e.cuotas.forEach((q) => { const c = (porCompra[q.compraId] = porCompra[q.compraId] || { id: q.compraId, desc: q.desc, cat: q.cat, de: q.de, cuotas: [] }); c.cuotas.push(q); });
+    const compras = Object.values(porCompra).map((c) => {
+      c.cuotas.sort((a, b) => a.n - b.n);
+      c.pendientes = c.cuotas.filter((q) => q.pendiente > 0.004);
+      c.pagadas = c.cuotas.length - c.pendientes.length;
+      c.falta = U.r2(c.pendientes.reduce((s, q) => s + q.pendiente, 0));
+      c.total = U.r2(c.cuotas.reduce((s, q) => s + q.monto, 0));
+      c.proxima = c.pendientes[0] || null;
+      return c;
+    }).filter((c) => c.pendientes.length);
+    if (!compras.length) return;
+    const diferidas = compras.filter((c) => c.de > 1).sort((a, b) => (a.proxima.vence < b.proxima.vence ? -1 : 1));
+    const corrientes = compras.filter((c) => c.de === 1);
+    const sec = h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Lo que viene'), h('span', { class: 'texto-xs suave' }, 'Debes ' + $(e.deudaTotal))));
+    const nombreDe = (c) => c.desc || S().categoria(c.cat).nombre;
+    const iconoDe = (c) => S().categoria(c.cat).icono;
+    const cuotaTxt = (q) => h('div', { class: 'compra-cuota' + (q.pendiente <= 0.004 ? ' pagada' : q.vence === e.proximoVence ? ' proxima' : '') },
+      h('span', null, 'Cuota ' + q.n + ' de ' + q.de), h('span', { class: 'suave' }, q.pendiente <= 0.004 ? 'pagada' : (q.vence < hoy ? 'venció el ' : 'vence el ') + fechaLarga(q.vence)), h('span', { class: 'num' }, $(q.pendiente > 0.004 ? q.pendiente : q.monto)));
+    const filaCompra = (c) => {
+      const abierta = abiertas.has(c.id);
+      const n = c.pagadas + 1;
+      const cuotaBase = c.cuotas[0].monto;
+      const iguales = c.cuotas.every((q) => Math.abs(q.monto - cuotaBase) < 0.02);
+      const sub = (iguales ? c.de + ' cuotas de ' + $(cuotaBase) : c.de + ' cuotas') + ' · vas en la ' + Math.min(n, c.de) + ' · faltan ' + $(c.falta);
+      const cab = h('button', { class: 'compra-cab', type: 'button', 'aria-expanded': abierta ? 'true' : 'false', onclick: () => { if (abierta) abiertas.delete(c.id); else abiertas.add(c.id); AF.app.redibujar(); } },
+        h('div', { class: 'ico' }, iconoDe(c)),
+        h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, nombreDe(c)), h('div', { class: 'fila-sub' }, sub)),
+        h('div', { class: 'compra-der' }, h('span', { class: 'monto' }, $(c.proxima.pendiente)), h('span', { class: 'texto-xs suave' }, c.proxima.vence === e.proximoVence ? 'próximo pago' : fechaLarga(c.proxima.vence))),
+        ico('derecha', 'chico'));
+      return h('div', { class: 'compra-fila' + (abierta ? ' abierta' : '') }, cab, abierta ? h('div', { class: 'compra-cuotas' }, c.cuotas.map(cuotaTxt), h('div', { class: 'compra-total texto-xs suave' }, 'Total de la compra ' + $(c.total) + (c.total - c.cuotas.reduce((s, q) => s + q.capital, 0) > 0.5 ? ' · incluye ' + $(c.total - c.cuotas.reduce((s, q) => s + q.capital, 0)) + ' de intereses' : ' · sin intereses'))) : null);
+    };
+    if (diferidas.length) sec.appendChild(h('div', { class: 'lista' }, diferidas.map(filaCompra)));
+    if (corrientes.length) {
+      const porVence = {};
+      corrientes.forEach((c) => { (porVence[c.proxima.vence] = porVence[c.proxima.vence] || []).push(c); });
+      Object.keys(porVence).sort().forEach((v) => {
+        const grupo = porVence[v], total = U.r2(grupo.reduce((s, c) => s + c.falta, 0));
+        const k = 'corr-' + v, abierta = abiertas.has(k);
+        sec.appendChild(h('div', { class: 'compra-fila' + (abierta ? ' abierta' : ''), estilo: { marginTop: '10px' } },
+          h('button', { class: 'compra-cab', type: 'button', 'aria-expanded': abierta ? 'true' : 'false', onclick: () => { if (abierta) abiertas.delete(k); else abiertas.add(k); AF.app.redibujar(); } },
+            h('div', { class: 'ico' }, '🛒'), h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, 'Compras del mes'), h('div', { class: 'fila-sub' }, grupo.length + (grupo.length === 1 ? ' compra' : ' compras') + ' · ' + (v < hoy ? 'vencieron el ' : 'se pagan el ') + fechaLarga(v))),
+            h('div', { class: 'compra-der' }, h('span', { class: 'monto' }, $(total))), ico('derecha', 'chico')),
+          abierta ? h('div', { class: 'compra-cuotas' }, grupo.map((c) => h('div', { class: 'compra-cuota' }, h('span', null, nombreDe(c)), h('span', { class: 'suave' }, S().categoria(c.cat).nombre), h('span', { class: 'num' }, $(c.falta))))) : null));
+      });
+    }
+    cont.appendChild(sec);
   }
 
   /* ------------------------------------------------------------------ costos de la tarjeta */
@@ -5644,7 +6288,7 @@
   }
   function metas(cont) {
     const D = S().d, hoy = AF.app.hoy();
-    cont.appendChild(intro('Ahorra para algo concreto. Con Pro, «Hoy puedes gastar» aparta tus aportes antes de decirte cuánto te queda.'));
+    cont.appendChild(intro('Ahorra para algo concreto. Lo que apartas para tus metas se descuenta de «lo que te queda» en Inicio.'));
     if (!D.metas.length) cont.appendChild(vacio('Aún no tienes metas', 'Un viaje, una moto, un colchón para emergencias. Ponle nombre y monto.', 'Crear una meta', () => formMeta(null)));
     else cont.appendChild(h('div', { class: 'lista' }, D.metas.map((m) => { const a = ahorrado(m), pct = m.objetivo ? a / m.objetivo : 0;
       return bloque({ icono: m.icono || '🏁', titulo: m.nombre, sub: $(a) + ' de ' + $(m.objetivo), derecha: h('span', { class: 'monto' }, Math.round(pct * 100) + ' %'), progreso: pct, nivel: pct >= 1 ? 'ok' : '',
@@ -5726,7 +6370,7 @@
   }
   function fijos(cont) {
     const D = S().d, hoy = AF.app.hoy(), lista = D.pagosFijos.filter(delTipo(false));
-    cont.appendChild(intro('Lo que pagas todos los meses. «Hoy puedes gastar» ya lo aparta para que no te falte.'));
+    cont.appendChild(intro('Lo que pagas todos los meses. «Lo que te queda» en Inicio ya lo aparta para que no te falte.'));
     if (!lista.length) cont.appendChild(vacio('Aún no tienes pagos fijos', 'Arriendo, internet, colegio, la cuota de la moto…', 'Agregar un pago fijo', () => formFijo(null, false)));
     else {
       cont.appendChild(h('div', { class: 'resumen-dos' }, h('div', null, h('div', { class: 'dato-etiqueta suave' }, 'Al mes'), h('div', { class: 'dato-valor' }, $(lista.filter((p) => p.activo !== false).reduce((s, p) => s + p.monto, 0)))),
@@ -6450,27 +7094,27 @@
 
   function render(cont) {
     const st = AF.acceso.estado(AF.app.hoy()), p = PLAN.precios;
-    const cab = h('section', { class: 'nota pro', estilo: { alignItems: 'center' } }, ico('estrella', 'relleno'), h('div', null,
-      st.tipo === 'pro' ? h('div', null, h('strong', null, 'Eres Pro'), ' hasta el ' + U.fechaCorta(st.hasta, AF.app.hoy()) + '.')
-        : st.tipo === 'prueba' ? h('div', null, h('strong', null, 'Pro gratis: ' + (st.diasPrueba === 1 ? 'te queda 1 día' : 'te quedan ' + st.diasPrueba + ' días')), '. Después sigues con Gratis; no pierdes tus datos.')
-          : h('div', null, h('strong', null, 'Estás en Gratis'), '. Todo lo básico funciona; Pro suma lo de abajo.')));
+    const hoy = AF.app.hoy();
+    const cab = h('section', { class: 'nota ' + (st.tipo === 'pro' ? 'pro' : 'info'), estilo: { alignItems: 'center', marginTop: '4px' } }, ico('estrella', 'relleno'), h('div', null,
+      st.tipo === 'pro' ? h('div', null, h('strong', null, 'Eres Pro'), ' hasta el ' + U.fechaCorta(st.hasta, hoy) + '.')
+        : st.tipo === 'prueba' ? h('div', null, h('strong', null, 'Estás probando Pro: ' + (st.diasPrueba === 1 ? 'queda 1 día' : 'quedan ' + st.diasPrueba + ' días')), '. Después sigues con Gratis y no pierdes nada.')
+          : h('div', null, h('strong', null, 'Estás en Gratis'), '. Lo esencial está incluido y no caduca.')));
     cont.appendChild(cab);
     if (st.tipo === 'gratis' && !S().d.plan.inicioPrueba) {
-      cont.appendChild(h('button', { class: 'btn btn-voz btn-bloque', type: 'button', estilo: { marginTop: '16px' }, onclick: () => { AF.acceso.iniciarPrueba(AF.app.hoy()); AF.bus.emit('plan'); aviso('Pro activado ' + PLAN.prueba.diasProGratis + ' días'); } }, 'Probar Pro ' + PLAN.prueba.diasProGratis + ' días gratis'));
-      cont.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '8px', textAlign: 'center' } }, 'Sin tarjeta. Si no te gusta, sigues en Gratis.'));
+      cont.appendChild(h('button', { class: 'btn btn-voz btn-bloque', type: 'button', estilo: { marginTop: '16px' }, onclick: () => { AF.acceso.iniciarPrueba(hoy); AF.bus.emit('plan'); aviso('Pro activado ' + PLAN.prueba.diasProGratis + ' días'); } }, 'Probar Pro ' + PLAN.prueba.diasProGratis + ' días gratis'));
+      cont.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '8px', textAlign: 'center' } }, 'Sin tarjeta. Si no te convence, sigues en Gratis.'));
     }
-    const filas = [h('div', { class: 'cab' }, ''), h('div', { class: 'cab centro' }, 'Gratis'), h('div', { class: 'cab centro' }, 'Pro')];
-    Object.keys(PLAN.limites.gratis).forEach((k) => {
-      if (!LIMITES_TXT[k]) return;
-      const gv = PLAN.limites.gratis[k], pv = PLAN.limites.pro[k];
-      filas.push(h('div', null, LIMITES_TXT[k]), h('div', { class: 'centro num' }, gv === 0 ? '—' : String(gv)), h('div', { class: 'centro num' }, pv == null ? '∞' : String(pv)));
-    });
-    Object.keys(PLAN.funciones).forEach((k) => {
-      const f = PLAN.funciones[k]; if (f.g || !f.p || !ETIQUETAS[k]) return;
-      if (k === 'sri' && !PLAN.pais(S().d.ajustes.pais).sri) return;
-      filas.push(h('div', null, ETIQUETAS[k]), h('div', { class: 'centro suave' }, '—'), h('div', { class: 'centro', estilo: { color: 'var(--acento)' } }, ico('ok', 'chico')));
-    });
-    cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Lo que cambia')), h('div', { class: 'pro-comparar' }, filas)));
+    // Gratis: lo que ya tienes
+    cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Gratis · incluido siempre')),
+      h('div', { class: 'tarjeta' }, h('ul', { class: 'lista-simple' }, PLAN.pro.gratis.map((t) => h('li', null, ico('ok', 'chico'), h('span', null, t)))))));
+    // Pro: lo que suma
+    const esEcuador = !!PLAN.pais(S().d.ajustes.pais).sri;
+    const items = PLAN.pro.pro.filter((x) => esEcuador || !/SRI/.test(x.titulo));
+    cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Pro · lo que suma')),
+      h('div', { class: 'pro-lista' }, items.map((x) => h('div', { class: 'tarjeta pro-item' }, ico('estrella', 'relleno'), h('div', null, h('strong', null, x.titulo), h('span', null, x.texto)))))));
+    // límites, en una línea
+    const lim = Object.keys(PLAN.limites.gratis).filter((k) => LIMITES_TXT[k]).map((k) => LIMITES_TXT[k].toLowerCase() + ': ' + (PLAN.limites.gratis[k] === 0 ? 'ninguna' : PLAN.limites.gratis[k]) + ' en Gratis, sin límite en Pro');
+    cont.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '12px' } }, 'Límites · ' + lim.join(' · ') + '.'));
     if (st.tipo !== 'pro') {
       const ahorro = Math.round((1 - p.anualUSD / (p.mensualUSD * 12)) * 100);
       cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Elige tu plan')),
@@ -6551,7 +7195,7 @@
             let cuota, total;
             if (forma === 'sin') { cuota = U.r2(m / n); total = m; }
             else { const t = num(tasa); if (t == null) { salida.appendChild(h('p', { class: 'suave' }, 'Pon la tasa anual de tu tarjeta para calcular los intereses.')); return; } cuota = AF.tarjetas.cuotaFrancesa(m, t, n); total = U.r2(cuota * n); }
-            lineas.push(['Cuota mensual', $(cuota)], ['Total que pagarás', $(total)], ['Intereses', $(total - m)], ['Tu cuota frente a lo que gastas por día', Math.round((cuota / Math.max(1, hoyPG.porDia * 30)) * 100) + ' % de tu presupuesto mensual disponible']);
+            lineas.push(['Cuota mensual', $(cuota)], ['Total que pagarás', $(total)], ['Intereses', $(total - m)], ['La cuota frente a lo que te queda', hoyPG.resto > 0 ? Math.round((cuota / hoyPG.resto) * 100) + ' % de lo que te queda hasta tu cobro' : 'ya no te queda margen este periodo']);
           }
           salida.appendChild(h('div', { class: 'lista' }, lineas.map(([a, b]) => h('div', { class: 'interruptor', estilo: { minHeight: '48px' } }, h('span', null, a), h('strong', { class: 'num' }, b)))));
           salida.appendChild(h('p', { class: 'texto-xs suave' }, 'Simulación: no cambia tus datos.'));
@@ -6735,7 +7379,7 @@
       f('📲', 'Instalar en este teléfono', 'Se abre como una app, sin barra del navegador', async () => { if (await N().instalacion.instalar()) aviso('Instalada'); }, h('span')),
     ]));
     cuerpo.appendChild(grupo('Tu cuenta', [
-      f('⚙️', 'Ajustes', 'Nombre, país, modo y color, bloqueo, voz', ir('Ajustes', (c) => ajustes(c))),
+      f('⚙️', 'Ajustes', 'Cómo cobras, país, voz, PIN, apariencia', ir('Ajustes', (c) => ajustes(c))),
       f('☁️', 'Copia de seguridad', N().proveedorListo && AF.app.sesion && AF.app.sesion.proveedor === 'google' ? 'En tu Google Drive' : 'En un archivo', ir('Copia de seguridad', (c) => respaldo(c))),
       f('🚪', 'Cerrar sesión', AF.app.sesion && AF.app.sesion.email ? AF.app.sesion.email : 'Vuelves a la primera pantalla', cerrarSesion, h('span')),
     ]));
@@ -6743,7 +7387,8 @@
     cont.appendChild(cuerpo);
   }
   async function cerrarSesion() {
-    if (await C().confirmar({ titulo: '¿Cerrar sesión?', texto: 'Tus datos siguen cifrados en este teléfono. Al volver a entrar con la misma cuenta, los recuperas con tu PIN.', si: 'Cerrar sesión' })) AF.app.cerrarSesion();
+    const conPin = await Sg().tienePin(AF.app.ns);
+    if (await C().confirmar({ titulo: '¿Cerrar sesión?', texto: 'Tus datos siguen cifrados en este teléfono. Al volver a entrar con la misma cuenta los recuperas' + (conPin ? ' con tu PIN.' : '.'), si: 'Cerrar sesión' })) AF.app.cerrarSesion();
   }
 
   /* ------------------------------------------------------------------ ajustes */
@@ -6752,64 +7397,127 @@
     hoja({ titulo, cuerpo: h('div', null, campo('', inp, ayuda)), acciones: [{ texto: 'Guardar', clase: 'btn-primario', onclick: () => { const r = alGuardar(inp.value); return r === false ? false : undefined; } }] });
     setTimeout(() => inp.focus(), 150);
   };
+  const sw = (titulo, sub, activo, cambia) => h('button', { class: 'interruptor', type: 'button', role: 'switch', 'aria-checked': activo ? 'true' : 'false', estilo: { width: '100%', textAlign: 'left' }, onclick: () => cambia(!activo) }, h('div', { class: 'interruptor-texto' }, h('div', { class: 'fila-titulo', estilo: { whiteSpace: 'normal' } }, titulo), sub ? h('div', { class: 'fila-sub', estilo: { whiteSpace: 'normal' } }, sub) : null), h('span', { class: 'pastilla' }));
+  const cerrarHojaDe = (e) => { const hj = e.currentTarget.closest('.hoja'); if (hj && hj.previousSibling) hj.previousSibling.click(); };
+
   function ajustes(cont) {
     const D = S().d, a = D.ajustes;
     const p = PLAN.pais(a.pais);
     const fila2 = (icono, titulo, valor, onclick) => fila({ icono, titulo, sub: valor, onclick, derecha: ico('derecha') });
-    const sw = (titulo, sub, activo, cambia) => h('button', { class: 'interruptor', type: 'button', role: 'switch', 'aria-checked': activo ? 'true' : 'false', estilo: { width: '100%', textAlign: 'left' }, onclick: () => cambia(!activo) }, h('div', { class: 'interruptor-texto' }, h('div', { class: 'fila-titulo', estilo: { whiteSpace: 'normal' } }, titulo), sub ? h('div', { class: 'fila-sub', estilo: { whiteSpace: 'normal' } }, sub) : null), h('span', { class: 'pastilla' }));
-    const sec = (t) => h('div', { class: 'seccion-cabeza', estilo: { marginTop: '28px' } }, h('h2', { class: 'h2' }, t));
-    cont.appendChild(h('div', { estilo: { marginTop: '4px' } }));
-    cont.appendChild(sec('Tus datos'));
+    const sec = (t, primera) => h('div', { class: 'seccion-cabeza', estilo: { marginTop: primera ? '8px' : '28px' } }, h('h2', { class: 'h2' }, t));
+
+    /* --- cómo cobras --- */
+    const editarCobro = () => {
+      const r = { cobro: Object.assign({ modo: 'mensual', dia: a.diaCobro || null, dia2: null, diaSemana: 5 }, a.cobro || {}), sueldo: a.sueldo, moneda: a.moneda };
+      const err = h('p', { class: 'ayuda', role: 'alert', estilo: { color: 'var(--gasto)', minHeight: '18px' } });
+      const etiqueta = h('label', null);
+      const pintarEtiqueta = () => { etiqueta.textContent = r.cobro.modo === 'mensual' ? 'Cuánto cobras al mes' : r.cobro.modo === 'variable' ? 'Cuánto cobras más o menos al mes' : 'Cuánto cobras cada vez'; };
+      const form = V.acceso.formCobro(r, () => { pintarEtiqueta(); err.textContent = ''; });
+      pintarEtiqueta();
+      const dinero = V.acceso.campoDinero(r.sueldo, r.moneda, (v) => { r.sueldo = v; }, 'Cuánto cobras');
+      hoja({ titulo: 'Cómo cobras', cuerpo: h('div', null, h('div', { class: 'campo' }, h('label', null, 'Cada cuánto te pagan'), form), h('div', { class: 'campo' }, etiqueta, dinero.el, h('div', { class: 'ayuda' }, 'Se usa mientras no registres el cobro del periodo. Si varía, dímelo cada vez: «me pagaron 300».')), err),
+        acciones: [{ texto: 'Guardar', clase: 'btn-primario', onclick: () => {
+          if (!V.acceso.cobroListo(r.cobro)) { err.textContent = r.cobro.modo === 'quincenal' ? 'Toca los dos días en que te pagan.' : 'Toca el día en que te pagan.'; return false; }
+          S().ajustar({ cobro: r.cobro, diaCobro: r.cobro.dia || a.diaCobro || 1, sueldo: r.sueldo || null }); AF.app.refrescar();
+        } }] });
+    };
+    const editarPais = () => V.acceso.elegirPais(a.pais, (x) => { S().ajustar({ pais: x.codigo, moneda: x.moneda }); AF.app.refrescar(); });
+    const editarMoneda = () => hoja({ titulo: 'Moneda', cuerpo: h('div', { class: 'opciones', estilo: { marginTop: '12px' } }, Object.keys(PLAN.monedas).map((m) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': a.moneda === m ? 'true' : 'false', onclick: (e) => { S().ajustar({ moneda: m }); AF.app.refrescar(); cerrarHojaDe(e); } }, PLAN.monedas[m].simbolo + ' ' + m + ' · ' + PLAN.monedas[m].nombre))) });
+
+    cont.appendChild(sec('Tu cobro', true));
     cont.appendChild(h('div', { class: 'lista' },
-      fila2('🙂', 'Nombre', a.nombre || 'Sin nombre', () => editor('Nombre', a.nombre, 'texto', (v) => { if (!v.trim()) return false; S().ajustar({ nombre: v.trim() }); })),
-      fila2('🌎', 'País y moneda', p.nombre + ' · ' + a.moneda, () => hoja({ titulo: 'País y moneda', cuerpo: h('div', null, h('div', { class: 'opciones', estilo: { marginTop: '10px' } }, PLAN.paises.map((x) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': a.pais === x.codigo ? 'true' : 'false', onclick: (e) => { S().ajustar({ pais: x.codigo, moneda: x.moneda }); AF.app.refrescar(); e.currentTarget.closest('.hoja').previousSibling.click(); } }, x.nombre))),
-        campo('Moneda', h('div', { class: 'opciones' }, Object.keys(PLAN.monedas).map((m) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': a.moneda === m ? 'true' : 'false', onclick: (e) => { S().ajustar({ moneda: m }); e.currentTarget.closest('.hoja').previousSibling.click(); } }, PLAN.monedas[m].simbolo + ' ' + m))))) })),
-      fila2('📅', 'Día de cobro', 'Día ' + a.diaCobro, () => editor('Día de cobro', a.diaCobro, 'num', (v) => { const n = Math.round(U.parseNumero(v)); if (!(n >= 1 && n <= 31)) return false; S().ajustar({ diaCobro: n }); })),
-      fila2('💼', 'Ingreso mensual', a.sueldo ? $(a.sueldo) : 'Sin definir', () => editor('Ingreso mensual', a.sueldo, 'num', (v) => { S().ajustar({ sueldo: v.trim() ? U.parseNumero(v) : null }); }, 'Se usa solo si aún no registras ingresos en el periodo.')),
-      p.sri ? fila2('👨‍👩‍👧', 'Cargas familiares', String(a.cargas || 0), () => hoja({ titulo: 'Cargas familiares', cuerpo: h('div', { class: 'opciones', estilo: { marginTop: '12px' } }, [0, 1, 2, 3, 4, 5].map((n) => h('button', { type: 'button', class: 'opcion', onclick: (e) => { S().ajustar({ cargas: n }); e.currentTarget.closest('.hoja').previousSibling.click(); } }, n === 5 ? '5 o más' : String(n)))) })) : null));
-    cont.appendChild(sec('Apariencia y voz'));
+      fila2('📅', 'Cómo cobras', V.acceso.textoCobro(a.cobro || { modo: 'mensual', dia: a.diaCobro }) + (a.sueldo ? ' · ' + $(a.sueldo) : ' · sin monto'), editarCobro),
+      fila2('🌎', 'País', p.nombre, editarPais),
+      fila2('💱', 'Moneda', PLAN.monedas[a.moneda] ? PLAN.monedas[a.moneda].simbolo + ' ' + a.moneda : a.moneda, editarMoneda),
+      p.sri ? fila2('👨‍👩‍👧', 'Cargas familiares', String(a.cargas || 0), () => hoja({ titulo: 'Cargas familiares', cuerpo: h('div', { class: 'opciones', estilo: { marginTop: '12px' } }, [0, 1, 2, 3, 4, 5].map((n) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': (a.cargas || 0) === n ? 'true' : 'false', onclick: (e) => { S().ajustar({ cargas: n }); cerrarHojaDe(e); } }, n === 5 ? '5 o más' : String(n)))) })) : null,
+      fila2('🙂', 'Cómo te llamo', a.nombre || 'Sin nombre (opcional)', () => editor('Cómo te llamo', a.nombre, 'texto', (v) => { S().ajustar({ nombre: v.trim() }); }, 'Solo para saludarte. Puedes dejarlo vacío.'))));
+
+    cont.appendChild(sec('Voz'));
     cont.appendChild(h('div', null,
-      h('div', { class: 'campo' }, h('label', null, 'Color de la app'), h('div', { class: 'opciones' }, PLAN.apariencia.colores.map((c) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': (a.colorApp || 'marino') === c.id ? 'true' : 'false', onclick: () => S().ajustar({ colorApp: c.id }) },
-        h('span', { class: 'muestra-color', estilo: { background: AF.tema.paleta('claro', c.id).voz } }), c.nombre)))),
-      h('div', { class: 'campo' }, h('label', null, 'Gráficas'), h('div', { class: 'segmentos' }, [['barras', 'Barras'], ['lineas', 'Líneas'], ['circulo', 'Círculo']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': (a.grafica || 'barras') === k ? 'true' : 'false', onclick: () => S().ajustar({ grafica: k }) }, t)))),
-      h('div', { class: 'campo' }, h('label', null, 'Modo'), h('div', { class: 'segmentos' }, [['auto', 'Automático'], ['claro', 'Claro'], ['oscuro', 'Oscuro']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': (a.tema || 'auto') === k ? 'true' : 'false', onclick: () => S().ajustar({ tema: k }) }, t)))),
-      sw('Que me responda en voz alta', 'Lee en voz alta lo que entendió y las respuestas.', a.respuestaVoz, (v) => S().ajustar({ respuestaVoz: v }))));
+      sw('Que la app me hable', 'Lee en voz alta lo que entendió y las respuestas. Útil si no ves bien la pantalla.', !!a.respuestaVoz, (v) => S().ajustar({ respuestaVoz: v }))));
+
     cont.appendChild(sec('Seguridad'));
-    cont.appendChild(h('div', { class: 'lista' },
-      fila2('⏱️', 'Pedir PIN o huella', a.bloqueoSeg === 0 ? 'Cada vez que salgas' : 'Tras ' + (a.bloqueoSeg >= 60 ? a.bloqueoSeg / 60 + ' min' : a.bloqueoSeg + ' s') + ' fuera de la app', () => hoja({ titulo: 'Pedir PIN o huella', cuerpo: h('div', { class: 'opciones', estilo: { marginTop: '12px' } }, [[0, 'Siempre'], [30, '30 segundos'], [60, '1 minuto'], [300, '5 minutos']].map(([s, t]) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': a.bloqueoSeg === s ? 'true' : 'false', onclick: (e) => { S().ajustar({ bloqueoSeg: s }); e.currentTarget.closest('.hoja').previousSibling.click(); } }, t))) })),
-      fila2('🔑', 'Cambiar mi PIN', 'Uno nuevo de ' + PLAN.sesion.pinMin + ' a ' + PLAN.sesion.pinMax + ' dígitos', cambiarPin)));
-    const zonaHuella = h('div'); cont.appendChild(zonaHuella);
-    N().huellaDisponible().then(async (ok) => {
-      if (!ok) { zonaHuella.appendChild(h('p', { class: 'texto-sm suave', estilo: { marginTop: '8px' } }, 'Este teléfono no tiene huella configurada.')); return; }
-      const on = await Sg().huellaActiva(AF.app.ns);
-      zonaHuella.appendChild(sw('Entrar con huella', 'El PIN sigue sirviendo siempre.', on, async (v) => {
-        try { if (v) await Sg().activarHuella(AF.app.ns, N().secretosHuella); else await Sg().desactivarHuella(AF.app.ns, N().secretosHuella); aviso(v ? 'Huella activada' : 'Huella desactivada'); }
-        catch (e) { aviso('No pude cambiar la huella'); }
-        AF.app.refrescar();
-      }));
-    });
-    cont.appendChild(sec('Tus palabras'));
+    const zonaSeg = h('div'); cont.appendChild(zonaSeg);
+    pintarSeguridad(zonaSeg, a);
+
+    cont.appendChild(sec('Apariencia'));
+    cont.appendChild(h('div', null,
+      h('div', { class: 'campo' }, h('label', null, 'Modo'), h('div', { class: 'segmentos' }, [['auto', 'Automático'], ['claro', 'Claro'], ['oscuro', 'Oscuro']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': (a.tema || 'auto') === k ? 'true' : 'false', onclick: () => S().ajustar({ tema: k }) }, t)))),
+      h('div', { class: 'campo' }, h('label', null, 'Color'), h('div', { class: 'opciones' }, PLAN.apariencia.colores.map((c) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': (a.colorApp || 'marino') === c.id ? 'true' : 'false', onclick: () => S().ajustar({ colorApp: c.id }) },
+        h('span', { class: 'muestra-color', estilo: { background: AF.tema.paleta('claro', c.id).voz } }), c.nombre)))),
+      h('div', { class: 'campo' }, h('label', null, 'Gráficas'), h('div', { class: 'segmentos' }, [['barras', 'Barras'], ['lineas', 'Líneas'], ['circulo', 'Círculo']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': (a.grafica || 'barras') === k ? 'true' : 'false', onclick: () => S().ajustar({ grafica: k }) }, t))))));
+
+    cont.appendChild(sec('Palabras que aprendí'));
     const aprendidas = Object.entries(D.diccionario);
-    cont.appendChild(aprendidas.length ? h('div', { class: 'lista' }, aprendidas.slice(0, 30).map(([w, cat]) => fila({ icono: S().categoria(cat).icono, titulo: w, sub: S().categoria(cat).nombre, derecha: h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Olvidar ' + w, onclick: () => { S().olvidarAprendido(w); AF.app.refrescar(); } }, ico('cerrar')) })))
-      : h('p', { class: 'texto-sm suave' }, 'Cuando corriges una categoría, aprendo la palabra y la verás aquí.'));
+    cont.appendChild(aprendidas.length ? h('div', { class: 'lista' }, aprendidas.slice(0, 40).map(([w, v]) => { const c = S().categoria(S().aprendidoCat(v)); const nec = v && typeof v === 'object' ? v.nec : null; return fila({ icono: c.icono, titulo: w, sub: c.nombre + (nec === 'G' ? ' · innecesario' : nec === 'N' ? ' · necesario' : ''), derecha: h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Olvidar ' + w, onclick: () => { S().olvidarAprendido(w); AF.app.refrescar(); } }, ico('cerrar')) }); }))
+      : h('p', { class: 'texto-sm suave' }, 'Cuando corriges una categoría o respondes una de mis preguntas, aprendo la palabra y la verás aquí.'));
+
     cont.appendChild(sec('Datos'));
     cont.appendChild(h('div', { class: 'lista' },
       fila2('🗑️', 'Borrar todos mis datos', 'Movimientos, tarjetas y metas. No se puede deshacer.', borrarTodo)));
     cont.appendChild(h('div', { estilo: { height: '24px' } }));
   }
 
-  function cambiarPin() {
-    const n = PLAN.sesion;
-    const nuevo = h('input', { class: 'entrada grande', type: 'password', inputmode: 'numeric', maxlength: n.pinMax, 'aria-label': 'PIN nuevo', placeholder: '••••' });
-    const rep = h('input', { class: 'entrada grande', type: 'password', inputmode: 'numeric', maxlength: n.pinMax, 'aria-label': 'Repite el PIN nuevo', placeholder: '••••' });
-    const err = h('div', { class: 'ayuda', role: 'alert', estilo: { color: 'var(--gasto)', minHeight: '18px' } });
-    hoja({ titulo: 'Cambiar mi PIN', cuerpo: h('div', null, h('p', { class: 'suave', estilo: { marginTop: '4px' } }, 'Si lo olvidas, los datos no se pueden recuperar.'), campo('PIN nuevo (' + n.pinMin + ' a ' + n.pinMax + ' números)', nuevo), campo('Repítelo', rep), err),
-      acciones: [{ texto: 'Cambiar PIN', clase: 'btn-primario', onclick: async () => {
+  /* --- seguridad: el PIN es opcional. Apagado = entras directo. --- */
+  async function pintarSeguridad(zona, a) {
+    const ns = AF.app.ns;
+    let conPin = false;
+    try { conPin = await Sg().tienePin(ns); } catch (e) { conPin = false; }
+    AF.ui.vaciar(zona);
+    zona.appendChild(sw('Pedir PIN al abrir', conPin ? 'Nadie entra sin tu PIN. Si lo olvidas, los datos no se recuperan.' : 'Apagado: la app se abre directo. Actívalo si otras personas usan tu teléfono.', conPin, async (v) => {
+      if (v) {
+        const pin = await pedirPinNuevo('Crea tu PIN', 'Activar PIN');
+        if (!pin) return;
+        try { await Sg().ponerPin(ns, pin); if (a.bloqueoSeg == null) S().ajustar({ bloqueoSeg: 60 }); aviso('PIN activado'); } catch (e) { aviso('No pude activar el PIN'); }
+      } else {
+        if (!(await C().confirmar({ titulo: '¿Quitar el PIN?', texto: 'La app se abrirá directo en este teléfono. Tus datos siguen cifrados.', si: 'Quitar PIN' }))) return;
+        try { await Sg().quitarPin(ns); try { await Sg().desactivarHuella(ns, N().secretosHuella); } catch (e2) { /* no había huella */ } aviso('PIN quitado'); } catch (e) { aviso('No pude quitar el PIN'); }
+      }
+      AF.app.refrescar();
+    }));
+    if (!conPin) return;
+    const seg = a.bloqueoSeg == null ? 60 : a.bloqueoSeg;
+    zona.appendChild(h('div', { class: 'lista', estilo: { marginTop: '10px' } },
+      fila({ icono: '⏱️', titulo: 'Pedirlo de nuevo', sub: seg === 0 ? 'Cada vez que salgas de la app' : 'Tras ' + (seg >= 60 ? seg / 60 + ' min' : seg + ' s') + ' fuera de la app', derecha: ico('derecha'), onclick: () => hoja({ titulo: 'Pedir el PIN de nuevo', cuerpo: h('div', { class: 'opciones', estilo: { marginTop: '12px' } }, [[0, 'Cada vez que salga'], [30, 'Tras 30 segundos fuera'], [60, 'Tras 1 minuto fuera'], [300, 'Tras 5 minutos fuera']].map(([s, t]) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': seg === s ? 'true' : 'false', onclick: (e) => { S().ajustar({ bloqueoSeg: s }); cerrarHojaDe(e); AF.app.refrescar(); } }, t))) }) }),
+      fila({ icono: '🔑', titulo: 'Cambiar mi PIN', sub: 'Uno nuevo de ' + PLAN.sesion.pinMin + ' a ' + PLAN.sesion.pinMax + ' números', derecha: ico('derecha'), onclick: cambiarPin })));
+    const zonaHuella = h('div'); zona.appendChild(zonaHuella);
+    N().huellaDisponible().then(async (ok) => {
+      if (!ok) return;
+      const on = await Sg().huellaActiva(ns);
+      zonaHuella.appendChild(h('div', { estilo: { marginTop: '10px' } }, sw('Entrar con huella', 'El PIN sigue sirviendo siempre.', on, async (v) => {
+        try { if (v) await Sg().activarHuella(ns, N().secretosHuella); else await Sg().desactivarHuella(ns, N().secretosHuella); aviso(v ? 'Huella activada' : 'Huella desactivada'); }
+        catch (e) { aviso('No pude cambiar la huella'); }
+        AF.app.refrescar();
+      })));
+    }).catch(() => {});
+  }
+
+  // Pide un PIN nuevo (dos veces). Devuelve el PIN o null si cancela.
+  function pedirPinNuevo(titulo, textoBoton) {
+    return new Promise((res) => {
+      const n = PLAN.sesion;
+      let listo = false;
+      const fin = (v) => { if (!listo) { listo = true; res(v); } };
+      const nuevo = h('input', { class: 'entrada grande', type: 'password', inputmode: 'numeric', maxlength: n.pinMax, 'aria-label': 'PIN nuevo', placeholder: '••••', autocomplete: 'new-password' });
+      const rep = h('input', { class: 'entrada grande', type: 'password', inputmode: 'numeric', maxlength: n.pinMax, 'aria-label': 'Repite el PIN', placeholder: '••••', autocomplete: 'new-password' });
+      const err = h('div', { class: 'ayuda', role: 'alert', estilo: { color: 'var(--gasto)', minHeight: '18px' } });
+      let api;
+      const validar = () => {
         if (!Sg().pinValido(nuevo.value)) { err.textContent = 'Usa de ' + n.pinMin + ' a ' + n.pinMax + ' números.'; return false; }
-        if (Sg().pinDebil(nuevo.value)) { err.textContent = 'Ese PIN es muy fácil de adivinar.'; return false; }
+        if (Sg().pinDebil(nuevo.value)) { err.textContent = 'Ese PIN es muy fácil de adivinar. Prueba otro.'; return false; }
         if (nuevo.value !== rep.value) { err.textContent = 'No coinciden.'; return false; }
-        try { await Sg().cambiarPin(AF.app.ns, nuevo.value); aviso('PIN cambiado'); } catch (e) { aviso('No pude cambiar el PIN'); }
-      } }] });
+        return true;
+      };
+      api = hoja({ titulo, cuerpo: h('div', null, h('p', { class: 'suave', estilo: { marginTop: '4px' } }, 'Si lo olvidas, nadie puede recuperar tus datos: ni yo. Guarda una copia en Drive por si acaso.'), campo('PIN (' + n.pinMin + ' a ' + n.pinMax + ' números)', nuevo), campo('Repítelo', rep), err),
+        alCerrar: () => fin(null),
+        acciones: [{ texto: textoBoton || 'Guardar', clase: 'btn-primario', cierra: false, onclick: () => { if (!validar()) return false; fin(nuevo.value); api.cerrar(); } }] });
+      setTimeout(() => nuevo.focus(), 150);
+    });
+  }
+  async function cambiarPin() {
+    const pin = await pedirPinNuevo('Cambiar mi PIN', 'Cambiar PIN');
+    if (!pin) return;
+    try { await Sg().cambiarPin(AF.app.ns, pin); aviso('PIN cambiado'); } catch (e) { aviso('No pude cambiar el PIN'); }
   }
 
   async function borrarTodo() {
@@ -6824,7 +7532,10 @@
   function respaldo(cont) {
     const D = S().d, esGoogle = AF.app.sesion && AF.app.sesion.proveedor === 'google';
     const info = h('p', { class: 'texto-sm suave', estilo: { marginTop: '8px' } }, 'Revisando…');
-    cont.appendChild(h('p', { class: 'suave', estilo: { marginTop: '4px' } }, 'La copia sale ya cifrada con tu PIN: ni Google ni nadie puede leerla. Para restaurarla necesitas el PIN que usabas al hacerla.'));
+    const nota = h('p', { class: 'suave', estilo: { marginTop: '4px' } }, 'La copia sale cifrada: ni Google ni nadie puede leerla.');
+    cont.appendChild(nota);
+    Sg().tienePin(AF.app.ns).then((conPin) => { nota.textContent = conPin ? 'La copia sale cifrada con tu PIN: ni Google ni nadie puede leerla. Para restaurarla necesitas el PIN que usabas al hacerla.' : 'La copia sale cifrada: ni Google ni nadie puede leerla. Al restaurarla en otro teléfono entras directo, sin PIN.'; }).catch(() => {});
+    if (esGoogle && D.ajustes.ultimaCopia) cont.appendChild(h('p', { class: 'texto-xs suave' }, 'Se guarda sola cada vez que cambias algo (si diste permiso a Drive).'));
     const msg = (t) => { info.textContent = t; };
     const hacer = async (fn, ok, mal) => { try { await fn(); aviso(ok); } catch (e) { aviso(mal || (e && e.message) || 'No se pudo'); } };
     const copia = async () => { await S().guardarYa(); return Sg().paqueteRespaldo(AF.app.ns); };
@@ -6834,7 +7545,7 @@
         h('div', { estilo: { display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '14px' } },
           h('button', { class: 'btn btn-primario btn-bloque', type: 'button', onclick: async (e) => { const boton = e.currentTarget; boton.disabled = true; await hacer(async () => { await N().respaldoSubir(await copia()); S().ajustar({ ultimaCopia: Date.now() }); msg('Última copia: ahora mismo.'); }, 'Copia guardada en Drive', 'No pude subir la copia. ¿Tienes internet y diste permiso?'); boton.disabled = false; } }, ico('nube'), 'Hacer copia ahora'),
           h('button', { class: 'btn btn-borde btn-bloque', type: 'button', onclick: async () => {
-            if (!(await C().confirmar({ titulo: '¿Restaurar la copia de Drive?', texto: 'Reemplaza lo que tienes ahora por la copia. Te pedirá el PIN que usabas al hacerla.', si: 'Restaurar' }))) return;
+            if (!(await C().confirmar({ titulo: '¿Restaurar la copia de Drive?', texto: 'Reemplaza lo que tienes ahora por la copia. Si la copia tenía PIN, te lo pedirá.', si: 'Restaurar' }))) return;
             await hacer(async () => { const p = await N().respaldoBajar(); if (!p) throw new Error('No hay ninguna copia en tu Drive.'); await Sg().restaurarPaquete(AF.app.ns, p); S().cargar(null); AF.app.abierta = false; await V.acceso.bloqueo(); }, 'Copia restaurada');
           } }, 'Restaurar desde Drive'),
           h('button', { class: 'btn-texto btn-peligro', type: 'button', onclick: async () => { if (await C().confirmar({ titulo: '¿Borrar la copia de Drive?', texto: 'Tus datos del teléfono no se tocan.', si: 'Borrar copia', peligro: true })) await hacer(async () => { const r = await N().respaldoBorrar(); msg(r ? 'Copia borrada.' : 'No había copia.'); }, 'Copia de Drive borrada'); } }, 'Borrar la copia de Drive'))));
@@ -6846,7 +7557,7 @@
         h('button', { class: 'btn btn-borde btn-bloque', type: 'button', onclick: () => hacer(async () => { const p = await copia(); await N().entregarArchivo('asistente-financiero-' + AF.app.hoy() + '.copia', JSON.stringify(p), 'application/json'); }, 'Copia lista', 'No pude crear el archivo') }, ico('archivo'), 'Guardar copia en un archivo'),
         h('label', { class: 'btn btn-borde btn-bloque', estilo: { cursor: 'pointer' } }, 'Restaurar desde un archivo', h('input', { type: 'file', class: 'oculto', accept: '.copia,.json,application/json', onchange: async (e) => {
           const f = e.target.files[0]; if (!f) return;
-          if (!(await C().confirmar({ titulo: '¿Restaurar esta copia?', texto: 'Reemplaza lo que tienes ahora. Te pedirá el PIN que usabas al hacerla.', si: 'Restaurar' }))) return;
+          if (!(await C().confirmar({ titulo: '¿Restaurar esta copia?', texto: 'Reemplaza lo que tienes ahora. Si la copia tenía PIN, te lo pedirá.', si: 'Restaurar' }))) return;
           await hacer(async () => { const p = JSON.parse(await f.text()); await Sg().restaurarPaquete(AF.app.ns, p); S().cargar(null); AF.app.abierta = false; await V.acceso.bloqueo(); }, 'Copia restaurada', 'Ese archivo no es una copia válida');
         } })))));
     cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Borrar todo')),
@@ -6884,9 +7595,16 @@
     if (vistaEl) return;
     vistaEl = h('div', { id: 'vista' });
     pestanasEl = h('nav', { class: 'pestanas oculto', 'aria-label': 'Secciones' }, TABS.map(([k, t, i]) => h('button', { class: 'pestana', type: 'button', 'data-tab': k, onclick: () => app.ir(k) }, h('span', { class: 'ico-wrap' }, ico(i)), t)));
-    compositorEl = h('div', { class: 'compositor oculto' }, h('div', { class: 'compositor-barra' },
-      h('button', { class: 'compositor-texto', type: 'button', onclick: () => V().voz.abrir({ modo: 'texto' }) }, 'Dime un gasto o un ingreso'),
-      h('button', { class: 'mic', type: 'button', 'aria-label': 'Hablar', onclick: () => V().voz.abrir({ modo: 'voz' }) }, ico('mic'))));
+    // La barra de abajo ES el campo para escribir: no abre otra pantalla. Con texto, el micrófono se vuelve «enviar».
+    const input = h('input', { class: 'compositor-input', type: 'text', placeholder: 'Dime un gasto o un ingreso', 'aria-label': 'Escribe un gasto, un ingreso o una pregunta', autocomplete: 'off', enterkeyhint: 'send' });
+    const boton = h('button', { class: 'mic', type: 'button', 'aria-label': 'Hablar' }, ico('mic'));
+    const enviar = () => { const t = input.value.trim(); if (!t) return; input.value = ''; input.blur(); pintarBoton(); V().voz.abrir({ texto: t }); };
+    const pintarBoton = () => { AF.ui.vaciar(boton); const hayTexto = !!input.value.trim(); boton.appendChild(ico(hayTexto ? 'enviar' : 'mic')); boton.setAttribute('aria-label', hayTexto ? 'Enviar' : 'Hablar'); };
+    boton.addEventListener('click', () => { if (input.value.trim()) enviar(); else { input.blur(); V().voz.abrir({ modo: 'voz' }); } });
+    input.addEventListener('input', pintarBoton);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); enviar(); } });
+    compositorEl = h('div', { class: 'compositor oculto' }, h('div', { class: 'compositor-barra' }, input, boton));
+    app.compositorInput = input;
     const r = raiz(); r.appendChild(vistaEl); r.appendChild(pestanasEl); r.appendChild(compositorEl);
   }
   function cerrarCapas() { raiz().querySelectorAll('.telon, .hoja, .voz, .aviso-flotante').forEach((e) => e.remove()); }
@@ -6911,6 +7629,9 @@
     const y = g.scrollY;
     AF.ui.vaciar(vistaEl);
     const tope = app.pila[app.pila.length - 1];
+    // el compositor (hablar / escribir) solo en las cuatro pestañas; en pantallas internas tapa el contenido
+    compositorEl.classList.toggle('oculto', !!tope);
+    vistaEl.classList.toggle('sin-compositor', !!tope);
     if (tope) {
       const cuerpo = h('div', { class: 'contenido' });
       const cab = h('header', { class: 'barra-superior' }, h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Atrás', onclick: () => app.atras() }, ico('atras')), h('h1', { class: 'h2' }, tope.titulo));
@@ -6930,7 +7651,7 @@
   app.noRefrescar = false;
   app.refrescar = () => { if (app.noRefrescar) return; cancelAnimationFrame(rafRef); rafRef = requestAnimationFrame(dibujar); };
   app.redibujar = () => { cancelAnimationFrame(rafRef); rafRef = requestAnimationFrame(dibujar); };
-  app.ir = (tab) => { app.noRefrescar = false; app.tab = tab; app.pila = []; cerrarCapas(); g.scrollTo(0, 0); dibujar(); };
+  app.ir = (tab, opciones) => { app.noRefrescar = false; app.tab = tab; app.pila = []; cerrarCapas(); if (V()[tab] && V()[tab].alEntrar) V()[tab].alEntrar(opciones || {}); g.scrollTo(0, 0); dibujar(); };
   app.abrir = (titulo, render) => { app.noRefrescar = false; app.pila.push({ titulo, render }); g.scrollTo(0, 0); dibujar(); };
   app.atras = () => { if (app.pila.length) { app.noRefrescar = false; app.pila.pop(); g.scrollTo(0, 0); dibujar(); return true; } return false; };
 
@@ -6970,21 +7691,38 @@
   };
 
   // Se llama al terminar la bienvenida: crea la bóveda, guarda los ajustes y entra.
+  // Se llama al terminar la bienvenida: crea la bóveda SIN PIN (la persona lo activa luego en Ajustes si quiere), guarda los ajustes y entra.
   app.crearCuenta = async ({ ajustes, pin }) => {
-    if (pin !== null && pin !== undefined) {
-      await Sg().crear(app.ns, pin);
-    } else {
-      await Sg().crearSinPin(app.ns);
-    }
+    if (pin) await Sg().crear(app.ns, pin); else await Sg().crearSinPin(app.ns);
     const nuevo = S().vacio();
-    Object.assign(nuevo.ajustes, { nombre: ajustes.nombre, pais: ajustes.pais, moneda: ajustes.moneda, diaCobro: ajustes.diaCobro, sueldo: ajustes.sueldo || null, cargas: ajustes.cargas || 0, bienvenidaHecha: true });
+    const nombre = (app.sesion && app.sesion.nombre) || ajustes.nombre || '';
+    Object.assign(nuevo.ajustes, { nombre, pais: ajustes.pais, moneda: ajustes.moneda, diaCobro: ajustes.cobro ? ajustes.cobro.dia : (ajustes.diaCobro || 1), cobro: ajustes.cobro || null, sueldo: ajustes.sueldo || null, cargas: ajustes.cargas || 0, bienvenidaHecha: true, respuestaVoz: !!PLAN.voz.hablarPorDefecto });
     nuevo.tarjetas = (ajustes.tarjetas || []).map((t) => Object.assign({ id: AF.util.uid(), creado: Date.now() }, t));
     if (PLAN.prueba.iniciaAlCrearCuenta) nuevo.plan.inicioPrueba = app.hoy();
     S().cargar(nuevo, { escribir: (dd) => Sg().guardarDatos(app.ns, dd) });
     await S().guardarYa();
-    await V().acceso.ofrecerHuella();
     await app.entrar(true);
   };
+
+  /* ------------------------------------------------------- copia automática en Drive */
+  // Con cuenta de Google y permiso de Drive a mano, cada cambio se respalda solo (sin molestar). Si no hay permiso, no hace nada.
+  let respaldoT = 0, respaldoPendiente = false, respaldando = false;
+  async function respaldarAhora() {
+    clearTimeout(respaldoT);
+    if (!respaldoPendiente || respaldando || !app.abierta || !app.sesion || app.sesion.proveedor !== 'google' || !PLAN.respaldo.automatico) return;
+    respaldando = true;
+    try {
+      if (!N().drivePermisoAMano()) { respaldando = false; return; }        // sin permiso a mano no abre ventanas: la copia manual está en Más
+      await S().guardarYa();
+      await N().respaldoSubir(await Sg().paqueteRespaldo(app.ns));
+      respaldoPendiente = false;
+      S().ajustar({ ultimaCopia: Date.now() });
+    } catch (e) { /* sin internet o sin permiso: se reintenta en el próximo cambio */ }
+    respaldando = false;
+  }
+  function programarRespaldo() { respaldoPendiente = true; clearTimeout(respaldoT); respaldoT = setTimeout(respaldarAhora, 20000); }
+  AF.bus.on('cambio', programarRespaldo);
+  app.respaldarAhora = respaldarAhora;
 
   app.entrar = async (yaCargado) => {
     if (!yaCargado) {
@@ -7062,9 +7800,11 @@
     const al = N().almacenNativo(); if (al) Sg().usarAlmacen(al);
     N().prepararWeb();                                                        // versión web: copia para abrir sin internet + datos que el navegador no borra
 
-    N().alVolverAPrimerPlano(() => { if (app.abierta && !app.exento) Sg().marcarSalida(); }, () => {
+    N().alVolverAPrimerPlano(() => { if (app.abierta && !app.exento) { Sg().marcarSalida(); respaldarAhora(); } }, () => {
       if (!app.abierta) return;
       if (app.exento) { Sg().marcarEntrada(); return; }
+      // Sin PIN nunca se bloquea. Con PIN, solo según lo elegido en Ajustes (por defecto: nunca al minimizar, solo al abrir de nuevo).
+      if (Sg().obtenerAutoPin(app.ns)) { Sg().marcarEntrada(); return; }
       if (Sg().debeBloquear(S().d.ajustes.bloqueoSeg)) app.bloquear(); else Sg().marcarEntrada();
     });
     N().alAbrirEnlace(() => { if (app.abierta) V().voz.abrir({ modo: 'voz' }); else app.pendienteVoz = true; });

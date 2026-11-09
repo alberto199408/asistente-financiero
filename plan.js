@@ -16,7 +16,7 @@
     app: {
       nombre: 'Asistente Financiero',            // PROVISIONAL (nombre de trabajo)
       nombreCorto: 'Asistente',
-      version: '1.1.0',
+      version: '3.0.0',
       // PROVISIONAL. Ojo: el id del paquete NO se puede cambiar después de publicar en Play.
       idPaquete: 'com.asistentefinanciero.app',
       desarrollador: '',                          // LUIS: nombre de desarrollador en Play (no su nombre personal)
@@ -42,11 +42,13 @@
       googleAlcanceDrive: 'https://www.googleapis.com/auth/drive.appdata',   // solo para la copia en Drive (carpeta privada de la app)
       facebookAppId: '',                          // LUIS: ID de la app creada en developers.facebook.com
       facebookClientToken: '',                    // LUIS: "token de cliente" de esa misma app (no es una contraseña)
-      permitirSinCuenta: true,                    // PROVISIONAL: botón «Probar sin cuenta» (datos solo en este teléfono). Ponlo en false cuando Google y Facebook ya funcionen
+      permitirSinCuenta: true,                    // botón «Empezar sin cuenta» (datos solo en este teléfono). Ponlo en false si solo quieres Google y Facebook
       facebookPermisos: ['public_profile', 'email'],
       facebookVersion: 'v23.0',                   // versión de la API de Facebook para la web (solo la usa la versión instalada desde Chrome)
       // La copia en Google Drive solo existe si la persona entró con Google (Facebook no tiene Drive).
-      bloquearTrasSegundos: 86400,                 // 24 h: solo pide PIN si la app estuvo cerrada mucho tiempo (en la práctica solo cuando se reinicia)
+      // PIN: viene APAGADO. La persona lo activa en Más → Ajustes → Seguridad si quiere. Sin PIN nunca se pide clave.
+      pinPorDefecto: false,
+      bloquearTrasSegundos: 0,                    // con PIN activo: 0 = pide el PIN solo al abrir la app de nuevo (minimizarla no cuenta)
       pinMin: 4,
       pinMax: 6,
       intentosPinMax: 5,
@@ -56,12 +58,23 @@
     },
 
     /* ------------------------------------------------------------ BIENVENIDA */
-    // Preguntas de la primera vez, después de iniciar sesión (cortas, todas editables luego).
+    // Una sola pantalla después de entrar: cómo cobras y cuánto. El país sale del teléfono; el nombre, de la cuenta.
     bienvenida: {
-      preguntas: ['nombre', 'pais', 'moneda', 'diaCobro', 'sueldo', 'cargas', 'tarjetas'],
+      modosCobro: [                               // formas reales de cobrar
+        { id: 'mensual', nombre: 'Una vez al mes' },
+        { id: 'quincenal', nombre: 'Dos veces al mes' },
+        { id: 'semanal', nombre: 'Cada semana' },
+        { id: 'variable', nombre: 'Sin día fijo' },
+      ],
       sueldoOpcional: true,
-      cargasSoloSiSRI: true,                      // "cargas familiares" solo si el país tiene módulo SRI
-      diaCobroDefecto: 1,
+    },
+
+    /* ------------------------------------------------------------------ VOZ */
+    voz: {
+      hablarPorDefecto: false,                    // la app NO habla en voz alta salvo que la persona lo encienda en Ajustes
+      silencioSeg: 2.5,                           // tras este silencio después de la última palabra, termina sola y muestra «Esto entendí»
+      esperaInicialSeg: 12,                       // cuánto espera a que la persona empiece a hablar antes de decir «no te escuché»
+      maximoSeg: 60,                              // tope de una sola grabación
     },
 
     /* --------------------------------------------------------------- PAÍSES */
@@ -113,12 +126,33 @@
     },
 
     /* ------------------------------------------------------ PRUEBA Y PRECIOS */
-    prueba: { iniciaAlCrearCuenta: true, diasProGratis: 3 },
+    prueba: { iniciaAlCrearCuenta: true, diasProGratis: 7 },   // PROVISIONAL: 7 días (3 no alcanzan para ver el valor)
     precios: {                                    // PROVISIONAL (a decidir con Luis)
       mensualUSD: 2.99,
       anualUSD: 19.99,
       productosPlay: { mensual: 'pro_mensual', anual: 'pro_anual' },
       invitarAmigoMesesPro: 1,
+    },
+    // Lo que ve la gente en la pantalla «Gratis y Pro»: pocas cosas, claras. (La tabla `funciones` de abajo es la que manda en el código.)
+    pro: {
+      gratis: [
+        'Registrar gastos e ingresos sin límite, hablando o escribiendo',
+        'Cuánto te queda hasta tu cobro, siempre a la vista',
+        'Movimientos por día, semana, mes y año, con filtros y categorías',
+        'Una tarjeta de crédito con su fecha de pago',
+        'Preguntas comunes: «¿cuánto gasté en comida este mes?»',
+        'Aviso de gastos innecesarios del mes',
+        'Copia de seguridad en tu Google Drive',
+      ],
+      pro: [
+        { titulo: 'Asistente inteligente', texto: 'Entiende cualquier frase y responde cualquier pregunta sobre tu plata.' },
+        { titulo: 'Tarjetas sin límite', texto: 'Cuotas, intereses, «¿pago el mínimo o el total?» y avisos de corte y pago.' },
+        { titulo: 'Detector de compras compulsivas', texto: 'Suscripciones que no usas, antojos repetidos y consejos para bajarlos.' },
+        { titulo: '«¿Me conviene esta compra?»', texto: 'Antes de comprar, te dice si te alcanza sin descuadrar el mes.' },
+        { titulo: 'Resumen del año y libro contable', texto: 'Compara meses, exporta a PDF y Excel.' },
+        { titulo: 'Gastos deducibles (SRI)', texto: 'Solo Ecuador: marca lo deducible y calcula la rebaja.' },
+        { titulo: 'Pareja o familia', texto: 'Gastos compartidos: quién pagó y quién debe.' },
+      ],
     },
 
     /* ----------------------------------------------------------------- IA */
@@ -149,10 +183,14 @@
       preguntasLibresIA:       { g: false, p: true  },
       respuestaEnVoz:          { g: true,  p: true  },
       puedesGastarHoySimple:   { g: true,  p: true  },
-      puedesGastarHoyCompleto: { g: false, p: true  },
+      puedesGastarHoyCompleto: { g: true,  p: true  },   // la cifra «te queda hasta tu cobro» es la misma para todos (es el corazón de la app)
       categoriasNecesarioGusto:{ g: true,  p: true  },
+      innecesariosTotal:       { g: true,  p: true  },   // «Gastos innecesarios del mes» con su total: para todos
+      innecesariosDetalle:     { g: false, p: true  },   // detector de compras compulsivas, suscripciones y consejos
       hormigaTotal:            { g: true,  p: true  },
       hormigaDetalle:          { g: false, p: true  },
+      movimientosPorPeriodo:   { g: true,  p: true  },   // día / semana / mes / año y filtros
+      libroContable:           { g: true,  p: true  },   // la vista de libro contable se ve; exportarla a PDF/Excel es Pro (abajo)
       retos:                   { g: true,  p: true  },
       presupuestoGeneral:      { g: true,  p: true  },
       presupuestoPorCategoria: { g: false, p: true  },
@@ -202,85 +240,109 @@
 
     /* ------------------------------------------------------------ CATEGORÍAS */
     // nec: 'N' necesario, 'G' gusto, null = sin clasificar.  hormiga: candidata a gasto hormiga.
-    // sri: rubro del formulario de gastos personales (solo Ecuador).  palabras: SIN tildes, minúsculas.
+    // sri: rubro del formulario de gastos personales (solo Ecuador).  palabras: SIN tildes, minúsculas, de TODOS los países.
     // Las palabras de varias palabras ganan a las de una sola ("tanque de gas" > "tanque").
+    // montoMax: monto típico máximo de UNA compra de esa categoría. Si lo dictado lo pasa por mucho (una hamburguesa de $350),
+    //           la app pregunta «¿$3,50 o $350?» antes de guardar.
+    // pregunta: lo que la app pregunta UNA vez cuando la palabra es ambigua (y se acuerda de la respuesta).
     categorias: [
       // ---- Gastos
-      { id: 'comida_hogar', color: '#22C55E', nombre: 'Comida del hogar', icono: '🛒', tipo: 'gasto', nec: 'N', sri: 'alimentacion',
-        palabras: ['mercado', 'supermercado', 'super', 'supermaxi', 'megamaxi', 'comisariato', 'mi comisariato', 'tia', 'santa maria',
-          'gran aki', 'aki', 'tienda', 'tiendita', 'abarrotes', 'verduras', 'frutas', 'carne', 'pollo', 'huevos', 'leche', 'arroz',
-          'despensa', 'viveres', 'fruta', 'verdura', 'legumbres', 'compras de la casa', 'compras del mes', 'granos', 'pan', 'panaderia', 'queso', 'aceite', 'azucar'] },
-      { id: 'servicios', color: '#F59E0B', nombre: 'Servicios básicos', icono: '💡', tipo: 'gasto', nec: 'N', sri: null,
-        palabras: ['luz', 'electricidad', 'agua', 'agua potable', 'internet', 'telefono', 'plan celular', 'recarga', 'recargas', 'gas',
-          'tanque de gas', 'cnel', 'planilla', 'planillas', 'alicuota', 'cable', 'tv cable', 'wifi', 'basura'] },
-      { id: 'vivienda', color: '#3D6FB6', nombre: 'Vivienda', icono: '🏠', tipo: 'gasto', nec: 'N', sri: 'vivienda',
-        palabras: ['arriendo', 'alquiler', 'hipoteca', 'predial', 'impuesto predial', 'reparacion de la casa', 'plomero', 'electricista'] },
-      { id: 'transporte', color: '#06B6D4', nombre: 'Transporte', icono: '🚌', tipo: 'gasto', nec: 'N', sri: null,
-        palabras: ['pasaje', 'pasajes', 'bus', 'buseta', 'taxi', 'uber', 'cabify', 'indrive', 'in drive', 'carrera', 'metro', 'trolebus',
-          'ecovia', 'peaje', 'parqueadero', 'parqueo', 'mecanico', 'llanta', 'llantas', 'repuestos', 'cambio de aceite',
-          'matricula vehicular', 'lavada del carro'] },
-      { id: 'combustible', color: '#EF4444', nombre: 'Combustible', icono: '⛽', tipo: 'gasto', nec: 'N', sri: null,
-        palabras: ['gasolina', 'gasolina extra', 'gasolina super', 'diesel', 'eco pais', 'ecopais', 'gasolinera', 'tanqueada', 'tanquee',
-          'tanque lleno', 'combustible', 'primax', 'terpel', 'petroecuador'],
+      { id: 'comida_hogar', color: '#22C55E', nombre: 'Comida del hogar', icono: '🛒', tipo: 'gasto', nec: 'N', sri: 'alimentacion', montoMax: 600,
+        palabras: [
+          // dónde se compra
+          'mercado', 'supermercado', 'super', 'supermaxi', 'megamaxi', 'comisariato', 'mi comisariato', 'tia', 'santa maria', 'gran aki', 'aki', 'coral',
+          'tienda', 'tiendita', 'tienda de la esquina', 'abarrotes', 'abasto', 'bodega', 'colmado', 'pulperia', 'minimarket', 'minimercado', 'despensa', 'viveres', 'granos',
+          'compras de la casa', 'compras del mes', 'compra del mes', 'compras de la semana', 'comida para la casa', 'comida para el hogar', 'comida de la casa', 'comida del hogar',
+          'para la casa', 'para el hogar', 'para mi casa', 'para mi hogar', 'comida para mi hogar', 'comida para mi casa', 'hogar', 'mandado', 'mandados', 'feria', 'plaza de mercado', 'mercado mayorista',
+          'exito', 'jumbo', 'carulla', 'd1', 'ara', 'olimpica', 'wong', 'plaza vea', 'tottus', 'vivanda', 'mass', 'soriana', 'walmart', 'chedraui', 'bodega aurrera', 'la comer',
+          'carrefour', 'coto', 'lider', 'unimarc', 'santa isabel', 'mercadona', 'lidl', 'hipercor', 'la sirena', 'bravo', 'pricesmart', 'makro', 'pali', 'maxi pali', 'super selectos', 'la torre', 'paiz',
+          // ingredientes y cosas para cocinar
+          'verduras', 'verdura', 'frutas', 'fruta', 'legumbres', 'hortalizas', 'carne', 'carnes', 'pollo', 'pescado', 'mariscos', 'camarones', 'huevos', 'leche', 'queso', 'mantequilla', 'yogur', 'yogurt',
+          'arroz', 'frejol', 'frijol', 'frijoles', 'lenteja', 'lentejas', 'garbanzos', 'fideos', 'pasta', 'harina', 'avena', 'azucar', 'sal', 'aceite', 'manteca',
+          'pan', 'panaderia', 'tortillas', 'arepas', 'papa', 'papas', 'cebolla', 'cebollas', 'tomate', 'tomates', 'zanahoria', 'zanahorias', 'platano', 'platanos', 'yuca',
+          'ajo', 'pimiento', 'lechuga', 'brocoli', 'limon', 'limones', 'naranja', 'naranjas', 'manzana', 'manzanas', 'banano', 'bananos', 'guineo', 'sandia', 'papaya', 'aguacate', 'palta',
+          'cafe molido', 'cafe en grano', 'cocoa', 'condimentos', 'especias', 'atun', 'sardina', 'enlatados', 'salsa', 'mayonesa', 'ketchup', 'mostaza', 'embutidos', 'jamon', 'salchichas', 'mortadela',
+          'libras', 'libra', 'kilos', 'kilo', 'quintal', 'docena', 'funda', 'atado', 'racimo', 'cartón de huevos', 'carton de huevos', 'cubeta',
+          // aseo y limpieza de la casa (van con la compra del súper)
+          'papel higienico', 'jabon', 'detergente', 'cloro', 'desinfectante', 'shampoo', 'champu', 'pasta dental', 'cepillo de dientes', 'panales', 'toallas humedas', 'escoba', 'trapeador', 'esponja', 'lavaplatos', 'limpieza', 'aseo'],
+        palabrasDebiles: ['comida', 'compras', 'compra'] },
+      { id: 'servicios', color: '#F59E0B', nombre: 'Servicios básicos', icono: '💡', tipo: 'gasto', nec: 'N', sri: null, montoMax: 500,
+        palabras: ['luz', 'electricidad', 'energia', 'energia electrica', 'agua', 'agua potable', 'internet', 'telefono', 'telefono fijo', 'plan celular', 'plan del celular', 'recarga', 'recargas', 'recarga del celular', 'datos', 'megas', 'gas', 'tanque de gas', 'cilindro de gas', 'bombona', 'garrafa', 'balon de gas',
+          'cnel', 'empresa electrica', 'planilla', 'planillas', 'alicuota', 'alicuotas', 'expensas', 'administracion', 'cuota de administracion', 'condominio', 'cable', 'tv cable', 'television por cable', 'wifi', 'basura', 'recoleccion de basura',
+          'movistar', 'tigo', 'entel', 'telcel', 'at t', 'wom', 'bitel', 'cnt', 'tuenti', 'digicel', 'kolbi', 'une', 'etb', 'epm', 'cfe', 'enel', 'edesur', 'edenor', 'luz del sur', 'sedapal', 'interagua', 'epmaps', 'codensa', 'emcali', 'naturgy', 'iberdrola', 'endesa', 'netlife', 'puntonet', 'xtrim', 'directv', 'izzi', 'totalplay', 'megacable', 'telmex'],
+        palabrasDebiles: ['servicios', 'servicio', 'claro', 'personal'] },
+      { id: 'vivienda', color: '#3D6FB6', nombre: 'Vivienda', icono: '🏠', tipo: 'gasto', nec: 'N', sri: 'vivienda', montoMax: 3000,
+        palabras: ['arriendo', 'arrendamiento', 'alquiler', 'renta', 'renta de la casa', 'renta del departamento', 'hipoteca', 'cuota de la casa', 'credito hipotecario', 'predial', 'impuesto predial', 'contribuciones',
+          'reparacion de la casa', 'arreglo de la casa', 'plomero', 'gasfitero', 'fontanero', 'electricista', 'albanil', 'pintura de la casa', 'cerrajero', 'garantia del departamento', 'deposito de garantia', 'portero', 'guardiania', 'seguridad del edificio'] },
+      { id: 'transporte', color: '#06B6D4', nombre: 'Transporte', icono: '🚌', tipo: 'gasto', nec: 'N', sri: null, montoMax: 120,
+        palabras: ['pasaje', 'pasajes', 'bus', 'buseta', 'colectivo', 'micro', 'combi', 'trufi', 'guagua', 'camion', 'pesero', 'taxi', 'mototaxi', 'uber', 'cabify', 'indrive', 'in drive', 'didi', 'beat', 'bolt', 'carrera', 'carrerita', 'viaje en taxi',
+          'metro', 'subte', 'trolebus', 'ecovia', 'metrovia', 'transmilenio', 'metrobus', 'tren', 'peaje', 'peajes', 'parqueadero', 'parqueo', 'estacionamiento', 'parking', 'mecanico', 'taller', 'llanta', 'llantas', 'neumaticos', 'repuestos', 'cambio de aceite', 'revision tecnica', 'matricula vehicular', 'matricula del carro', 'soat', 'seguro del carro', 'lavada del carro', 'lavado del auto', 'autolavado',
+          'bicicleta electrica', 'patineta', 'scooter', 'moto', 'motocicleta', 'bicicleta'] },
+      { id: 'combustible', color: '#EF4444', nombre: 'Combustible', icono: '⛽', tipo: 'gasto', nec: 'N', sri: null, montoMax: 150,
+        palabras: ['gasolina', 'gasolina extra', 'gasolina super', 'nafta', 'bencina', 'diesel', 'eco pais', 'ecopais', 'gasolinera', 'grifo', 'bomba de gasolina', 'estacion de servicio', 'tanqueada', 'tanquee', 'tanque lleno', 'combustible', 'primax', 'terpel', 'petroecuador', 'pemex', 'ypf', 'shell', 'copec', 'puma', 'texaco', 'petrobras'],
         palabrasDebiles: ['extra', 'tanque'] },
-      { id: 'salud', color: '#D6455D', nombre: 'Salud', icono: '💊', tipo: 'gasto', nec: 'N', sri: 'salud',
-        palabras: ['farmacia', 'medicina', 'medicinas', 'pastillas', 'doctor', 'doctora', 'medico', 'consulta', 'examen medico', 'examenes',
-          'laboratorio', 'dentista', 'odontologo', 'hospital', 'clinica', 'fybeca', 'cruz azul', 'sana sana', 'vacuna', 'terapia',
-          'psicologo', 'lentes', 'optica', 'receta', 'antibiotico', 'inyeccion'] },
-      { id: 'educacion', color: '#0E7490', nombre: 'Educación', icono: '🎓', tipo: 'gasto', nec: 'N', sri: 'educacion',
-        palabras: ['colegio', 'escuela', 'universidad', 'matricula', 'pension', 'curso', 'libros', 'utiles', 'utiles escolares',
-          'cuaderno', 'cuadernos', 'mensualidad', 'clases', 'tutoria', 'inscripcion'] },
-      { id: 'comida_fuera', color: '#FF7A00', nombre: 'Comida fuera', icono: '🍔', tipo: 'gasto', nec: 'G', sri: 'alimentacion', hormiga: true,
-        palabras: ['restaurante', 'almuerzo', 'desayuno', 'cena', 'comida rapida', 'salchipapa', 'salchipapas', 'chuzo', 'chuzos', 'hornado',
-          'fritada', 'encebollado', 'ceviche', 'empanada', 'empanadas', 'hamburguesa', 'pizza', 'kfc', 'mcdonalds', 'menu',
-          'almuerzo ejecutivo', 'caldo', 'bolon', 'tigrillo', 'sanduche', 'sushi', 'parrillada', 'asado', 'shawarma', 'tacos',
-          'comi', 'cene', 'almorce', 'desayune', 'colada', 'colada morada', 'guaguas de pan', 'fanesca', 'guatita', 'llapingachos',
-          'yaguarlocro', 'morocho', 'humitas', 'tamales', 'quimbolitos', 'cuy', 'churrasco', 'menestra', 'bolones', 'espumilla', 'cholado',
-          'seco de pollo', 'pollo asado', 'broaster', 'jugo natural', 'batido'],
-        palabrasDebiles: ['comida'] },
-      { id: 'antojos', color: '#F59E8B', nombre: 'Antojos', icono: '🍦', tipo: 'gasto', nec: 'G', sri: 'alimentacion', hormiga: true,
-        palabras: ['helado', 'helados', 'cola', 'coca', 'coca cola', 'cocacola', 'gaseosa', 'jugo', 'cafe', 'cafecito', 'galletas',
-          'chocolate', 'dulce', 'dulces', 'caramelos', 'chicles', 'snack', 'snacks', 'papitas', 'papas fritas', 'chifles', 'gatorade', 'agua mineral',
-          'energizante', 'red bull', 'pastel', 'pasteles', 'torta', 'tortas', 'dona', 'donas',
-          'canguil', 'golosina', 'golosinas', 'colita'] },
-      { id: 'salidas', color: '#D4537E', nombre: 'Salidas', icono: '🎉', tipo: 'gasto', nec: 'G', sri: null,
-        palabras: ['cine', 'bar', 'cerveza', 'cervezas', 'birra', 'birras', 'chela', 'chelas', 'trago', 'tragos', 'discoteca', 'fiesta',
-          'salida', 'salidas', 'salida con amigos', 'amigos', 'cumpleanos', 'karaoke', 'juntada', 'evento', 'concierto', 'entradas',
-          'copas', 'vino', 'pola', 'polas'] },
-      { id: 'ropa', color: '#3B82F6', nombre: 'Ropa', icono: '👕', tipo: 'gasto', nec: 'G', sri: 'vestimenta',
-        palabras: ['ropa', 'zapatos', 'tenis', 'camisa', 'camiseta', 'pantalon', 'jean', 'jeans', 'vestido', 'chompa', 'de prati',
-          'zapatillas', 'medias', 'ropa interior', 'chaqueta', 'abrigo', 'uniforme', 'uniformes'] },
-      { id: 'compras_grandes', color: '#14B8A6', nombre: 'Compras grandes', icono: '🛍️', tipo: 'gasto', nec: 'G', sri: null,
-        palabras: ['celular', 'laptop', 'computadora', 'computador', 'televisor', 'tv', 'refrigeradora', 'lavadora', 'electrodomestico',
-          'mueble', 'muebles', 'colchon', 'moto', 'bicicleta', 'consola', 'tablet', 'parlante', 'play station', 'playstation'] },
-      { id: 'suscripciones', color: '#E11D48', nombre: 'Suscripciones', icono: '📺', tipo: 'gasto', nec: 'G', sri: null,
-        palabras: ['netflix', 'spotify', 'disney', 'disney plus', 'hbo', 'amazon prime', 'prime video', 'youtube premium', 'chatgpt',
-          'icloud', 'google one', 'suscripcion', 'apple music', 'paramount', 'crunchyroll'] },
-      { id: 'cuidado_personal', color: '#D97706', nombre: 'Cuidado personal', icono: '💈', tipo: 'gasto', nec: 'G', sri: null,
-        palabras: ['peluqueria', 'barberia', 'corte de pelo', 'manicure', 'spa', 'maquillaje', 'perfume', 'gimnasio', 'gym'] },
-      { id: 'mascotas', color: '#84CC16', nombre: 'Mascotas', icono: '🐶', tipo: 'gasto', nec: 'N', sri: 'mascotas',
-        palabras: ['perro', 'gato', 'mascota', 'mascotas', 'veterinario', 'veterinaria', 'comida de perro', 'comida de gato', 'balanceado',
-          'arena para gato'] },
-      { id: 'turismo', color: '#0EA5E9', nombre: 'Turismo y viajes', icono: '✈️', tipo: 'gasto', nec: 'G', sri: 'turismo',
-        palabras: ['hotel', 'hostal', 'vuelo', 'pasaje de avion', 'pasajes de avion', 'avion', 'vacaciones', 'viaje', 'paseo', 'tour',
-          'playa', 'turismo', 'hospedaje', 'cabanas'] },
-      { id: 'arte_cultura', color: '#9A6B3F', nombre: 'Arte y cultura', icono: '🎭', tipo: 'gasto', nec: 'G', sri: 'arte',
-        palabras: ['museo', 'teatro', 'galeria', 'obra de teatro', 'clase de musica', 'curso de arte'] },
-      { id: 'deudas', color: '#64748B', nombre: 'Deudas y cuotas', icono: '🏦', tipo: 'gasto', nec: 'N', sri: null,
-        palabras: ['prestamo', 'cuota del prestamo', 'cuota del banco', 'deuda', 'credito', 'pago del credito', 'dividendo',
-          'pague la tarjeta', 'pago de la tarjeta', 'pago tarjeta', 'abonar tarjeta', 'abono tarjeta', 'pagar la tarjeta',
-          'pague mi tarjeta', 'pago de tarjeta', 'abono de tarjeta', 'pague del banco', 'pago al banco'] },
+      { id: 'salud', color: '#D6455D', nombre: 'Salud', icono: '💊', tipo: 'gasto', nec: 'N', sri: 'salud', montoMax: 800,
+        palabras: ['farmacia', 'botica', 'drogueria', 'medicina', 'medicinas', 'medicamento', 'medicamentos', 'remedio', 'remedios', 'pastillas', 'jarabe', 'doctor', 'doctora', 'medico', 'consulta', 'consulta medica', 'cita medica', 'examen medico', 'examenes', 'analisis', 'laboratorio', 'radiografia', 'ecografia',
+          'dentista', 'odontologo', 'ortodoncia', 'brackets', 'hospital', 'clinica', 'emergencia', 'fybeca', 'cruz azul', 'sana sana', 'pharmacys', 'medicity', 'inkafarma', 'mifarma', 'farmatodo', 'cruz verde', 'la rebaja', 'farmacias del ahorro', 'farmacias guadalajara', 'similares', 'vacuna', 'terapia', 'fisioterapia',
+          'psicologo', 'psicologa', 'lentes', 'gafas', 'optica', 'receta', 'antibiotico', 'inyeccion', 'mascarilla', 'mascarillas', 'tapabocas', 'cubrebocas', 'barbijo', 'alcohol', 'gel antibacterial', 'vitaminas', 'suplementos', 'seguro medico', 'seguro de salud', 'iess', 'eps', 'isapre'] },
+      { id: 'educacion', color: '#0E7490', nombre: 'Educación', icono: '🎓', tipo: 'gasto', nec: 'N', sri: 'educacion', montoMax: 2000,
+        palabras: ['colegio', 'escuela', 'kinder', 'guarderia', 'universidad', 'instituto', 'matricula', 'pension', 'pension del colegio', 'colegiatura', 'curso', 'cursos', 'diplomado', 'maestria', 'libros', 'libro', 'utiles', 'utiles escolares', 'cuaderno', 'cuadernos', 'mochila',
+          'mensualidad', 'clases', 'clases particulares', 'tutoria', 'profesor particular', 'inscripcion', 'academia', 'ingles', 'curso de ingles', 'udemy', 'platzi', 'coursera', 'examen de admision', 'fotocopias', 'copias', 'impresiones'] },
+      { id: 'comida_fuera', color: '#FF7A00', nombre: 'Comida fuera', icono: '🍔', tipo: 'gasto', nec: 'G', sri: 'alimentacion', hormiga: true, montoMax: 80,
+        palabras: ['restaurante', 'restaurant', 'almuerzo', 'desayuno', 'cena', 'merienda', 'lonche', 'comida rapida', 'rapida', 'delivery', 'domicilio', 'a domicilio', 'pedidos ya', 'pedidosya', 'rappi', 'uber eats', 'didi food', 'glovo',
+          'salchipapa', 'salchipapas', 'chuzo', 'chuzos', 'hornado', 'fritada', 'encebollado', 'ceviche', 'empanada', 'empanadas', 'hamburguesa', 'hamburguesas', 'pizza', 'pizzas', 'kfc', 'mcdonalds', 'mc donalds', 'burger king', 'subway', 'dominos', 'papa johns', 'menu', 'almuerzo ejecutivo', 'menu ejecutivo', 'corrientazo',
+          'caldo', 'sopa', 'bolon', 'tigrillo', 'sanduche', 'sandwich', 'sushi', 'parrillada', 'parrilla', 'asado', 'churrasco', 'lomito', 'shawarma', 'tacos', 'taco', 'burrito', 'quesadilla', 'torta', 'tamal', 'pupusa', 'pupusas', 'baleada', 'gallo pinto', 'arepa rellena', 'bandeja paisa', 'ajiaco', 'pollo a la brasa', 'chaufa', 'lomo saltado', 'anticuchos', 'choripan', 'milanesa', 'locro', 'feijoada', 'picanha',
+          'comi', 'cene', 'almorce', 'desayune', 'merende', 'colada', 'colada morada', 'guaguas de pan', 'fanesca', 'guatita', 'llapingachos', 'yaguarlocro', 'morocho', 'humitas', 'tamales', 'quimbolitos', 'cuy', 'menestra', 'bolones', 'espumilla', 'cholado',
+          'seco de pollo', 'pollo asado', 'broaster', 'pollo broaster', 'alitas', 'jugo natural', 'batido', 'ensalada', 'wok', 'chifa', 'comida china', 'buffet', 'cafeteria', 'comedor', 'fonda', 'picanteria', 'huarique', 'bar restaurante', 'cevicheria', 'marisqueria', 'pizzeria', 'hamburgueseria', 'taqueria'],
+        palabrasDebiles: ['comida', 'comer'] },
+      { id: 'antojos', color: '#F59E8B', nombre: 'Antojos', icono: '🍦', tipo: 'gasto', nec: 'G', sri: 'alimentacion', hormiga: true, montoMax: 25,
+        palabras: ['helado', 'helados', 'cola', 'coca', 'coca cola', 'cocacola', 'pepsi', 'sprite', 'fanta', 'inca kola', 'gaseosa', 'gaseosas', 'refresco', 'soda', 'jugo', 'jugos', 'cafe', 'cafecito', 'capuchino', 'cappuccino', 'latte', 'frapuccino', 'starbucks', 'juan valdez', 'sweet and coffee', 'galletas', 'galleta',
+          'chocolate', 'chocolates', 'dulce', 'dulces', 'caramelos', 'chicles', 'snack', 'snacks', 'papitas', 'papas fritas', 'chifles', 'doritos', 'cheetos', 'gatorade', 'powerade', 'agua mineral', 'agua embotellada', 'botella de agua',
+          'energizante', 'red bull', 'monster', 'pastel', 'pasteles', 'pastelito', 'pastelitos', 'torta', 'tortas', 'dona', 'donas', 'donut', 'canguil', 'cotufas', 'palomitas', 'cabritas', 'pochoclo', 'golosina', 'golosinas', 'colita', 'oxxo', 'tambo', 'kiosco', 'quiosco', 'tiendita de la esquina', 'maquina expendedora', 'bubble tea', 'frozen', 'raspado', 'granizado', 'paleta', 'bombon'],
+        // Una cola o unas galletas pueden ser un antojo o la compra de la casa: se pregunta una vez.
+        ambiguas: ['cola', 'coca', 'coca cola', 'cocacola', 'pepsi', 'gaseosa', 'gaseosas', 'refresco', 'jugo', 'jugos', 'galletas', 'galleta', 'agua mineral', 'agua embotellada', 'botella de agua', 'chocolate', 'chocolates', 'papitas', 'chifles', 'cafe'],
+        pregunta: { texto: '¿Fue un antojo o compra para la casa?', opciones: [{ texto: 'Un antojo', cat: 'antojos' }, { texto: 'Para la casa', cat: 'comida_hogar' }] } },
+      { id: 'salidas', color: '#D4537E', nombre: 'Salidas', icono: '🎉', tipo: 'gasto', nec: 'G', sri: null, montoMax: 200,
+        palabras: ['cine', 'bar', 'cerveza', 'cervezas', 'birra', 'birras', 'chela', 'chelas', 'caguama', 'pilsener', 'trago', 'tragos', 'discoteca', 'disco', 'antro', 'boliche', 'fiesta', 'farra', 'rumba', 'joda', 'jarana', 'parranda', 'tomata', 'previa',
+          'salida', 'salidas', 'salida con amigos', 'amigos', 'cumpleanos', 'cumple', 'karaoke', 'juntada', 'evento', 'concierto', 'entradas', 'boletos', 'copas', 'vino', 'pola', 'polas', 'ron', 'whisky', 'tequila', 'aguardiente', 'pisco', 'cachaca', 'bolos', 'billar', 'bowling', 'parque de diversiones', 'feria de juegos', 'estadio', 'partido', 'entrada al estadio'] },
+      { id: 'ropa', color: '#3B82F6', nombre: 'Ropa', icono: '👕', tipo: 'gasto', nec: 'G', sri: 'vestimenta', montoMax: 400,
+        palabras: ['ropa', 'zapatos', 'tenis', 'zapatillas', 'zapatos deportivos', 'sandalias', 'botas', 'camisa', 'camiseta', 'polo', 'playera', 'remera', 'franela', 'blusa', 'pantalon', 'pantalones', 'jean', 'jeans', 'short', 'shorts', 'bermuda', 'falda', 'vestido', 'chompa', 'buzo', 'sueter', 'saco', 'hoodie', 'casaca', 'campera',
+          'medias', 'calcetines', 'ropa interior', 'calzoncillos', 'boxers', 'brasier', 'sosten', 'chaqueta', 'abrigo', 'uniforme', 'uniformes', 'gorra', 'sombrero', 'bufanda', 'guantes', 'cinturon', 'correa', 'cartera', 'bolso', 'mochila de moda', 'reloj', 'aretes', 'collar', 'anillo', 'bisuteria', 'de prati', 'eta fashion', 'zara', 'h m', 'bershka', 'pull and bear', 'forever 21', 'shein', 'nike', 'adidas', 'puma'] },
+      { id: 'tecnologia', color: '#6366F1', nombre: 'Tecnología', icono: '🎧', tipo: 'gasto', nec: 'G', sri: null, montoMax: 2500,
+        palabras: ['auriculares', 'audifonos', 'audifono', 'earbuds', 'airpods', 'cargador', 'cable usb', 'cable del celular', 'celular', 'telefono nuevo', 'smartphone', 'iphone', 'samsung', 'xiaomi', 'motorola', 'huawei', 'laptop', 'portatil', 'notebook', 'computadora', 'computador', 'pc', 'mouse', 'raton', 'teclado', 'monitor', 'pantalla', 'impresora', 'tinta', 'toner',
+          'parlante', 'bocina', 'altavoz', 'bafle', 'consola', 'play station', 'playstation', 'ps5', 'ps4', 'xbox', 'nintendo', 'switch', 'videojuego', 'videojuegos', 'juego de video', 'tablet', 'ipad', 'smartwatch', 'reloj inteligente', 'camara', 'gopro', 'drone', 'dron', 'televisor', 'tv', 'television', 'smart tv', 'pendrive', 'usb', 'disco duro', 'router', 'modem', 'alexa', 'kindle', 'funda del celular', 'protector de pantalla', 'mica', 'power bank', 'bateria externa', 'steam', 'play store', 'app store', 'skin', 'compra en el juego', 'pavos', 'robux', 'diamantes'],
+        pregunta: { texto: '¿Lo necesitas para tu trabajo o estudio?', opciones: [{ texto: 'Sí, para trabajar o estudiar', cat: 'tecnologia', nec: 'N' }, { texto: 'No, fue un gusto', cat: 'tecnologia', nec: 'G' }] } },
+      { id: 'hogar', color: '#14B8A6', nombre: 'Casa y muebles', icono: '🛋️', tipo: 'gasto', nec: 'N', sri: null, montoMax: 3000,
+        palabras: ['mueble', 'muebles', 'sofa', 'sillon', 'mesa', 'sillas', 'silla', 'cama', 'colchon', 'velador', 'closet', 'ropero', 'armario', 'estanteria', 'repisa', 'refrigeradora', 'refrigerador', 'nevera', 'heladera', 'lavadora', 'secadora', 'cocina', 'estufa', 'horno', 'microondas', 'licuadora', 'batidora', 'olla', 'ollas', 'olla arrocera', 'arrocera', 'sarten', 'vajilla', 'platos', 'vasos', 'cubiertos', 'cafetera', 'tostadora', 'plancha', 'aspiradora', 'ventilador', 'calefactor', 'aire acondicionado', 'electrodomestico', 'electrodomesticos',
+          'sabanas', 'cobija', 'cobijas', 'edredon', 'almohada', 'almohadas', 'toallas', 'cortinas', 'alfombra', 'decoracion', 'cuadro', 'florero', 'foco', 'focos', 'bombillo', 'bombillos', 'ampolleta', 'herramientas', 'taladro', 'martillo', 'pintura', 'ferreteria', 'kywi', 'sodimac', 'homecenter', 'easy', 'home depot', 'ikea', 'sukasa', 'almacenes de prati hogar', 'comandato', 'artefacta', 'la ganga', 'marcimex', 'jardin', 'plantas', 'macetas'] },
+      { id: 'suscripciones', color: '#E11D48', nombre: 'Suscripciones', icono: '📺', tipo: 'gasto', nec: 'G', sri: null, hormiga: false, montoMax: 60,
+        palabras: ['netflix', 'spotify', 'disney', 'disney plus', 'hbo', 'hbo max', 'amazon prime', 'prime video', 'prime', 'youtube premium', 'youtube music', 'youtube', 'chatgpt', 'chat gpt', 'openai', 'claude', 'gemini', 'copilot', 'icloud', 'google one', 'google drive', 'dropbox', 'suscripcion', 'suscripciones', 'membresia', 'mensualidad de la app', 'apple music', 'apple tv', 'apple one', 'paramount', 'paramount plus', 'crunchyroll', 'deezer', 'tidal', 'twitch', 'patreon', 'onlyfans', 'canva', 'adobe', 'office 365', 'microsoft 365', 'xbox game pass', 'game pass', 'playstation plus', 'ps plus', 'nintendo online', 'vpn', 'nordvpn', 'duolingo', 'tinder', 'bumble', 'linkedin premium', 'star plus', 'vix', 'movistar play', 'directv go', 'win sports'] },
+      { id: 'cuidado_personal', color: '#D97706', nombre: 'Cuidado personal', icono: '💈', tipo: 'gasto', nec: 'G', sri: null, montoMax: 150,
+        palabras: ['peluqueria', 'barberia', 'barbero', 'corte de pelo', 'corte de cabello', 'motilado', 'tinte', 'mechas', 'alisado', 'keratina', 'manicure', 'pedicure', 'arreglo de unas', 'unas postizas', 'cejas', 'pestanas', 'depilacion', 'spa', 'masaje', 'maquillaje', 'cosmeticos', 'crema', 'cremas', 'perfume', 'colonia', 'desodorante', 'afeitadora', 'rasuradora', 'gimnasio', 'gym', 'smart fit', 'crossfit', 'yoga', 'pilates', 'natacion', 'cancha', 'cancha sintetica', 'futbol', 'pelota', 'balon', 'ropa deportiva'] },
+      { id: 'mascotas', color: '#84CC16', nombre: 'Mascotas', icono: '🐶', tipo: 'gasto', nec: 'N', sri: 'mascotas', montoMax: 300,
+        palabras: ['perro', 'perrito', 'gato', 'gatito', 'mascota', 'mascotas', 'veterinario', 'veterinaria', 'vacuna del perro', 'vacuna del gato', 'comida de perro', 'comida de gato', 'comida del perro', 'comida del gato', 'croquetas', 'balanceado', 'pro plan', 'dog chow', 'cat chow', 'pedigree', 'whiskas', 'arena para gato', 'arena del gato', 'collar del perro', 'correa del perro', 'peluqueria canina', 'bano del perro', 'desparasitante', 'antipulgas', 'pet shop', 'petshop'] },
+      { id: 'turismo', color: '#0EA5E9', nombre: 'Turismo y viajes', icono: '✈️', tipo: 'gasto', nec: 'G', sri: 'turismo', montoMax: 5000,
+        palabras: ['hotel', 'hostal', 'hospedaje', 'airbnb', 'booking', 'vuelo', 'vuelos', 'pasaje de avion', 'pasajes de avion', 'avion', 'aerolinea', 'latam', 'avianca', 'aeromexico', 'volaris', 'viva aerobus', 'sky', 'jetsmart', 'vacaciones', 'viaje', 'paseo', 'tour', 'excursion', 'playa', 'turismo', 'cabanas', 'cabana', 'camping', 'bus interprovincial', 'terminal terrestre', 'despegar', 'agencia de viajes', 'maleta', 'maletas', 'souvenir', 'recuerdos'] },
+      { id: 'arte_cultura', color: '#9A6B3F', nombre: 'Arte y cultura', icono: '🎭', tipo: 'gasto', nec: 'G', sri: 'arte', montoMax: 300,
+        palabras: ['museo', 'teatro', 'galeria', 'obra de teatro', 'clase de musica', 'clases de musica', 'clase de guitarra', 'clase de piano', 'clase de baile', 'clases de baile', 'curso de arte', 'curso de pintura', 'exposicion', 'feria del libro', 'libreria', 'instrumento', 'guitarra', 'piano', 'violin'] },
+      { id: 'regalos', color: '#EC4899', nombre: 'Regalos y ayudas', icono: '🎁', tipo: 'gasto', nec: 'G', sri: null, montoMax: 500,
+        palabras: ['regalo', 'regalos', 'obsequio', 'detalle', 'flores', 'ramo', 'torta de cumpleanos', 'pastel de cumpleanos', 'rifa', 'colecta', 'vaca', 'vaquita', 'donacion', 'donativo', 'limosna', 'diezmo', 'ofrenda', 'caridad', 'ayuda a mi mama', 'ayuda a mi papa', 'le di a mi mama', 'le di a mi papa', 'le mande a mi mama', 'le envie a mi mama', 'mesada', 'propina para', 'le preste', 'le presté'] },
+      { id: 'deudas', color: '#64748B', nombre: 'Deudas y cuotas', icono: '🏦', tipo: 'gasto', nec: 'N', sri: null, montoMax: 5000,
+        palabras: ['prestamo', 'cuota del prestamo', 'cuota del banco', 'cuota del credito', 'deuda', 'credito', 'pago del credito', 'dividendo', 'letra', 'letras', 'cuota del carro', 'cuota de la moto', 'cuota del celular', 'credito de consumo', 'microcredito', 'chulquero', 'chulco', 'prestamista', 'gota a gota', 'fiado', 'pague lo fiado', 'abono al prestamo', 'abono a la deuda', 'intereses del prestamo', 'cooperativa', 'pago a la cooperativa', 'casa de empeno', 'empeno', 'desempeno'] },
       { id: 'otros', color: '#94A3B8', nombre: 'Otros gastos', icono: '📦', tipo: 'gasto', nec: null, sri: null, palabras: [] },
       // ---- Ingresos
       { id: 'sueldo', color: '#10B981', nombre: 'Sueldo', icono: '💼', tipo: 'ingreso', nec: null, sri: null,
-        palabras: ['sueldo', 'rol', 'quincena', 'salario', 'pago del mes', 'nomina', 'mi sueldo'] },
+        palabras: ['sueldo', 'rol', 'rol de pagos', 'quincena', 'salario', 'pago del mes', 'nomina', 'mi sueldo', 'me pagaron el sueldo', 'cobre el sueldo', 'decimo', 'decimo tercero', 'decimo cuarto', 'aguinaldo', 'prima', 'gratificacion', 'utilidades', 'vacaciones pagadas', 'liquidacion', 'jubilacion', 'pension jubilar', 'sueldo quincenal', 'jornal'] },
       { id: 'extra', color: '#06B6D4', nombre: 'Ingreso extra', icono: '💵', tipo: 'ingreso', nec: null, sri: null,
-        palabras: ['extra', 'ingreso extra', 'propina', 'propinas', 'trabajo extra', 'bono', 'comision', 'horas extras', 'trabajito'] },
+        palabras: ['extra', 'ingreso extra', 'propina', 'propinas', 'trabajo extra', 'trabajito', 'cachuelo', 'chamba extra', 'chambita', 'camello', 'freelance', 'bono', 'comision', 'comisiones', 'horas extras', 'hora extra', 'turno extra', 'me pagaron un trabajo', 'un trabajo', 'arreglo que hice', 'servicio que di', 'rifa que gane', 'premio', 'loteria', 'apuesta'] },
       { id: 'ventas', color: '#F59E0B', nombre: 'Ventas', icono: '🏷️', tipo: 'ingreso', nec: null, sri: null,
-        palabras: ['venta', 'ventas', 'vendi'] },
+        palabras: ['venta', 'ventas', 'vendi', 'vendimos', 'me compraron', 'marketplace', 'mercado libre', 'olx'] },
       { id: 'otros_ingresos', color: '#7A8CA3', nombre: 'Otros ingresos', icono: '🎁', tipo: 'ingreso', nec: null, sri: null,
-        palabras: ['regalo', 'devolucion', 'reembolso', 'me devolvieron'] },
+        palabras: ['regalo', 'me regalaron', 'devolucion', 'reembolso', 'me devolvieron', 'me pagaron lo que me debian', 'me pagaron la deuda', 'me prestaron', 'prestamo que recibi', 'giro', 'remesa', 'me mandaron plata', 'me enviaron dinero', 'western union', 'interes', 'intereses de la cuenta', 'intereses del ahorro', 'arriendo que me pagan', 'renta que cobro', 'alquiler que cobro'] },
     ],
+
+    // Palabras que piden «lo mismo que el mes pasado» o describen medidas: ayudan a saber que es compra para la casa (ingredientes).
+    medidasHogar: ['libra', 'libras', 'kilo', 'kilos', 'kg', 'gramos', 'litro', 'litros', 'docena', 'media docena', 'funda', 'fundas', 'atado', 'atados', 'racimo', 'cubeta', 'carton', 'paquete', 'paquetes', 'quintal', 'arroba', 'saco', 'bolsa', 'bolsas'],
 
     /* ------------------------------------------------- GASTOS HORMIGA / 50-30-20 */
     hormiga: { montoMaximo: 5, minimoRepeticionesMes: 3 },
