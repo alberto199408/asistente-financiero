@@ -1,7 +1,7 @@
-/* Asistente Financiero — ayudante para abrir sin internet (generado por scripts/construir-web.js; versión 831dc19b8e).
+/* Asistente Financiero — ayudante para abrir sin internet (generado por scripts/construir-web.js; versión 35b186599f).
    Con internet pide siempre lo más nuevo (si subes cambios, se ven en la próxima apertura); sin internet o con internet lento usa la copia guardada.
    Nunca toca las llamadas a Google, Facebook, Drive ni a la IA: esas van directo a internet. */
-const CACHE = 'asistente-831dc19b8e';
+const CACHE = 'asistente-35b186599f';
 const ARCHIVOS = ["./","app.css","app.js","apple-touch-icon.png","favicon.png","icon-192.png","icon-512.png","icon-maskable-512.png","index.html","logos.js","manifest.webmanifest","plan.js","tema.js"];
 const ESPERA = 4000;
 

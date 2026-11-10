@@ -157,6 +157,221 @@
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
 
+/* ===== js/iconos.js ===== */
+/* Íconos de la app: un solo juego de trazos (Lucide, licencia ISC, https://lucide.dev) para que todas las pantallas se vean igual.
+   - trazos: nombre → dibujo (24x24). Se pintan con ico('nombre') de ui.js.
+   - emoji: cada emoji que usan las categorías y las pantallas → el ícono que lo reemplaza. ui.js lo cambia solo al construir la pantalla;
+     un emoji que no esté aquí se muestra como emoji. */
+(function (g) {
+  'use strict';
+  const AF = (g.AF = g.AF || {});
+  const trazos = {
+  "inicio": "<path d=\"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8\"/><path d=\"M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z\"/>",
+  "movimientos": "<path d=\"M8 3 4 7l4 4\"/><path d=\"M4 7h16\"/><path d=\"m16 21 4-4-4-4\"/><path d=\"M20 17H4\"/>",
+  "tarjeta": "<rect width=\"20\" height=\"14\" x=\"2\" y=\"5\" rx=\"2\"/><line x1=\"2\" x2=\"22\" y1=\"10\" y2=\"10\"/>",
+  "mas": "<rect width=\"7\" height=\"7\" x=\"3\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"14\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"14\" y=\"14\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"3\" y=\"14\" rx=\"1\"/>",
+  "mic": "<path d=\"M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z\"/><path d=\"M19 10v2a7 7 0 0 1-14 0v-2\"/><line x1=\"12\" x2=\"12\" y1=\"19\" y2=\"22\"/>",
+  "teclado": "<path d=\"M10 8h.01\"/><path d=\"M12 12h.01\"/><path d=\"M14 8h.01\"/><path d=\"M16 12h.01\"/><path d=\"M18 8h.01\"/><path d=\"M6 8h.01\"/><path d=\"M7 16h10\"/><path d=\"M8 12h.01\"/><rect width=\"20\" height=\"16\" x=\"2\" y=\"4\" rx=\"2\"/>",
+  "cerrar": "<path d=\"M18 6 6 18\"/><path d=\"m6 6 12 12\"/>",
+  "atras": "<path d=\"m15 18-6-6 6-6\"/>",
+  "derecha": "<path d=\"m9 18 6-6-6-6\"/>",
+  "adelante": "<path d=\"m9 18 6-6-6-6\"/>",
+  "abajo": "<path d=\"m6 9 6 6 6-6\"/>",
+  "arriba": "<path d=\"m18 15-6-6-6 6\"/>",
+  "flecha": "<path d=\"M5 12h14\"/><path d=\"m12 5 7 7-7 7\"/>",
+  "candado": "<rect width=\"18\" height=\"11\" x=\"3\" y=\"11\" rx=\"2\" ry=\"2\"/><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"/>",
+  "huella": "<path d=\"M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4\"/><path d=\"M14 13.12c0 2.38 0 6.38-1 8.88\"/><path d=\"M17.29 21.02c.12-.6.43-2.3.5-3.02\"/><path d=\"M2 12a10 10 0 0 1 18-6\"/><path d=\"M2 16h.01\"/><path d=\"M21.8 16c.2-2 .131-5.354 0-6\"/><path d=\"M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2\"/><path d=\"M8.65 22c.21-.66.45-1.32.57-2\"/><path d=\"M9 6.8a6 6 0 0 1 9 5.2v2\"/>",
+  "mas_": "<path d=\"M5 12h14\"/><path d=\"M12 5v14\"/>",
+  "ok": "<path d=\"M20 6 9 17l-5-5\"/>",
+  "estrella": "<path d=\"M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z\"/>",
+  "alerta": "<path d=\"m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3\"/><path d=\"M12 9v4\"/><path d=\"M12 17h.01\"/>",
+  "camara": "<path d=\"M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z\"/><circle cx=\"12\" cy=\"13\" r=\"3\"/>",
+  "grafica": "<path d=\"M3 3v16a2 2 0 0 0 2 2h16\"/><path d=\"M18 17V9\"/><path d=\"M13 17V5\"/><path d=\"M8 17v-3\"/>",
+  "meta": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><circle cx=\"12\" cy=\"12\" r=\"6\"/><circle cx=\"12\" cy=\"12\" r=\"2\"/>",
+  "repetir": "<path d=\"m17 2 4 4-4 4\"/><path d=\"M3 11v-1a4 4 0 0 1 4-4h14\"/><path d=\"m7 22-4-4 4-4\"/><path d=\"M21 13v1a4 4 0 0 1-4 4H3\"/>",
+  "personas": "<path d=\"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2\"/><circle cx=\"9\" cy=\"7\" r=\"4\"/><path d=\"M22 21v-2a4 4 0 0 0-3-3.87\"/><path d=\"M16 3.13a4 4 0 0 1 0 7.75\"/>",
+  "archivo": "<path d=\"M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z\"/><path d=\"M14 2v4a2 2 0 0 0 2 2h4\"/><path d=\"M10 9H8\"/><path d=\"M16 13H8\"/><path d=\"M16 17H8\"/>",
+  "ajustes": "<line x1=\"21\" x2=\"14\" y1=\"4\" y2=\"4\"/><line x1=\"10\" x2=\"3\" y1=\"4\" y2=\"4\"/><line x1=\"21\" x2=\"12\" y1=\"12\" y2=\"12\"/><line x1=\"8\" x2=\"3\" y1=\"12\" y2=\"12\"/><line x1=\"21\" x2=\"16\" y1=\"20\" y2=\"20\"/><line x1=\"12\" x2=\"3\" y1=\"20\" y2=\"20\"/><line x1=\"14\" x2=\"14\" y1=\"2\" y2=\"6\"/><line x1=\"8\" x2=\"8\" y1=\"10\" y2=\"14\"/><line x1=\"16\" x2=\"16\" y1=\"18\" y2=\"22\"/>",
+  "buscar": "<circle cx=\"11\" cy=\"11\" r=\"8\"/><path d=\"m21 21-4.3-4.3\"/>",
+  "basura": "<path d=\"M3 6h18\"/><path d=\"M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6\"/><path d=\"M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2\"/><line x1=\"10\" x2=\"10\" y1=\"11\" y2=\"17\"/><line x1=\"14\" x2=\"14\" y1=\"11\" y2=\"17\"/>",
+  "editar": "<path d=\"M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z\"/><path d=\"m15 5 4 4\"/>",
+  "deshacer": "<path d=\"M9 14 4 9l5-5\"/><path d=\"M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11\"/>",
+  "enviar": "<path d=\"M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z\"/><path d=\"m21.854 2.147-10.94 10.939\"/>",
+  "salir": "<path d=\"M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4\"/><polyline points=\"16 17 21 12 16 7\"/><line x1=\"21\" x2=\"9\" y1=\"12\" y2=\"12\"/>",
+  "sol": "<circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M12 2v2\"/><path d=\"M12 20v2\"/><path d=\"m4.93 4.93 1.41 1.41\"/><path d=\"m17.66 17.66 1.41 1.41\"/><path d=\"M2 12h2\"/><path d=\"M20 12h2\"/><path d=\"m6.34 17.66-1.41 1.41\"/><path d=\"m19.07 4.93-1.41 1.41\"/>",
+  "luna": "<path d=\"M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z\"/>",
+  "nube": "<path d=\"M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z\"/>",
+  "ojo": "<path d=\"M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/>",
+  "ojo_no": "<path d=\"M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49\"/><path d=\"M14.084 14.158a3 3 0 0 1-4.242-4.242\"/><path d=\"M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143\"/><path d=\"m2 2 20 20\"/>",
+  "info": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 16v-4\"/><path d=\"M12 8h.01\"/>",
+  "calendario": "<path d=\"M8 2v4\"/><path d=\"M16 2v4\"/><rect width=\"18\" height=\"18\" x=\"3\" y=\"4\" rx=\"2\"/><path d=\"M3 10h18\"/>",
+  "papel": "<path d=\"M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z\"/><path d=\"M14 8H8\"/><path d=\"M16 12H8\"/><path d=\"M13 16H8\"/>",
+  "billetera": "<path d=\"M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1\"/><path d=\"M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4\"/>",
+  "recibo": "<path d=\"M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z\"/><path d=\"M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8\"/><path d=\"M12 17.5v-11\"/>",
+  "bandera": "<path d=\"M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z\"/><line x1=\"4\" x2=\"4\" y1=\"22\" y2=\"15\"/>",
+  "regalo": "<rect x=\"3\" y=\"8\" width=\"18\" height=\"4\" rx=\"1\"/><path d=\"M12 8v13\"/><path d=\"M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7\"/><path d=\"M7.5 8a2.5 2.5 0 0 1 0-5A4.8 8 0 0 1 12 8a4.8 8 0 0 1 4.5-5 2.5 2.5 0 0 1 0 5\"/>",
+  "trofeo": "<path d=\"M6 9H4.5a2.5 2.5 0 0 1 0-5H6\"/><path d=\"M18 9h1.5a2.5 2.5 0 0 0 0-5H18\"/><path d=\"M4 22h16\"/><path d=\"M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22\"/><path d=\"M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22\"/><path d=\"M18 2H6v7a6 6 0 0 0 12 0V2Z\"/>",
+  "avion": "<path d=\"M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z\"/>",
+  "maletin": "<path d=\"M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16\"/><rect width=\"20\" height=\"14\" x=\"2\" y=\"6\" rx=\"2\"/>",
+  "balanza": "<path d=\"m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z\"/><path d=\"m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z\"/><path d=\"M7 21h10\"/><path d=\"M12 3v18\"/><path d=\"M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2\"/>",
+  "carrito": "<circle cx=\"8\" cy=\"21\" r=\"1\"/><circle cx=\"19\" cy=\"21\" r=\"1\"/><path d=\"M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12\"/>",
+  "casa": "<path d=\"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8\"/><path d=\"M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z\"/>",
+  "gasolina": "<line x1=\"3\" x2=\"15\" y1=\"22\" y2=\"22\"/><line x1=\"4\" x2=\"14\" y1=\"9\" y2=\"9\"/><path d=\"M14 22V4a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v18\"/><path d=\"M14 13h2a2 2 0 0 1 2 2v2a2 2 0 0 0 2 2a2 2 0 0 0 2-2V9.83a2 2 0 0 0-.59-1.42L18 5\"/>",
+  "birrete": "<path d=\"M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z\"/><path d=\"M22 10v6\"/><path d=\"M6 12.5V16a6 3 0 0 0 12 0v-3.5\"/>",
+  "fiesta": "<path d=\"M5.8 11.3 2 22l10.7-3.79\"/><path d=\"M4 3h.01\"/><path d=\"M22 8h.01\"/><path d=\"M15 2h.01\"/><path d=\"M22 20h.01\"/><path d=\"m22 2-2.24.75a2.9 2.9 0 0 0-1.96 3.12c.1.86-.57 1.63-1.45 1.63h-.38c-.86 0-1.6.6-1.76 1.44L14 10\"/><path d=\"m22 13-.82-.33c-.86-.34-1.82.2-1.98 1.11c-.11.7-.72 1.22-1.43 1.22H17\"/><path d=\"m11 2 .33.82c.34.86-.2 1.82-1.11 1.98C9.52 4.9 9 5.52 9 6.23V7\"/><path d=\"M11 13c1.93 1.93 2.83 4.17 2 5-.83.83-3.07-.07-5-2-1.93-1.93-2.83-4.17-2-5 .83-.83 3.07.07 5 2Z\"/>",
+  "tv": "<rect width=\"20\" height=\"15\" x=\"2\" y=\"7\" rx=\"2\" ry=\"2\"/><polyline points=\"17 2 12 7 7 2\"/>",
+  "banco": "<line x1=\"3\" x2=\"21\" y1=\"22\" y2=\"22\"/><line x1=\"6\" x2=\"6\" y1=\"18\" y2=\"11\"/><line x1=\"10\" x2=\"10\" y1=\"18\" y2=\"11\"/><line x1=\"14\" x2=\"14\" y1=\"18\" y2=\"11\"/><line x1=\"18\" x2=\"18\" y1=\"18\" y2=\"11\"/><polygon points=\"12 2 20 7 4 7\"/>",
+  "billete": "<rect width=\"20\" height=\"12\" x=\"2\" y=\"6\" rx=\"2\"/><circle cx=\"12\" cy=\"12\" r=\"2\"/><path d=\"M6 12h.01M18 12h.01\"/>",
+  "hormiga": "<path d=\"m8 2 1.88 1.88\"/><path d=\"M14.12 3.88 16 2\"/><path d=\"M9 7.13v-1a3.003 3.003 0 1 1 6 0v1\"/><path d=\"M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6\"/><path d=\"M12 20v-9\"/><path d=\"M6.53 9C4.6 8.8 3 7.1 3 5\"/><path d=\"M6 13H2\"/><path d=\"M3 21c0-2.1 1.7-3.9 3.8-4\"/><path d=\"M20.97 5c0 2.1-1.6 3.8-3.5 4\"/><path d=\"M22 13h-4\"/><path d=\"M17.2 17c2.1.1 3.8 1.9 3.8 4\"/>",
+  "apreton": "<path d=\"m11 17 2 2a1 1 0 1 0 3-3\"/><path d=\"m14 14 2.5 2.5a1 1 0 1 0 3-3l-3.88-3.88a3 3 0 0 0-4.24 0l-.88.88a1 1 0 1 1-3-3l2.81-2.81a5.79 5.79 0 0 1 7.06-.87l.47.28a2 2 0 0 0 1.42.25L21 4\"/><path d=\"m21 3 1 11h-2\"/><path d=\"M3 3 2 14l6.5 6.5a1 1 0 1 0 3-3\"/><path d=\"M3 4h8\"/>",
+  "bandeja": "<polyline points=\"22 12 16 12 14 15 10 15 8 12 2 12\"/><path d=\"M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z\"/>",
+  "foco": "<path d=\"M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5\"/><path d=\"M9 18h6\"/><path d=\"M10 22h4\"/>",
+  "bus": "<path d=\"M8 6v6\"/><path d=\"M15 6v6\"/><path d=\"M2 12h19.6\"/><path d=\"M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3\"/><circle cx=\"7\" cy=\"18\" r=\"2\"/><path d=\"M9 18h5\"/><circle cx=\"16\" cy=\"18\" r=\"2\"/>",
+  "pastilla": "<path d=\"m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7Z\"/><path d=\"m8.5 8.5 7 7\"/>",
+  "comida": "<path d=\"M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2\"/><path d=\"M7 2v20\"/><path d=\"M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7\"/>",
+  "helado": "<path d=\"m7 11 4.08 10.35a1 1 0 0 0 1.84 0L17 11\"/><path d=\"M17 7A5 5 0 0 0 7 7\"/><path d=\"M17 7a2 2 0 0 1 0 4H7a2 2 0 0 1 0-4\"/>",
+  "camisa": "<path d=\"M20.38 3.46 16 2a4 4 0 0 1-8 0L3.62 3.46a2 2 0 0 0-1.34 2.23l.58 3.47a1 1 0 0 0 .99.84H6v10c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V10h2.15a1 1 0 0 0 .99-.84l.58-3.47a2 2 0 0 0-1.34-2.23z\"/>",
+  "audifonos": "<path d=\"M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3\"/>",
+  "sofa": "<path d=\"M20 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v3\"/><path d=\"M2 16a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5a2 2 0 0 0-4 0v1.5a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5V11a2 2 0 0 0-4 0z\"/><path d=\"M4 18v2\"/><path d=\"M20 18v2\"/><path d=\"M12 4v9\"/>",
+  "tijeras": "<circle cx=\"6\" cy=\"6\" r=\"3\"/><path d=\"M8.12 8.12 12 12\"/><path d=\"M20 4 8.12 15.88\"/><circle cx=\"6\" cy=\"18\" r=\"3\"/><path d=\"M14.8 14.8 20 20\"/>",
+  "perro": "<path d=\"M11.25 16.25h1.5L12 17z\"/><path d=\"M16 14v.5\"/><path d=\"M4.42 11.247A13.152 13.152 0 0 0 4 14.556C4 18.728 7.582 21 12 21s8-2.272 8-6.444a11.702 11.702 0 0 0-.493-3.309\"/><path d=\"M8 14v.5\"/><path d=\"M8.5 8.5c-.384 1.05-1.083 2.028-2.344 2.5-1.931.722-3.576-.297-3.656-1-.113-.994 1.177-6.53 4-7 1.923-.321 3.651.845 3.651 2.235A7.497 7.497 0 0 1 14 5.277c0-1.39 1.844-2.598 3.767-2.277 2.823.47 4.113 6.006 4 7-.08.703-1.725 1.722-3.656 1-1.261-.472-1.855-1.45-2.239-2.5\"/>",
+  "teatro": "<path d=\"M10 11h.01\"/><path d=\"M14 6h.01\"/><path d=\"M18 6h.01\"/><path d=\"M6.5 13.1h.01\"/><path d=\"M22 5c0 9-4 12-6 12s-6-3-6-12c0-2 2-3 6-3s6 1 6 3\"/><path d=\"M17.4 9.9c-.8.8-2 .8-2.8 0\"/><path d=\"M10.1 7.1C9 7.2 7.7 7.7 6 8.6c-3.5 2-4.7 3.9-3.7 5.6 4.5 7.8 9.5 8.4 11.2 7.4.9-.5 1.9-2.1 1.9-4.7\"/><path d=\"M9.1 16.5c.3-1.1 1.4-1.7 2.4-1.4\"/>",
+  "caja": "<path d=\"M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z\"/><path d=\"M12 22V12\"/><path d=\"m3.3 7 7.703 4.734a2 2 0 0 0 1.994 0L20.7 7\"/><path d=\"m7.5 4.27 9 5.15\"/>",
+  "etiqueta": "<path d=\"M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z\"/><circle cx=\"7.5\" cy=\"7.5\" r=\".5\" fill=\"currentColor\"/>",
+  "tendencia": "<polyline points=\"22 7 13.5 15.5 8.5 10.5 2 17\"/><polyline points=\"16 7 22 7 22 13\"/>",
+  "bolsa": "<path d=\"M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z\"/><path d=\"M3 6h18\"/><path d=\"M16 10a4 4 0 0 1-8 0\"/>",
+  "herramientas": "<path d=\"M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z\"/>",
+  "telefono": "<path d=\"M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z\"/>",
+  "check_c": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m9 12 2 2 4-4\"/>",
+  "libro": "<path d=\"M12 7v14\"/><path d=\"M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z\"/>",
+  "calculadora": "<rect width=\"16\" height=\"20\" x=\"4\" y=\"2\" rx=\"2\"/><line x1=\"8\" x2=\"16\" y1=\"6\" y2=\"6\"/><line x1=\"16\" x2=\"16\" y1=\"14\" y2=\"18\"/><path d=\"M16 10h.01\"/><path d=\"M12 10h.01\"/><path d=\"M8 10h.01\"/><path d=\"M12 14h.01\"/><path d=\"M8 14h.01\"/><path d=\"M12 18h.01\"/><path d=\"M8 18h.01\"/>",
+  "descargar": "<path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\"/><polyline points=\"7 10 12 15 17 10\"/><line x1=\"12\" x2=\"12\" y1=\"15\" y2=\"3\"/>",
+  "actualizar": "<path d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8\"/><path d=\"M21 3v5h-5\"/><path d=\"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16\"/><path d=\"M8 16H3v5\"/>",
+  "mundo": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20\"/><path d=\"M2 12h20\"/>",
+  "familia": "<path d=\"M18 21a8 8 0 0 0-16 0\"/><circle cx=\"10\" cy=\"8\" r=\"5\"/><path d=\"M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3\"/>",
+  "sonrisa": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M8 14s1.5 2 4 2 4-2 4-2\"/><line x1=\"9\" x2=\"9.01\" y1=\"9\" y2=\"9\"/><line x1=\"15\" x2=\"15.01\" y1=\"9\" y2=\"9\"/>",
+  "llave": "<path d=\"M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z\"/><circle cx=\"16.5\" cy=\"7.5\" r=\".5\" fill=\"currentColor\"/>",
+  "monedas": "<path d=\"M11 15h2a2 2 0 1 0 0-4h-3c-.6 0-1.1.2-1.4.6L3 17\"/><path d=\"m7 21 1.6-1.4c.3-.4.8-.6 1.4-.6h4c1.1 0 2.1-.4 2.8-1.2l4.6-4.4a2 2 0 0 0-2.75-2.91l-4.2 3.9\"/><path d=\"m2 16 6 6\"/><circle cx=\"16\" cy=\"9\" r=\"2.9\"/><circle cx=\"6\" cy=\"5\" r=\"3\"/>",
+  "pluma": "<path d=\"M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4\"/><path d=\"M2 6h4\"/><path d=\"M2 10h4\"/><path d=\"M2 14h4\"/><path d=\"M2 18h4\"/><path d=\"M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z\"/>",
+  "palmera": "<path d=\"M13 8c0-2.76-2.46-5-5.5-5S2 5.24 2 8h2l1-1 1 1h4\"/><path d=\"M13 7.14A5.82 5.82 0 0 1 16.5 6c3.04 0 5.5 2.24 5.5 5h-3l-1-1-1 1h-3\"/><path d=\"M5.89 9.71c-2.15 2.15-2.3 5.47-.35 7.43l4.24-4.25.7-.7.71-.71 2.12-2.12c-1.95-1.96-5.27-1.8-7.42.35\"/><path d=\"M11 15.5c.5 2.5-.17 4.5-1 6.5h4c2-5.5-.5-12-1-14\"/>",
+  "auto": "<path d=\"M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2\"/><circle cx=\"7\" cy=\"17\" r=\"2\"/><path d=\"M9 17h6\"/><circle cx=\"17\" cy=\"17\" r=\"2\"/>",
+  "laptop": "<path d=\"M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16\"/>",
+  "celular": "<rect width=\"14\" height=\"20\" x=\"5\" y=\"2\" rx=\"2\" ry=\"2\"/><path d=\"M12 18h.01\"/>",
+  "joya": "<path d=\"M6 3h12l4 6-10 13L2 9Z\"/><path d=\"M11 3 8 9l4 13 4-13-3-6\"/><path d=\"M2 9h20\"/>",
+  "salvavidas": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m4.93 4.93 4.24 4.24\"/><path d=\"m14.83 9.17 4.24-4.24\"/><path d=\"m14.83 14.83 4.24 4.24\"/><path d=\"m9.17 14.83-4.24 4.24\"/><circle cx=\"12\" cy=\"12\" r=\"4\"/>",
+  "subir": "<path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\"/><polyline points=\"17 8 12 3 7 8\"/><line x1=\"12\" x2=\"12\" y1=\"3\" y2=\"15\"/>",
+  "pastel": "<path d=\"M21 12c.552 0 1.005-.449.95-.998a10 10 0 0 0-8.953-8.951c-.55-.055-.998.398-.998.95v8a1 1 0 0 0 1 1z\"/><path d=\"M21.21 15.89A10 10 0 1 1 8 2.83\"/>",
+  "corona": "<path d=\"M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z\"/><path d=\"M5 21h14\"/>",
+  "brillo": "<path d=\"M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z\"/><path d=\"M20 3v4\"/><path d=\"M22 5h-4\"/><path d=\"M4 17v2\"/><path d=\"M5 18H3\"/>",
+  "campana": "<path d=\"M10.268 21a2 2 0 0 0 3.464 0\"/><path d=\"M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326\"/>",
+  "usuario": "<path d=\"M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2\"/><circle cx=\"12\" cy=\"7\" r=\"4\"/>",
+  "sube": "<path d=\"m5 12 7-7 7 7\"/><path d=\"M12 19V5\"/>",
+  "baja": "<path d=\"M12 5v14\"/><path d=\"m19 12-7 7-7-7\"/>",
+  "filtro": "<path d=\"M3 6h18\"/><path d=\"M7 12h10\"/><path d=\"M10 18h4\"/>",
+  "paleta": "<circle cx=\"13.5\" cy=\"6.5\" r=\".5\" fill=\"currentColor\"/><circle cx=\"17.5\" cy=\"10.5\" r=\".5\" fill=\"currentColor\"/><circle cx=\"8.5\" cy=\"7.5\" r=\".5\" fill=\"currentColor\"/><circle cx=\"6.5\" cy=\"12.5\" r=\".5\" fill=\"currentColor\"/><path d=\"M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z\"/>",
+  "escudo": "<path d=\"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z\"/><path d=\"m9 12 2 2 4-4\"/>",
+  "ayuda": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3\"/><path d=\"M12 17h.01\"/>",
+  "cafe": "<path d=\"M10 2v2\"/><path d=\"M14 2v2\"/><path d=\"M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1\"/><path d=\"M6 2v2\"/>",
+  "rayo": "<path d=\"M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z\"/>",
+  "gota": "<path d=\"M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z\"/><path d=\"M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97\"/>",
+  "ahorro": "<path d=\"M19 5c-1.5 0-2.8 1.4-3 2-3.5-1.5-11-.3-11 5 0 1.8 0 3 2 4.5V20h4v-2h3v2h4v-4c1-.5 1.7-1 2-2h2v-4h-2c0-1-.5-1.5-1-2V5z\"/><path d=\"M2 9v1c0 1.1.9 2 2 2h1\"/><path d=\"M16 11h.01\"/>",
+  "porcentaje": "<line x1=\"19\" x2=\"5\" y1=\"5\" y2=\"19\"/><circle cx=\"6.5\" cy=\"6.5\" r=\"2.5\"/><circle cx=\"17.5\" cy=\"17.5\" r=\"2.5\"/>",
+  "reloj": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><polyline points=\"12 6 12 12 16 14\"/>",
+  "mas_c": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M8 12h8\"/><path d=\"M12 8v8\"/>",
+  "tabla": "<path d=\"M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18\"/>",
+  "tres_puntos": "<circle cx=\"12\" cy=\"12\" r=\"1\"/><circle cx=\"19\" cy=\"12\" r=\"1\"/><circle cx=\"5\" cy=\"12\" r=\"1\"/>",
+  "copiar": "<rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\" ry=\"2\"/><path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\"/>",
+  "compartir": "<circle cx=\"18\" cy=\"5\" r=\"3\"/><circle cx=\"6\" cy=\"12\" r=\"3\"/><circle cx=\"18\" cy=\"19\" r=\"3\"/><line x1=\"8.59\" x2=\"15.42\" y1=\"13.51\" y2=\"17.49\"/><line x1=\"15.41\" x2=\"8.59\" y1=\"6.51\" y2=\"10.49\"/>",
+  "excel": "<path d=\"M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z\"/><path d=\"M14 2v4a2 2 0 0 0 2 2h4\"/><path d=\"M8 13h2\"/><path d=\"M14 13h2\"/><path d=\"M8 17h2\"/><path d=\"M14 17h2\"/>",
+  "imprimir": "<path d=\"M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2\"/><path d=\"M6 9V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6\"/><rect x=\"6\" y=\"14\" width=\"12\" height=\"8\" rx=\"1\"/>",
+  "imagen": "<path d=\"M16 5h6\"/><path d=\"M19 2v6\"/><path d=\"M21 11.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7.5\"/><path d=\"m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21\"/><circle cx=\"9\" cy=\"9\" r=\"2\"/>",
+  "escanear": "<path d=\"M3 7V5a2 2 0 0 1 2-2h2\"/><path d=\"M17 3h2a2 2 0 0 1 2 2v2\"/><path d=\"M21 17v2a2 2 0 0 1-2 2h-2\"/><path d=\"M7 21H5a2 2 0 0 1-2-2v-2\"/><path d=\"M7 12h10\"/>",
+  "pdf": "<path d=\"M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z\"/><path d=\"M14 2v4a2 2 0 0 0 2 2h4\"/><path d=\"M12 18v-6\"/><path d=\"m9 15 3 3 3-3\"/>",
+  "lista": "<path d=\"M3 12h.01\"/><path d=\"M3 18h.01\"/><path d=\"M3 6h.01\"/><path d=\"M8 12h13\"/><path d=\"M8 18h13\"/><path d=\"M8 6h13\"/>",
+  "lineas": "<path d=\"M3 3v16a2 2 0 0 0 2 2h16\"/><path d=\"m19 9-5 5-4-4-3 3\"/>",
+  "moneda": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8\"/><path d=\"M12 18V6\"/>",
+  "sin_red": "<path d=\"M12 20h.01\"/><path d=\"M8.5 16.429a5 5 0 0 1 7 0\"/><path d=\"M5 12.859a10 10 0 0 1 5.17-2.69\"/><path d=\"M19 12.859a10 10 0 0 0-2.007-1.523\"/><path d=\"M2 8.82a15 15 0 0 1 4.177-2.643\"/><path d=\"M22 8.82a15 15 0 0 0-11.288-3.764\"/><path d=\"m2 2 20 20\"/>",
+  "libro_texto": "<path d=\"M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20\"/><path d=\"M8 11h8\"/><path d=\"M8 7h6\"/>"
+};
+  const emoji = {
+  "💳": "tarjeta",
+  "🧾": "recibo",
+  "🏁": "bandera",
+  "🎁": "regalo",
+  "🎯": "meta",
+  "🏆": "trofeo",
+  "🔁": "repetir",
+  "✈": "avion",
+  "📄": "archivo",
+  "🗓": "calendario",
+  "💼": "maletin",
+  "⚖": "balanza",
+  "🛒": "carrito",
+  "🏠": "casa",
+  "⛽": "gasolina",
+  "🎓": "birrete",
+  "🎉": "fiesta",
+  "📺": "tv",
+  "🏦": "banco",
+  "💵": "billete",
+  "🐜": "hormiga",
+  "🤝": "apreton",
+  "📥": "bandeja",
+  "🏛": "banco",
+  "💡": "foco",
+  "🚌": "bus",
+  "💊": "pastilla",
+  "🍔": "comida",
+  "🍦": "helado",
+  "👕": "camisa",
+  "🎧": "audifonos",
+  "🛋": "sofa",
+  "💈": "tijeras",
+  "🐶": "perro",
+  "🎭": "teatro",
+  "📦": "caja",
+  "🏷": "etiqueta",
+  "📈": "tendencia",
+  "🛍": "bolsa",
+  "🧰": "herramientas",
+  "📞": "telefono",
+  "✅": "check_c",
+  "📕": "libro",
+  "📗": "libro",
+  "📊": "grafica",
+  "🧮": "calculadora",
+  "👫": "personas",
+  "📲": "descargar",
+  "🔄": "actualizar",
+  "⚙": "ajustes",
+  "☁": "nube",
+  "🚪": "salir",
+  "📅": "calendario",
+  "🌎": "mundo",
+  "💱": "movimientos",
+  "👨‍👩‍👧": "familia",
+  "🙂": "sonrisa",
+  "🗑": "basura",
+  "🔑": "llave",
+  "💸": "monedas",
+  "📷": "camara",
+  "📝": "pluma",
+  "🏝": "palmera",
+  "🚗": "auto",
+  "💻": "laptop",
+  "📱": "celular",
+  "💍": "joya",
+  "🛟": "salvavidas",
+  "📤": "subir",
+  "🏳": "bandera"
+};
+  // Los emojis llegan a veces con el selector de variación (\uFE0F): se ignora al buscar.
+  const deEmoji = (t) => emoji[String(t).replace(/\uFE0F/g, '')] || null;
+  AF.iconos = { trazos, emoji, deEmoji };
+  if (typeof module === 'object' && module.exports) module.exports = AF.iconos;
+})(typeof window !== 'undefined' ? window : globalThis);
+;
+
 /* ===== js/ui.js ===== */
 /* Ayudas de interfaz: construir elementos (siempre con texto escapado), íconos, hojas inferiores, avisos. */
 (function (g) {
@@ -201,49 +416,30 @@
       if (c == null || c === false) continue;
       if (Array.isArray(c)) add(el, c);
       else if (c instanceof Node) el.appendChild(c);
-      else el.appendChild(d.createTextNode(String(c)));
+      else {
+        // «🍔 Comida fuera»: el emoji del principio se vuelve ícono y el resto queda como texto
+        const m = typeof c === 'string' && c.length < 90 ? c.match(/^(\p{Extended_Pictographic}\uFE0F?(?:\u200D\p{Extended_Pictographic}\uFE0F?)*)\s+(\S[\s\S]*)$/u) : null;
+        const gp = m ? glifo(m[1]) : null;
+        if (gp) { el.appendChild(gp); el.appendChild(d.createTextNode(' ' + m[2])); continue; }
+        const g1 = glifo(c); el.appendChild(g1 || d.createTextNode(String(c)));
+      }
     }
+  }
+  // Si el texto es UN emoji de la lista de iconos.js, devuelve su ícono (svg). Si no, null y se pone como texto.
+  function glifo(t) {
+    if (typeof t !== 'string' || t.length > 12) return null;
+    const n = AF.iconos.deEmoji(t.trim());
+    if (!n || !P[n]) return null;
+    const s = d.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('class', 'ico-svg glifo'); s.setAttribute('aria-hidden', 'true');
+    s.innerHTML = P[n];
+    return s;
   }
   const vaciar = (el) => { while (el.firstChild) el.removeChild(el.firstChild); return el; };
 
   /* --------------------------------------------------------------- Íconos */
-  // Trazos propios de 24x24. Solo cadenas fijas del código (nunca datos de la persona).
-  const P = {
-    inicio: '<path d="M3.5 11.2 12 4l8.5 7.2"/><path d="M5.5 9.8V20h13V9.8"/><path d="M10 20v-5.5h4V20"/>',
-    movimientos: '<path d="M8 6h12M8 12h12M8 18h12"/><path d="M3.8 6h.4M3.8 12h.4M3.8 18h.4"/>',
-    tarjeta: '<rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M3 10h18M6.5 15h4"/>',
-    mas: '<circle cx="5.5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18.5" cy="12" r="1.3"/>',
-    mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/>',
-    teclado: '<rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/>',
-    cerrar: '<path d="M6 6l12 12M18 6 6 18"/>',
-    atras: '<path d="M15 5l-7 7 7 7"/>',
-    derecha: '<path d="M9 5l7 7-7 7"/>',
-    candado: '<rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>',
-    huella: '<path d="M6 10.5a6 6 0 0 1 12 0c0 2.2.2 4.4-.6 6.5"/><path d="M9 20c.9-1.9 1.2-3.8 1.2-6a1.8 1.8 0 0 1 3.6 0c0 2.2.6 4.2 1.7 5.8"/><path d="M12 11v1M3.5 13c.2-1 .5-2 .9-2.9M7 17.5c.7-1.2 1-2.6 1-4a4 4 0 0 1 8 0"/>',
-    mas_: '<path d="M12 5v14M5 12h14"/>',
-    ok: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
-    estrella: '<path d="M12 3.8l2.5 5.2 5.7.8-4.1 4 1 5.7L12 16.8 6.9 19.5l1-5.7-4.1-4 5.7-.8z"/>',
-    alerta: '<path d="M12 4l9.5 16.5h-19z"/><path d="M12 10v4.5M12 17.5h.01"/>',
-    camara: '<path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.2-2h6.6L16.5 7h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="13" r="3.4"/>',
-    grafica: '<path d="M4 20V10M10 20V4M16 20v-7M21 20H3"/>',
-    meta: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/>',
-    repetir: '<path d="M4 11V9a3 3 0 0 1 3-3h11l-2.5-2.5M20 13v2a3 3 0 0 1-3 3H6l2.5 2.5"/>',
-    personas: '<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5a6 6 0 0 1 12 0"/><path d="M16 5.6a3.2 3.2 0 0 1 0 5.8M17.5 14.5a6 6 0 0 1 3.5 5"/>',
-    archivo: '<path d="M7 3.5h7l4 4V20a.5.5 0 0 1-.5.5h-10.5a.5.5 0 0 1-.5-.5z"/><path d="M14 3.5V8h4M9 13h6M9 16.5h6"/>',
-    ajustes: '<path d="M4 7h8.5M17.5 7H20M4 12h2.5M11.5 12H20M4 17h10.5M19.5 17H20"/><circle cx="15" cy="7" r="2.5"/><circle cx="9" cy="12" r="2.5"/><circle cx="17" cy="17" r="2.5"/>',
-    buscar: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
-    basura: '<path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.8 12.5h9.4L17.5 7M10 11v5M14 11v5"/>',
-    editar: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
-    deshacer: '<path d="M9 8H5V4"/><path d="M5.5 8A8 8 0 1 1 4 13"/>',
-    enviar: '<path d="M4 12l16-8-6 16-2.5-6.5z"/>',
-    salir: '<path d="M10 4.5H6.5A1.5 1.5 0 0 0 5 6v12a1.5 1.5 0 0 0 1.5 1.5H10M15 8l4 4-4 4M19 12H9.5"/>',
-    sol: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/>',
-    nube: '<path d="M7 18.5a4.5 4.5 0 0 1-.6-8.96A5.5 5.5 0 0 1 17 8.9a3.8 3.8 0 0 1 .5 7.6z"/><path d="M9 15l3-3 3 3M12 12v6"/>',
-    ojo: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
-    info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>',
-    calendario: '<rect x="4" y="5.5" width="16" height="14.5" rx="2.5"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/>',
-    papel: '<path d="M6 3.5h12v17l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4-2 1.4z"/><path d="M9 8.5h6M9 12h6"/>',
-  };
+  // Los dibujos están todos en iconos.js (un solo juego de trazos). Solo cadenas fijas del código (nunca datos de la persona).
+  const P = AF.iconos.trazos;
   function ico(nombre, clase) {
     const s = d.createElementNS('http://www.w3.org/2000/svg', 'svg');
     s.setAttribute('viewBox', '0 0 24 24');
@@ -350,7 +546,7 @@
     setTimeout(() => capa.remove(), 2600);
   }
 
-  AF.ui = { h, vaciar, tinteDe, confeti, ico, logoGoogle, logoFacebook, logoApp, insigniaBanco, chipPro, hoja, aviso, fila, campo, iconos: Object.keys(P) };
+  AF.ui = { h, vaciar, glifo, tinteDe, confeti, ico, logoGoogle, logoFacebook, logoApp, insigniaBanco, chipPro, hoja, aviso, fila, campo, iconos: Object.keys(P) };
   if (typeof module === 'object' && module.exports) module.exports = AF.ui;
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
@@ -376,7 +572,7 @@
     const o = {
       v: 1, creado: new Date().toISOString(),
       ajustes: { nombre: '', pais: p.codigo, moneda: p.moneda, diaCobro: PLAN.bienvenida.diaCobroDefecto, sueldo: null, cargas: 0,
-        tema: 'auto', colorApp: 'marino', respuestaVoz: !!(PLAN.voz && PLAN.voz.hablarPorDefecto), bloqueoSeg: PLAN.sesion.bloquearTrasSegundos, bienvenidaHecha: false },
+        tema: 'auto', colorApp: 'petroleo', respuestaVoz: !!(PLAN.voz && PLAN.voz.hablarPorDefecto), bloqueoSeg: PLAN.sesion.bloquearTrasSegundos, bienvenidaHecha: false },
       plan: { inicioPrueba: null, proHasta: null, ia: {} },
       diccionario: {}, historial: [],
     };
@@ -2584,6 +2780,21 @@
     return { ingresos: r2(ingresos), gastos: r2(gastos), veces, pagosTarjeta: r2(pagosTarjeta), conTarjeta: r2(conTarjeta), balance: r2(ingresos - gastos), porCategoria: lista, nec: { N: r2(nec.N), G: r2(nec.G), sin: r2(nec.sin) } };
   }
 
+  /* ------------------------------------------------------- Resumen del periodo (UNA sola cuenta para toda la app) */
+  // Inicio, Movimientos y los informes usan estas mismas cifras:
+  //   gastos       = TODO lo que compraste en el periodo (efectivo, débito y tarjeta)
+  //   conTarjeta   = la parte de «gastos» que pusiste en tarjeta (se paga después)
+  //   pagosTarjeta = lo que pagaste a tus tarjetas en el periodo (baja la deuda; NO es un gasto nuevo)
+  //   salio        = lo que salió de tu bolsillo = gastos − conTarjeta + pagosTarjeta
+  //   balance      = ingresos − salio
+  function resumenMes(d, desde, hasta) {
+    const t = totales(d, desde, hasta);
+    const efectivo = r2(t.gastos - t.conTarjeta);
+    const salio = r2(efectivo + t.pagosTarjeta);
+    const inn = innecesarios(d, desde, hasta);
+    return { ingresos: t.ingresos, gastos: t.gastos, veces: t.veces, efectivo, conTarjeta: t.conTarjeta, pagosTarjeta: t.pagosTarjeta, salio, balance: r2(t.ingresos - salio), innecesarios: inn.total, nInnecesarios: inn.veces, porCategoria: t.porCategoria, nec: t.nec };
+  }
+
   /* --------------------------------------------------------------- Gastos innecesarios */
   // Lo que fue gusto (no necesario) en el periodo, con lo que se repite. Para la tarjeta del Inicio, el filtro de Movimientos y las preguntas.
   function innecesarios(d, desde, hasta) {
@@ -3129,7 +3340,7 @@
     return lista.sort((a, b) => (b.fecha === a.fecha ? b.creado - a.creado : b.fecha < a.fecha ? -1 : 1))[0] || null;
   }
 
-  AF.informes = { totales, ingresosPorCategoria, hormiga, ciclo, cobroDe, ultimoDiaCobro, puedesGastarHoy, disponible: puedesGastarHoy, innecesarios, consejos, presupuestos, alertas, sri, serieMensual, csv, resumenCompartir, responder, objetivoDeCorreccion, catDe,
+  AF.informes = { totales, resumenMes, ingresosPorCategoria, hormiga, ciclo, cobroDe, ultimoDiaCobro, puedesGastarHoy, disponible: puedesGastarHoy, innecesarios, consejos, presupuestos, alertas, sri, serieMensual, csv, resumenCompartir, responder, objetivoDeCorreccion, catDe,
     estadoFijo, suscripcionesDetectadas, pendientePrestamo, prestamosResumen, reto, conciliar };
   if (typeof module === 'object' && module.exports) module.exports = AF.informes;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -4307,7 +4518,7 @@
   };
   /* ------------------------------------------------------ versión web: saber si hay una versión nueva y aplicarla */
   // La compilación la escribe scripts/construir-web.js (huella de todos los archivos). En desarrollo queda sin escribir y no se busca nada.
-  const COMPILACION = '831dc19b8e';
+  const COMPILACION = '35b186599f';
   const esCompilada = /^[0-9a-f]{10}$/.test(COMPILACION);
   let registro = null, nuevaCompilacion = null, ultimaBusqueda = 0;
   const oyentesVersion = [];
@@ -4465,7 +4676,7 @@
   function filaMov(m, hoy, onclick, conFecha) {
     if (m.tipo === 'pago_tarjeta') {
       const t = AF.store.buscar('tarjetas', m.tarjetaId);
-      return fila({ icono: '💳', titulo: 'Pago de ' + (t ? t.nombre : 'tarjeta'), sub: 'Baja tu deuda' + (conFecha && hoy ? ' · ' + U.fechaCorta(m.fecha, hoy) : ''), derecha: h('span', { class: 'monto pago' }, '−' + $(m.monto)), onclick });
+      return fila({ icono: '💳', tono: 'neutro', titulo: 'Pago de ' + (t ? t.nombre : 'tarjeta'), sub: 'Baja tu deuda' + (conFecha && hoy ? ' · ' + U.fechaCorta(m.fecha, hoy) : ''), derecha: h('span', { class: 'monto pago' }, '−' + $(m.monto)), onclick });
     }
     const c = catDe(m.cat);
     return fila({
@@ -4957,8 +5168,8 @@
 ;
 
 /* ===== js/vistas/inicio.js ===== */
-/* Inicio: cuánto te queda hasta tu cobro, avisos, gastos innecesarios, tarjetas por pagar y últimos movimientos.
-   Una sola cifra manda: lo que te queda. Nada de «gasto diario» ni «te pasaste». */
+/* Inicio: una cifra manda (lo que te queda hasta tu cobro), debajo lo que pasó en el mes y lo que viene.
+   Todas las cifras salen de AF.informes (las mismas que ve Movimientos): nada inventado, nada de «gasto diario» ni «te pasaste». */
 (function (g) {
   'use strict';
   const AF = (g.AF = g.AF || {});
@@ -4970,16 +5181,17 @@
 
   const SUGERENCIAS = ['Pagué 30 de luz', 'Me pagaron 500', 'Gasté 4 en un almuerzo'];
   const fechaBonita = (iso) => U.deISO(iso).getDate() + ' de ' + U.nombreMes(iso);
+  const colorOk = (c) => (typeof c === 'string' && /^#[0-9a-f]{3,8}$/i.test(c) ? c : null);
 
   /* ------------------------------------------------------------------ cabecera */
   function cabecera(D) {
     const nombre = D.ajustes.nombre || '';
     const hora = new Date().getHours();
-    const saludo = (hora < 12 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches') + (nombre ? ', ' + nombre : '');
-    return h('header', { class: 'barra-superior' },
+    const saludo = (hora < 12 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches') + (nombre ? ', ' + nombre.split(' ')[0] : '');
+    return h('header', { class: 'cab-inicio' },
       h('div', { class: 'avatar', 'aria-hidden': 'true' }, (nombre || PLAN.app.nombreCorto).charAt(0).toUpperCase()),
-      h('div', { class: 'saludo-texto' }, saludo),
-      h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Ajustes', onclick: () => AF.app.abrir('Ajustes', (c) => V.mas.ajustes(c)) }, ico('ajustes')));
+      h('div', { class: 'cab-inicio-texto' }, h('h1', { class: 'cab-inicio-saludo' }, saludo), h('div', { class: 'cab-inicio-sub' }, 'Así va tu dinero')),
+      h('button', { class: 'boton-redondo', type: 'button', 'aria-label': 'Ajustes', onclick: () => AF.app.abrir('Ajustes', (c) => V.mas.ajustes(c)) }, ico('ajustes')));
   }
 
   /* ------------------------------------------------------------------ lo que te queda */
@@ -4987,58 +5199,157 @@
     const p = AF.informes.puedesGastarHoy(D, hoy);
     const cont = h('section', { class: 'hero', 'aria-label': 'Cuánto te queda' });
     if (!p.ingresos) {
-      cont.appendChild(h('div', { class: 'tarjeta' },
+      cont.appendChild(h('div', { class: 'hero-card hero-vacio' },
         h('div', { class: 'hero-etiqueta' }, p.modo === 'variable' ? 'Este mes aún no registras ingresos' : 'Aún no registras tu cobro'),
-        h('div', { class: 'cifra hero-cifra suave' }, '—'),
+        h('div', { class: 'hero-cifra' }, '—'),
         h('p', { class: 'hero-meta' }, 'Dime cuánto cobraste («me pagaron 800») y te digo cuánto te queda' + (p.modo === 'variable' ? ' hasta fin de mes.' : ' hasta tu cobro.')),
-        h('div', { estilo: { marginTop: '12px' } }, h('button', { class: 'btn btn-suave btn-chico', type: 'button', onclick: () => C().formMovimiento({ inicial: { tipo: 'ingreso', cat: 'sueldo', monto: D.ajustes.sueldo || '' }, alGuardar: (m) => C().guardarMov(m) }) }, 'Registrar mi cobro'))));
+        h('div', { estilo: { marginTop: '16px' } }, h('button', { class: 'btn btn-oro btn-chico', type: 'button', onclick: () => C().formMovimiento({ inicial: { tipo: 'ingreso', cat: 'sueldo', monto: D.ajustes.sueldo || '' }, alGuardar: (m) => C().guardarMov(m) }) }, 'Registrar mi cobro'))));
       return cont;
     }
     const resto = Math.max(0, p.resto);
     const sinDinero = p.resto <= 0;
     const usado = p.ingresos > 0 ? Math.min(1, Math.max(0, (p.gastado + p.apartado) / p.ingresos)) : 0;
-    const hasta = p.modo === 'variable' ? 'hasta fin de mes' : 'hasta ' + p.etiqueta;
-    const dias = p.dias === 1 ? 'mañana es tu cobro' : 'faltan ' + p.dias + ' días';
-    const datos = [['Ingresos', $(p.ingresos), p.estimado ? 'según tu sueldo' : null], ['Gastado', $(p.gastado), null]];
-    if (p.apartado > 0) datos.push(['Apartado', $(p.apartado), 'cuotas y fijos']);
-    cont.appendChild(h('div', { class: 'tarjeta' },
-      h('div', { class: 'hero-etiqueta' }, sinDinero ? 'Ya no te queda dinero ' + hasta : 'Te queda ' + hasta),
-      h('div', { class: 'cifra hero-cifra' + (sinDinero ? ' pasado' : ''), 'aria-live': 'polite' }, h('span', { class: 'cambio-cifra' }, sinDinero ? '−' + $(-p.resto) : $(resto))),
-      h('p', { class: 'hero-meta' }, sinDinero ? 'Gastaste ' + $(p.gastado + p.apartado) + ' de ' + $(p.ingresos) + '. Tu cobro: ' + p.etiqueta.replace(/^el /, '') + '.' : U.cap(dias) + (p.modo === 'variable' ? '' : ' · cobras ' + p.etiqueta)),
-      h('div', { class: 'avance' + (usado > 0.85 ? ' alerta' : ''), role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(usado * 100), 'aria-label': 'Parte del ingreso ya usada' }, h('i', { estilo: { width: Math.round(usado * 100) + '%' } })),
-      h('div', { class: datos.length === 3 ? 'tres-datos' : 'dos-datos' }, datos.map(([t, v, nota]) => h('div', null, h('div', { class: 'dato-etiqueta' }, t + (nota ? ' · ' + nota : '')), h('div', { class: 'dato-valor' }, v))))));
+        const dias = p.dias === 1 ? 'Mañana es tu cobro' : 'Faltan ' + p.dias + ' días';
+    const datos = [['entra', 'subir', 'Entró', $(p.ingresos)], ['sale', 'baja', 'Salió', $(p.gastado)]];
+    if (p.apartado > 0) datos.push(['guarda', 'ahorro', 'Apartado', $(p.apartado)]);
+    cont.appendChild(h('div', { class: 'hero-card' },
+      h('div', { class: 'hero-fila' },
+        h('div', { class: 'hero-etiqueta' }, sinDinero ? 'Ya no te queda dinero' : 'Te queda'),
+        p.modo === 'variable' ? null : h('span', { class: 'hero-pildora' }, ico('calendario'), dias)),
+      h('div', { class: 'hero-cifra' + (sinDinero ? ' pasado' : ''), 'aria-live': 'polite' }, h('span', { class: 'cambio-cifra' }, sinDinero ? '−' + $(-p.resto) : $(resto))),
+      h('div', { class: 'hero-meta' }, sinDinero ? 'Usaste ' + $(p.gastado + p.apartado) + ' de ' + $(p.ingresos) + '. Tu cobro: ' + p.etiqueta.replace(/^el /, '') + '.' : (p.modo === 'variable' ? 'Hasta fin de mes · usaste ' + Math.round(usado * 100) + ' %' : 'Hasta tu cobro ' + p.etiqueta.replace(/^el /, 'del ') + ' · usaste ' + Math.round(usado * 100) + ' %')),
+      h('div', { class: 'hero-barra' + (usado > 0.85 ? ' alerta' : ''), role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(usado * 100), 'aria-label': 'Parte del ingreso ya usada' }, h('i', { estilo: { width: Math.round(usado * 100) + '%' } })),
+      h('div', { class: 'hero-datos', style: '--cols:' + datos.length }, datos.map(([cls, icono, t, v]) => h('div', { class: 'hero-dato' },
+        h('span', { class: 'hero-dato-ico ' + cls }, ico(icono)),
+        h('div', { estilo: { minWidth: 0 } }, h('div', { class: 'hero-dato-etq' }, t), h('div', { class: 'hero-dato-val' }, v)))))));
     return cont;
+  }
+
+  /* ------------------------------------------------------------------ escribir o dictar */
+  function dictar() {
+    const input = h('input', { class: 'dictar-input', type: 'text', placeholder: 'Dime un gasto o un ingreso', 'aria-label': 'Escribe un gasto, un ingreso o una pregunta', autocomplete: 'off', enterkeyhint: 'send' });
+    const enviar = h('button', { class: 'dictar-enviar oculto', type: 'button', 'aria-label': 'Enviar' }, ico('enviar'));
+    const mandar = () => { const t = input.value.trim(); if (!t) return; input.value = ''; V.voz.abrir({ texto: t }); };
+    input.addEventListener('input', () => enviar.classList.toggle('oculto', !input.value.trim()));
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); mandar(); } });
+    enviar.addEventListener('click', mandar);
+    return h('div', { class: 'dictar' }, h('button', { class: 'dictar-mic', type: 'button', 'aria-label': 'Hablar', onclick: () => V.voz.abrir({ modo: 'voz' }) }, ico('mic')), input, enviar);
+  }
+
+  /* ------------------------------------------------------------------ atajos */
+  // Los mismos cuatro de siempre en todo el diseño: límites, metas, tarjetas y reportes (gastos e ingresos se anotan hablando o escribiendo).
+  function atajos() {
+    const lista = [
+      ['Límites', 'meta', '--c:var(--naranja);--c-suave:var(--aviso-suave)', () => AF.app.abrir('Límites de gasto', (c) => V.finanzas.presupuestos(c))],
+      ['Metas', 'bandera', '--c:var(--ingreso);--c-suave:var(--ingreso-suave)', () => AF.app.abrir('Metas', (c) => V.finanzas.metas(c))],
+      ['Tarjetas', 'tarjeta', '--c:var(--acento);--c-suave:var(--panel-suave)', () => AF.app.ir('tarjetas')],
+      ['Reportes', 'grafica', '--c:var(--oro);--c-suave:var(--oro-suave)', () => AF.app.abrir('Resumen', (c) => V.informesUI.resumen(c))],
+    ];
+    return h('section', { class: 'seccion', 'aria-label': 'Atajos' }, h('div', { class: 'atajos' }, lista.map(([t, i, st, fn]) => h('button', { class: 'atajo', type: 'button', onclick: fn }, h('span', { class: 'atajo-ico', style: st }, ico(i)), t))));
   }
 
   /* --------------------------------------------------------------- avisos */
   function avisos(D, hoy) {
     const lista = AF.informes.alertas(D, hoy, AF.acceso.tiene('alertasPredictivas')).slice(0, 2);
     if (!lista.length) return null;
-    return h('div', { estilo: { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '14px' } }, lista.map((a) => h('button', { class: 'nota', type: 'button', estilo: { width: '100%', textAlign: 'left' }, role: 'status', onclick: () => AF.app.ir(a.accion || 'inicio') }, ico('alerta'), h('span', null, a.texto))));
+    return h('div', { estilo: { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px' } }, lista.map((a) => h('button', { class: 'nota', type: 'button', estilo: { width: '100%', textAlign: 'left' }, role: 'status', onclick: () => AF.app.ir(a.accion || 'inicio') }, ico('alerta'), h('span', null, a.texto))));
   }
 
-  /* --------------------------------------------------------------- gastos innecesarios del mes */
-  function innecesarios(D, hoy) {
+  /* --------------------------------------------------------------- gastos del mes (anillo) */
+  // El total es TODO lo que compraste en el mes: el mismo «Gastos» que ves en Movimientos.
+  function gastosDelMes(D, hoy) {
+    const r = AF.informes.resumenMes(D, U.inicioMes(hoy), U.finMes(hoy));
+    if (!r.gastos) return null;
+    const paleta = PLAN.apariencia.paleta;
+    const top = r.porCategoria.slice(0, 4).map((x, i) => ({ nombre: x.cat.nombre, valor: x.total, color: colorOk(x.cat.color) || paleta[i % paleta.length] }));
+    const resto = r2(r.gastos - top.reduce((s, x) => s + x.valor, 0));
+    if (resto > 0.004) top.push({ nombre: 'Otros', valor: resto, color: paleta[9] });
+    const R = 52, L = 2 * Math.PI * R;
+    let acum = 0;
+    const arcos = top.map((x) => { const largo = Math.max(0, (x.valor / r.gastos) * L); const s = '<circle cx="66" cy="66" r="' + R + '" fill="none" stroke="' + x.color + '" stroke-width="15" stroke-dasharray="' + Math.max(0, largo - 2).toFixed(2) + ' ' + (L - Math.max(0, largo - 2)).toFixed(2) + '" stroke-dashoffset="' + (-acum).toFixed(2) + '" transform="rotate(-90 66 66)"/>'; acum += largo; return s; }).join('');
+    const svg = g.document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 132 132'); svg.setAttribute('class', 'dona'); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', 'Gastos del mes por categoría');
+    svg.innerHTML = '<circle cx="66" cy="66" r="' + R + '" fill="none" stroke="var(--panel-suave)" stroke-width="15"/>' + arcos;
+    const t1 = g.document.createElementNS('http://www.w3.org/2000/svg', 'text'); t1.setAttribute('x', '66'); t1.setAttribute('y', '66'); t1.setAttribute('text-anchor', 'middle'); t1.setAttribute('class', 'dona-centro-valor'); t1.textContent = $(r.gastos);
+    const t2 = g.document.createElementNS('http://www.w3.org/2000/svg', 'text'); t2.setAttribute('x', '66'); t2.setAttribute('y', '82'); t2.setAttribute('text-anchor', 'middle'); t2.setAttribute('class', 'dona-centro-etq'); t2.textContent = 'gastos';
+    svg.appendChild(t1); svg.appendChild(t2);
+    t1.setAttribute('font-size', r.gastos >= 100000 ? '15' : '19');
+    return h('section', { class: 'seccion' },
+      h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Gastos de ' + U.nombreMes(hoy)), h('button', { class: 'enlace', type: 'button', onclick: () => AF.app.ir('movimientos', { periodo: 'mes', vista: 'categorias', tipo: 'gasto' }) }, 'Ver detalle', ico('adelante'))),
+      h('div', { class: 'tarjeta' },
+        h('div', { class: 'dona-caja' }, svg,
+          h('ul', { class: 'dona-leyenda' }, top.map((x) => h('li', null, h('i', { estilo: { background: x.color } }), h('span', { class: 'nombre' }, x.nombre), h('span', { class: 'pct' }, Math.round((x.valor / r.gastos) * 100) + ' %'))))),
+        r.conTarjeta > 0 ? h('p', { class: 'texto-xs suave', estilo: { marginTop: '14px' } }, 'Incluye ' + $(r.conTarjeta) + ' con tarjeta, que se paga después' + (r.pagosTarjeta ? ' (ya pagaste ' + $(r.pagosTarjeta) + ').' : '.')) : null));
+  }
+  const r2 = (n) => U.r2(n);
+
+  /* --------------------------------------------------------------- ingresos vs gastos (últimos 6 meses) */
+  // Solo con datos reales: sin ningún ingreso ni gasto en esos meses, no se muestra.
+  function ingresosVsGastos(D, hoy) {
+    const serie = AF.informes.serieMensual(D, hoy, 6);
+    const max = Math.max.apply(null, serie.map((x) => Math.max(x.ingresos, x.gastos)));
+    if (!max) return null;
+    const alto = (v) => (v > 0 ? Math.max(4, Math.round((v / max) * 100)) : 0) + '%';
+    const actual = serie[serie.length - 1];
+    return h('section', { class: 'seccion' },
+      h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Ingresos vs gastos'), h('button', { class: 'enlace', type: 'button', onclick: () => AF.app.abrir('Resumen', (c) => V.informesUI.resumen(c)) }, 'Ver más', ico('adelante'))),
+      h('div', { class: 'tarjeta' },
+        h('div', { class: 'leyenda', estilo: { marginTop: '0', marginBottom: '12px' } },
+          h('span', null, h('i', { estilo: { background: 'var(--ingreso)' } }), 'Ingresos ' + $(actual.ingresos)),
+          h('span', null, h('i', { estilo: { background: 'var(--gasto)' } }), 'Gastos ' + $(actual.gastos))),
+        h('div', { class: 'barra-vertical', role: 'img', 'aria-label': 'Ingresos y gastos de los últimos seis meses' }, serie.map((x) => h('button', { class: 'col-mes', type: 'button', 'aria-label': x.etiqueta + ': ingresos ' + $(x.ingresos) + ', gastos ' + $(x.gastos), onclick: () => V.movimientos.irAMes(x.mes + '-01') },
+          h('div', { class: 'par' }, h('i', { class: 'i', estilo: { height: alto(x.ingresos) } }), h('i', { class: 'g', estilo: { height: alto(x.gastos) } })), h('small', null, x.etiqueta))))));
+  }
+
+  /* --------------------------------------------------------------- meta de ahorro y límite de gasto */
+  function metaYLimite(D, hoy) {
+    const cajas = [];
+    const metas = D.metas.map((m) => ({ m, a: V.finanzas.ahorrado(m) })).map((x) => Object.assign(x, { pct: x.m.objetivo ? x.a / x.m.objetivo : 0 }));
+    const meta = metas.filter((x) => x.pct < 1).sort((a, b) => b.pct - a.pct)[0] || metas[0];
+    if (meta) {
+      cajas.push(h('button', { class: 'tarjeta', type: 'button', estilo: { width: '100%', textAlign: 'left' }, onclick: () => AF.app.abrir('Metas', (c) => V.finanzas.metas(c)) },
+        h('div', { class: 'bloque-fila' }, h('div', { class: 'ico' }, meta.m.icono || '🏁'),
+          h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, meta.m.nombre), h('div', { class: 'fila-sub' }, 'Meta de ahorro · ' + $(meta.a) + ' de ' + $(meta.m.objetivo))),
+          h('span', { class: 'monto' }, Math.round(meta.pct * 100) + ' %')),
+        h('div', { class: 'progreso ' + (meta.pct >= 1 ? 'ok' : ''), estilo: { marginTop: '12px' }, role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(Math.min(1, meta.pct) * 100) }, h('i', { estilo: { width: Math.min(1, meta.pct) * 100 + '%' } }))));
+    }
+    const pres = AF.informes.presupuestos(D, hoy).sort((a, b) => b.pct - a.pct)[0];
+    if (pres) {
+      const nivel = pres.nivel === 'detente' ? 'alto' : pres.nivel === 'aviso' ? 'aviso' : '';
+      cajas.push(h('button', { class: 'tarjeta', type: 'button', estilo: { width: '100%', textAlign: 'left' }, onclick: () => AF.app.abrir('Límites de gasto', (c) => V.finanzas.presupuestos(c)) },
+        h('div', { class: 'bloque-fila' }, h('div', { class: 'ico' }, pres.cat ? AF.store.categoria(pres.cat).icono : '🎯'),
+          h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, pres.nombre), h('div', { class: 'fila-sub' }, 'Límite · ' + $(pres.gastado) + ' de ' + $(pres.monto) + ' este mes')),
+          h('span', { class: 'monto' }, Math.round(pres.pct * 100) + ' %')),
+        h('div', { class: 'progreso ' + nivel, estilo: { marginTop: '12px' }, role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(Math.min(1, pres.pct) * 100) }, h('i', { estilo: { width: Math.min(1, pres.pct) * 100 + '%' } })),
+        h('div', { class: 'texto-xs suave', estilo: { marginTop: '8px' } }, pres.queda >= 0 ? 'Te quedan ' + $(pres.queda) : 'Te pasaste ' + $(-pres.queda))));
+    }
+    if (!cajas.length) return null;
+    return h('section', { class: 'seccion' }, h('div', { estilo: { display: 'flex', flexDirection: 'column', gap: '12px' } }, cajas));
+  }
+
+  /* --------------------------------------------------------------- innecesarios y tarjetas, lado a lado */
+  function resumenesChicos(D, hoy) {
     const inn = AF.informes.innecesarios(D, U.inicioMes(hoy), U.finMes(hoy));
-    if (!inn.veces) return null;
-    const t = AF.informes.totales(D, U.inicioMes(hoy), U.finMes(hoy));
-    const pct = t.gastos ? Math.round((inn.total / t.gastos) * 100) : 0;
-    const chips = inn.lista.slice(0, 4).map((m) => h('span', { class: 'chip gusto' }, (m.desc || AF.informes.catDe(D, m.cat).nombre) + ' ' + $(m.monto)));
-    return h('section', { class: 'seccion' },
-      h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Gastos innecesarios este mes'), h('button', { class: 'enlace', type: 'button', onclick: () => AF.app.ir('movimientos', { tipo: 'innecesarios' }) }, 'Ver todos')),
-      h('button', { class: 'tarjeta', type: 'button', estilo: { width: '100%', textAlign: 'left' }, onclick: () => AF.app.ir('movimientos', { tipo: 'innecesarios' }) },
-        h('div', { estilo: { display: 'flex', alignItems: 'baseline', gap: '10px' } }, h('div', { class: 'cifra-peq', estilo: { color: 'var(--gasto)' } }, $(inn.total)), h('div', { class: 'texto-sm suave' }, inn.veces + (inn.veces === 1 ? ' compra' : ' compras') + (pct ? ' · ' + pct + ' % de lo que compraste' : ''))),
-        h('div', { class: 'innecesarios-chips' }, chips, inn.veces > 4 ? h('span', { class: 'chip' }, '+' + (inn.veces - 4)) : null)));
-  }
-
-  /* --------------------------------------------------------------- tarjetas por pagar */
-  function tarjetas(D, hoy) {
-    if (!D.tarjetas.length) return null;
     const pagos = D.tarjetas.map((t) => ({ t, e: V.tarjetas.visto(t, hoy) })).filter((x) => x.e.proximoVence && x.e.aPagarProximo).sort((a, b) => (a.e.proximoVence < b.e.proximoVence ? -1 : 1));
-    if (!pagos.length) return null;
-    return h('section', { class: 'seccion' },
-      h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Tarjetas'), h('button', { class: 'enlace', type: 'button', onclick: () => AF.app.ir('tarjetas') }, 'Ver')),
-      h('div', { class: 'lista' }, pagos.slice(0, 2).map(({ t, e }) => fila({ icono: '💳', titulo: t.nombre, sub: 'Pagar el ' + fechaBonita(e.proximoVence) + (e.diasParaVencer <= 3 ? (e.diasParaVencer <= 0 ? ' · hoy' : e.diasParaVencer === 1 ? ' · mañana' : ' · en ' + e.diasParaVencer + ' días') : '') + (e.deudaTotal > e.aPagarProximo ? ' · debes ' + $(e.deudaTotal) : ''), derecha: h('span', { class: 'monto' }, $(e.aPagarProximo)), onclick: () => AF.app.ir('tarjetas') }))));
+    const cajas = [];
+    if (inn.veces) {
+      const t = AF.informes.totales(D, U.inicioMes(hoy), U.finMes(hoy));
+      const pct = t.gastos ? Math.round((inn.total / t.gastos) * 100) : 0;
+      cajas.push(h('button', { class: 'tarjeta mini-tarjeta', type: 'button', onclick: () => AF.app.ir('movimientos', { tipo: 'innecesarios' }) },
+        h('div', { class: 'h3' }, 'Innecesarios', ico('hormiga', 'chico')),
+        h('div', { class: 'mini-cifra', estilo: { color: 'var(--gasto)' } }, $(inn.total)),
+        h('div', { class: 'mini-sub' }, inn.veces + (inn.veces === 1 ? ' compra' : ' compras') + (pct ? ' · ' + pct + ' % de tus gastos' : ''))));
+    }
+    if (pagos.length) {
+      const { t, e } = pagos[0];
+      const cuando = e.diasParaVencer <= 0 ? 'vence hoy' : e.diasParaVencer === 1 ? 'vence mañana' : 'vence el ' + fechaBonita(e.proximoVence);
+      cajas.push(h('button', { class: 'tarjeta mini-tarjeta', type: 'button', onclick: () => AF.app.ir('tarjetas') },
+        h('div', { class: 'h3' }, 'Por pagar', ico('tarjeta', 'chico')),
+        h('div', { class: 'mini-cifra' }, $(e.aPagarProximo)),
+        h('div', { class: 'mini-sub' }, t.nombre + ' · ' + cuando)));
+    }
+    if (!cajas.length) return null;
+    return h('section', { class: 'seccion' }, h('div', { class: cajas.length === 2 ? 'dos-columnas' : '' }, cajas));
   }
 
   /* --------------------------------------------------------------- últimos movimientos / primera vez */
@@ -5048,24 +5359,32 @@
       return h('section', { class: 'seccion' },
         h('div', { class: 'tarjeta primeros-pasos' },
           h('div', { class: 'h2' }, 'Empieza con tu primer gasto'),
-          h('p', { class: 'texto-sm suave', estilo: { marginTop: '6px' } }, 'Toca el micrófono o escribe abajo, como se lo dirías a alguien. Yo lo anoto en su categoría y te digo cuánto te queda.'),
+          h('p', { class: 'texto-sm suave', estilo: { marginTop: '6px' } }, 'Toca el micrófono o escribe arriba, como se lo dirías a alguien. Yo lo anoto y te digo cuánto te queda.'),
           h('div', { class: 'opciones' }, SUGERENCIAS.map((s) => h('button', { class: 'opcion', type: 'button', onclick: () => V.voz.abrir({ texto: s }) }, '«' + s + '»')))));
     }
     return h('section', { class: 'seccion' },
-      h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Últimos movimientos'), h('button', { class: 'enlace', type: 'button', onclick: () => AF.app.ir('movimientos') }, 'Ver todo')),
+      h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Últimos movimientos'), h('button', { class: 'enlace', type: 'button', onclick: () => AF.app.ir('movimientos') }, 'Ver todo', ico('adelante'))),
       h('div', { class: 'lista' }, movs.map((m) => C().filaMov(m, hoy, () => C().editarMov(m), true))));
+  }
+
+  /* --------------------------------------------------------------- Pro */
+  function pro() {
+    const st = AF.acceso.estado(AF.app.hoy());
+    if (st.tipo === 'pro') return null;
+    const txt = st.tipo === 'prueba' ? 'Estás probando Pro: ' + (st.diasPrueba === 1 ? 'queda 1 día' : 'quedan ' + st.diasPrueba + ' días') : 'Estás en Gratis';
+    return h('section', { class: 'seccion' }, h('button', { class: 'tip', type: 'button', onclick: () => AF.app.abrir('Gratis y Pro', (c) => V.pro.render(c)) },
+      h('span', { class: 'ico' }, ico('corona')), h('span', { estilo: { flex: 1 } }, h('strong', null, txt), h('span', null, 'Mira qué incluye Pro')), ico('adelante', 'chico')));
   }
 
   function render(cont) {
     const D = AF.store.d, hoy = AF.app.hoy();
     cont.appendChild(cabecera(D));
     cont.appendChild(saldo(D, hoy));
+    cont.appendChild(dictar());
     const cuerpo = h('div', { class: 'contenido' });
-    [avisos(D, hoy), innecesarios(D, hoy), tarjetas(D, hoy), ultimos(D, hoy)].forEach((s) => s && cuerpo.appendChild(s));
-    const st = AF.acceso.estado(hoy);
-    if (st.tipo !== 'pro') cuerpo.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '24px', textAlign: 'center' } },
-      h('button', { class: 'enlace', type: 'button', estilo: { fontSize: 'var(--t-xs)', minHeight: '0' }, onclick: () => AF.app.abrir('Gratis y Pro', (c) => V.pro.render(c)) }, st.tipo === 'prueba' ? 'Estás probando Pro: ' + (st.diasPrueba === 1 ? 'queda 1 día' : 'quedan ' + st.diasPrueba + ' días') + ' · ¿Qué es Pro?' : 'Estás en Gratis · ¿Qué es Pro?')));
-    cuerpo.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '8px', textAlign: 'center' } }, PLAN.app.avisoLegal));
+    cuerpo.appendChild(atajos());
+    [avisos(D, hoy), gastosDelMes(D, hoy), ingresosVsGastos(D, hoy), resumenesChicos(D, hoy), metaYLimite(D, hoy), ultimos(D, hoy), pro()].forEach((s) => s && cuerpo.appendChild(s));
+    cuerpo.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '22px', textAlign: 'center' } }, PLAN.app.avisoLegal));
     cont.appendChild(cuerpo);
   }
 
@@ -5164,7 +5483,7 @@
     pintar([cabeza('Hablar'), h('div', { class: 'voz-cuerpo' }, estado, trans),
       h('div', { class: 'voz-pie' }, h('button', { class: 'mic-grande escuchando', type: 'button', 'aria-label': 'Terminar', onclick: terminarYa }, ico('mic')),
         h('p', { class: 'texto-xs suave', estilo: { textAlign: 'center' } }, 'Cuando termines de hablar, se cierra solo. O toca el micrófono.'),
-        btnTxt('Prefiero escribir', () => { cerrar(); escribirEnBarra(ultimo); }))]);
+        btnTxt('Prefiero escribir', () => { escribir(ultimo); }))]);
     const limpiar = () => { clearTimeout(tSilencio); clearTimeout(tInicial); clearTimeout(tMax); };
     try {
       const e = await N().escuchar((t) => {
@@ -5190,13 +5509,20 @@
   }
   function sinAudio(motivo) {
     Salir([h('p', { class: 'transcripcion' }, 'No te escuché.'), h('p', { class: 'voz-estado', estilo: { marginTop: '6px' } }, motivo || 'Habla más cerca del teléfono, o escríbelo abajo.')],
-      [btnPrim('Intentar otra vez', escuchar, 'btn-voz'), btnTxt('Escribir', () => { cerrar(); escribirEnBarra(''); })]);
+      [btnPrim('Intentar otra vez', escuchar, 'btn-voz'), btnTxt('Escribir', () => { escribir(''); })]);
   }
-  // Escribir es en la barra de abajo (no en otra pantalla)
-  function escribirEnBarra(texto) {
-    const inp = AF.app.compositorInput;
-    if (!inp) return;
-    inp.value = texto || ''; inp.dispatchEvent(new Event('input')); setTimeout(() => inp.focus(), 60);
+  // Escribir: el mismo panel, con un campo (no abre otra pantalla)
+  function escribir(texto) {
+    if (!capa) crearCapa();
+    if (escucha) { try { escucha.parar(); } catch (e) { /* nada */ } escucha = null; }
+    const campo = h('textarea', { class: 'texto-voz', rows: 2, placeholder: 'Ej.: Pagué 30 de luz', 'aria-label': 'Escribe un gasto, un ingreso o una pregunta', enterkeyhint: 'send', 'data-foco': 'si' });
+    campo.value = texto || '';
+    const enviar = () => { const t = campo.value.trim(); if (t) procesar(t); else campo.focus(); };
+    campo.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviar(); } });
+    const ej = ['Pagué 30 de luz', 'Me pagaron 500', 'Cuánto me queda'];
+    pintar([cabeza('Escribir'),
+      h('div', { class: 'voz-cuerpo' }, campo, h('div', { class: 'opciones', estilo: { marginTop: '12px' } }, ej.map((e) => h('button', { class: 'opcion', type: 'button', onclick: () => { campo.value = e; campo.focus(); } }, e)))),
+      h('div', { class: 'voz-pie' }, btnPrim('Anotar', enviar, 'btn-voz'), btnTxt('Prefiero hablar', escuchar))]);
   }
 
   /* --------------------------------------------------------------------- procesar */
@@ -5485,7 +5811,7 @@
     if (!sug.length) sug.push(EJEMPLOS_AYUDA[0], EJEMPLOS_AYUDA[4], EJEMPLOS_AYUDA[5]);
     pintar([cabeza(), h('div', { class: 'voz-cuerpo' }, h('p', { class: 'frase' }, '«' + texto + '»'), h('p', { class: 'voz-respuesta' }, mensaje || 'No entendí bien. ¿Quisiste decir…?'),
       h('div', { class: 'entendido' }, sug.slice(0, 3).map(([f, et]) => h('button', { class: 'entendido-fila', type: 'button', onclick: () => procesar(f) }, h('span', { class: 'texto-sm' }, et), ico('derecha', 'chico'))))),
-    h('div', { class: 'voz-pie' }, btnPrim('Decirlo de otra forma', escuchar, 'btn-voz'), btnTxt('Escribirlo', () => { cerrar(); escribirEnBarra(texto); }))]);
+    h('div', { class: 'voz-pie' }, btnPrim('Decirlo de otra forma', escuchar, 'btn-voz'), btnTxt('Escribirlo', () => { escribir(texto); }))]);
   }
 
   /* -------------------------------------------------------------------------- API */
@@ -5494,7 +5820,7 @@
     crearCapa();
     N().vibrar();
     if (o.texto) { procesar(o.texto); return; }
-    if (o.modo === 'texto') { cerrar(); escribirEnBarra(''); return; }
+    if (o.modo === 'texto') { escribir(''); return; }
     escuchar();
   }
   V.voz = { abrir, cerrar, procesar };
@@ -5558,31 +5884,34 @@
     const redibujar = () => AF.app.redibujar();
     cont.appendChild(h('header', { class: 'barra-superior' },
       h('h1', { class: 'h2' }, 'Movimientos'),
-      h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Buscar', 'aria-pressed': est.buscar ? 'true' : 'false', onclick: () => { est.buscar = !est.buscar; if (!est.buscar) est.texto = ''; redibujar(); } }, ico('buscar')),
-      h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Exportar', onclick: exportar }, ico('archivo')),
-      h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Agregar movimiento', onclick: () => C().formMovimiento({ alGuardar: (m) => C().guardarMov(m) }) }, ico('mas_'))));
+      h('button', { class: 'boton-redondo', type: 'button', 'aria-label': 'Buscar', 'aria-pressed': est.buscar ? 'true' : 'false', onclick: () => { est.buscar = !est.buscar; if (!est.buscar) est.texto = ''; redibujar(); } }, ico('buscar')),
+      h('button', { class: 'boton-redondo', type: 'button', 'aria-label': 'Exportar', onclick: exportar }, ico('archivo')),
+      h('button', { class: 'boton-redondo', type: 'button', 'aria-label': 'Agregar movimiento', onclick: () => C().formMovimiento({ alGuardar: (m) => C().guardarMov(m) }) }, ico('mas_'))));
     const sub = h('div', { class: 'contenido-solo', estilo: { paddingBottom: '0' } });
+    // la tarjeta de arriba (resumen + ir al mes anterior o siguiente) va primero: es lo que respondes antes que nada
+    sub.appendChild(resumenArriba());
     // periodo
-    sub.appendChild(h('div', { class: 'segmentos' }, [['dia', 'Día'], ['semana', 'Semana'], ['mes', 'Mes'], ['anio', 'Año']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': est.periodo === k ? 'true' : 'false', onclick: () => { est.periodo = k; est.ref = hoy; est.pagina = 1; redibujar(); } }, t))));
-    const adelante = !esFuturo(hoy) && rango().hasta < hoy;
-    sub.appendChild(h('div', { class: 'periodo-nav' },
-      h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Anterior', onclick: () => { mover(-1); redibujar(); } }, ico('atras')),
-      h('button', { class: 'periodo-titulo', type: 'button', 'aria-label': 'Elegir fecha', onclick: () => elegirFecha(hoy) }, tituloPeriodo(hoy)),
-      h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Siguiente', disabled: !adelante, estilo: { opacity: adelante ? '1' : '.3' }, onclick: () => { if (adelante) { mover(1); redibujar(); } } }, ico('derecha'))));
+    sub.appendChild(h('div', { class: 'periodo-fila' },
+      h('div', { class: 'segmentos' }, [['dia', 'Día'], ['semana', 'Semana'], ['mes', 'Mes'], ['anio', 'Año']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': est.periodo === k ? 'true' : 'false', onclick: () => { est.periodo = k; est.ref = hoy; est.pagina = 1; redibujar(); } }, t))),
+      h('button', { class: 'boton-redondo', type: 'button', 'aria-label': 'Cómo verlos: ' + NOMBRES_VISTA[est.vista], onclick: elegirVista }, ico(est.vista === 'categorias' ? 'grafica' : est.vista === 'libro' ? 'libro_texto' : est.vista === 'tabla' ? 'tabla' : 'lineas'))));
     if (est.buscar) {
       const inp = h('input', { class: 'entrada', type: 'search', placeholder: 'Buscar por nombre o categoría', value: est.texto, 'aria-label': 'Buscar movimientos',
         oninput: (e) => { est.texto = e.target.value; clearTimeout(est.t); est.t = setTimeout(() => { redibujar(); setTimeout(() => { const i = g.document.querySelector('input[type=search]'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 30); }, 260); } });
       sub.appendChild(h('div', { estilo: { marginTop: '10px' } }, inp)); setTimeout(() => { if (!est.texto) inp.focus(); }, 40);
     }
-    // tipo
-    sub.appendChild(h('div', { class: 'chips-filtro', role: 'group', 'aria-label': 'Qué ver' }, [['todos', 'Todo'], ['gasto', 'Gastos'], ['ingreso', 'Ingresos'], ['innecesarios', 'Innecesarios']].map(([k, t]) => h('button', { type: 'button', class: 'chip-filtro' + (k === 'innecesarios' ? ' gusto' : ''), 'aria-pressed': est.tipo === k ? 'true' : 'false', onclick: () => { est.tipo = k; est.pagina = 1; if (k === 'ingreso' && est.cat && S().categoria(est.cat).tipo !== 'ingreso') est.cat = null; redibujar(); } }, t))));
+    // tipo + cómo verlos (una sola fila)
+    const chips = [['todos', 'Todo'], ['gasto', 'Gastos'], ['ingreso', 'Ingresos'], ['innecesarios', 'Innecesarios']].map(([k, t]) => h('button', { type: 'button', class: 'chip-filtro' + (k === 'innecesarios' ? ' gusto' : ''), 'aria-pressed': est.tipo === k ? 'true' : 'false', onclick: () => { est.tipo = k; est.pagina = 1; if (k === 'ingreso' && est.cat && S().categoria(est.cat).tipo !== 'ingreso') est.cat = null; redibujar(); } }, t));
+    sub.appendChild(h('div', { class: 'chips-filtro', role: 'group', 'aria-label': 'Qué ver' }, chips));
     if (est.cat) {
       const c = S().categoria(est.cat);
-      sub.appendChild(h('div', { class: 'chips-filtro' }, h('button', { type: 'button', class: 'chip-filtro activo', 'aria-label': 'Quitar filtro ' + c.nombre, onclick: () => { est.cat = null; redibujar(); } }, c.icono + ' ' + c.nombre, ico('cerrar', 'chico'))));
+      sub.appendChild(h('div', { class: 'chips-filtro', estilo: { marginTop: '0' } }, h('button', { type: 'button', class: 'chip-filtro activo', 'aria-label': 'Quitar filtro ' + c.nombre, onclick: () => { est.cat = null; redibujar(); } }, c.icono + ' ' + c.nombre, ico('cerrar', 'chico'))));
     }
-    // vista
-    sub.appendChild(h('div', { class: 'segmentos chicos', estilo: { marginTop: '12px' } }, [['lista', 'Lista'], ['categorias', 'Categorías'], ['libro', 'Libro'], ['tabla', 'Tabla']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': est.vista === k ? 'true' : 'false', onclick: () => { est.vista = k; est.pagina = 1; redibujar(); } }, t))));
     cont.appendChild(sub);
+  }
+  const NOMBRES_VISTA = { lista: 'Lista', categorias: 'Categorías', libro: 'Libro', tabla: 'Tabla' };
+  function elegirVista() {
+    const det = { lista: ['lineas', 'Lista', 'Tus movimientos por día'], categorias: ['grafica', 'Categorías', 'Cuánto va a cada categoría'], libro: ['libro_texto', 'Libro', 'Ingresos, egresos y saldo acumulado'], tabla: ['tabla', 'Tabla', 'Corrige varios movimientos a la vez'] };
+    const api = hoja({ titulo: 'Cómo verlos', cuerpo: h('div', { class: 'lista' }, Object.keys(det).map((k) => AF.ui.fila({ icono: ico(det[k][0]), tono: 'neutro', titulo: det[k][1], sub: det[k][2], derecha: est.vista === k ? ico('ok') : null, onclick: () => { est.vista = k; est.pagina = 1; api.cerrar(); AF.app.redibujar(); } }))) });
   }
   function elegirFecha(hoy) {
     const inp = h('input', { class: 'entrada', type: 'date', value: est.ref, max: hoy });
@@ -5602,22 +5931,45 @@
     // balance = lo que entró menos lo que salió de tu bolsillo (las compras con tarjeta salen cuando pagas la tarjeta)
     return { ing, gas, efectivo, conTarjeta, pag, inn, balance: ing - efectivo - pag };
   }
+  // Tarjeta de arriba: el balance del periodo con el selector de periodo (anterior · título · siguiente) dentro.
+  // Lleva el balance de TODO el periodo (no cambia al filtrar); lo filtrado se ve abajo en la lista.
+  let resumenListo = null;
+  function resumenArriba() {
+    const hoy = AF.app.hoy(), D = S().d, { desde, hasta } = rango();
+    const lista = D.movs.filter((m) => m.fecha >= desde && m.fecha <= hasta);
+    const t = sumas(lista);
+    const redibujar = () => AF.app.redibujar();
+    const adelante = !esFuturo(hoy) && hasta < hoy;
+    const nav = h('div', { class: 'periodo-nav' },
+      h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Anterior', onclick: () => { mover(-1); redibujar(); } }, ico('atras')),
+      h('button', { class: 'periodo-titulo', type: 'button', 'aria-label': 'Elegir fecha', onclick: () => elegirFecha(hoy) }, tituloPeriodo(hoy)),
+      h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Siguiente', disabled: !adelante, estilo: { opacity: adelante ? '1' : '.3' }, onclick: () => { if (adelante) { mover(1); redibujar(); } } }, ico('derecha')));
+    const tercero = t.conTarjeta ? ['Con tarjeta', $(t.conTarjeta), ''] : t.pag ? ['Pagos de tarjeta', $(t.pag), ''] : ['Innecesarios', $(t.inn), ''];
+    const datos = [['Ingresos', $(t.ing), 'ing'], ['Gastos', $(t.gas), 'gas'], tercero];
+    const nota = (t.conTarjeta || t.pag) ? (t.conTarjeta ? 'Con tarjeta compraste ' + $(t.conTarjeta) + (t.pag ? ' y ' : '.') : '') + (t.pag ? (t.conTarjeta ? 'pagaste ' : 'Pagaste ') + $(t.pag) + ' a tu tarjeta.' : '') + ' El balance resta solo lo que salió de tu bolsillo.' : null;
+    return h('section', { class: 'resumen-mes', 'aria-label': 'Resumen del periodo' }, nav,
+      h('span', { class: 'hero-etiqueta' }, 'Balance'),
+      h('div', { class: 'resumen-mes-cifra' + (t.balance < 0 ? ' negativo' : '') }, (t.balance < 0 ? '−' : '') + $(Math.abs(t.balance))),
+      h('div', { class: 'hero-datos', style: '--cols:3' }, datos.map(([e, v, c]) => h('div', { estilo: { minWidth: 0 } }, h('div', { class: 'hero-dato-etq' }, e), h('div', { class: 'hero-dato-val ' + c }, v)))),
+      nota ? h('p', { class: 'resumen-mes-nota' }, nota) : null);
+  }
+  // Lo que cambia según el filtro: cuántos movimientos se ven y, si pediste innecesarios, cuánto suman.
   function resumen(lista) {
     const t = sumas(lista);
     if (est.tipo === 'innecesarios') {
       const n = lista.length;
-      return h('div', { class: 'resumen-tres', estilo: { marginTop: '16px' } },
+      return h('div', { class: 'resumen-tres', estilo: { marginTop: '14px' } },
         h('div', null, h('div', { class: 'dato-etiqueta' }, 'Innecesarios'), h('div', { class: 'dato-valor', estilo: { color: 'var(--gasto)' } }, $(t.inn))),
         h('div', null, h('div', { class: 'dato-etiqueta' }, 'Compras'), h('div', { class: 'dato-valor' }, String(n))),
         h('div', null, h('div', { class: 'dato-etiqueta' }, 'Promedio'), h('div', { class: 'dato-valor' }, n ? $(t.inn / n) : '—')));
     }
-    const datos = [['Ingresos', $(t.ing), 'var(--ingreso)'], ['Gastos', $(t.gas), 'var(--gasto)'], ['Balance', (t.balance < 0 ? '−' : '') + $(Math.abs(t.balance)), t.balance < 0 ? 'var(--gasto)' : 'inherit']];
-    const notas = [];
-    if (t.conTarjeta || t.pag) notas.push((t.conTarjeta ? 'Con tarjeta compraste ' + $(t.conTarjeta) + (t.pag ? ' y ' : '. ') : '') + (t.pag ? 'pagaste ' + $(t.pag) + ' a tu tarjeta. ' : '') + 'El balance resta solo lo que salió de tu bolsillo.');
-    return h('div', null,
-      h('div', { class: 'resumen-tres', estilo: { marginTop: '16px' } }, datos.map(([e, v, col]) => h('div', null, h('div', { class: 'dato-etiqueta' }, e), h('div', { class: 'dato-valor', estilo: { color: col } }, v)))),
-      notas.map((x) => h('p', { class: 'texto-xs suave', estilo: { marginTop: '6px' } }, x)),
-      t.inn && est.tipo !== 'ingreso' ? h('button', { class: 'enlace texto-sm', type: 'button', estilo: { marginTop: '4px' }, onclick: () => { est.tipo = 'innecesarios'; AF.app.redibujar(); } }, $(t.inn) + ' fueron gastos innecesarios · ver') : null);
+    if (est.tipo !== 'todos' || est.cat || est.texto) {
+      const soloIngresos = t.ing > 0 && !t.gas && !t.pag;
+      return h('div', { class: 'resumen-tres', estilo: { marginTop: '14px', gridTemplateColumns: '1fr 1fr' } },
+        h('div', null, h('div', { class: 'dato-etiqueta' }, soloIngresos ? 'Ingresos de esta lista' : 'Gastos de esta lista'), h('div', { class: 'dato-valor' }, $(soloIngresos ? t.ing : t.gas + t.pag))),
+        h('div', null, h('div', { class: 'dato-etiqueta' }, 'Movimientos'), h('div', { class: 'dato-valor' }, String(lista.length))));
+    }
+    return h('div', { estilo: { height: '2px' } });
   }
 
   /* ------------------------------------------------------------------------ lista */
@@ -5690,7 +6042,7 @@
       return h('tr', { onclick: () => C().editarMov(m), estilo: { cursor: 'pointer' } },
         h('td', { class: 'concepto' }, h('div', null, nombre), h('div', { class: 'texto-xs suave' }, fechaTxt + ' · ' + catTxt + (esTarj ? ' · con tarjeta' : '') + (esInnecesario(m) ? ' · innecesario' : ''))),
         h('td', { class: 'der ing' }, esIng ? $(m.monto) : ''),
-        h('td', { class: 'der egr' + (esTarj ? ' tarjeta' : '') }, esIng ? '' : $(m.monto)),
+        h('td', { class: 'der egr' + (esTarj ? ' con-tarjeta' : '') }, esIng ? '' : $(m.monto)),
         h('td', { class: 'der saldo' + (saldo < 0 ? ' negativo' : '') }, esTarj ? h('span', { class: 'suave' }, '—') : (saldo < 0 ? '−' : '') + $(Math.abs(saldo))));
     });
     cuerpo.appendChild(h('p', { class: 'texto-sm suave', estilo: { marginTop: '14px' } }, 'El saldo suma los ingresos y resta lo que salió de tu bolsillo.' + (tarj ? ' Las compras con tarjeta (' + $(tarj) + ') salen en gris: se descuentan cuando pagas la tarjeta.' : '') + ' Toca una fila para corregirla.'));
@@ -6052,6 +6404,8 @@
     datos.push(['Deuda total', $(e.deudaTotal)]);
     if (t.cupo) datos.push(['Cupo disponible', $(Math.max(0, t.cupo - e.cupoUsado))]);
     if (e.siguienteCorte) datos.push(['Próximo corte', fechaLarga(e.siguienteCorte) + ' · en ' + e.diasParaCorte + (e.diasParaCorte === 1 ? ' día' : ' días')]);
+    const ultimoPago = S().d.movs.filter((m) => m.tipo === 'pago_tarjeta' && m.tarjetaId === t.id).sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : b.creado - a.creado))[0];
+    if (ultimoPago) datos.push(['Último pago', $(ultimoPago.monto) + ' · ' + fechaLarga(ultimoPago.fecha)]);
     cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'lista' }, datos.map(([a, b]) => h('div', { class: 'interruptor', estilo: { minHeight: '52px' } }, h('span', null, a), h('strong', { class: 'num' }, b))))));
 
     seccionCostos(cont, t);
@@ -6065,10 +6419,30 @@
     } else if (e.aPagarProximo) cont.appendChild(h('div', { estilo: { marginTop: '16px' } }, C().gancho('Pro te dice si conviene pagar el mínimo o el total.', 'asesorTarjeta')));
 
     loQueViene(cont, e, hoy);
+    historial(cont, t, hoy);
     cont.appendChild(h('button', { class: 'btn btn-borde btn-bloque', type: 'button', estilo: { marginTop: '22px' }, onclick: () => ajustar(t) }, 'Ajustar con mi estado de cuenta'));
     cont.appendChild(h('button', { class: 'btn-texto btn-peligro', type: 'button', estilo: { marginTop: '8px', width: '100%' }, onclick: async () => {
       if (await C().confirmar({ titulo: '¿Quitar ' + t.nombre + '?', texto: 'Sus compras y pagos siguen en tus movimientos, pero ya no se calculan cuotas ni vencimientos.', si: 'Quitar tarjeta', peligro: true })) { S().borrar('tarjetas', t.id, 'Quité ' + t.nombre); AF.app.atras(); }
     } }, 'Quitar esta tarjeta'));
+  }
+
+  /* ------------------------------------------------------------------ compras y pagos de ESTA tarjeta */
+  // Lo que compraste con la tarjeta y lo que pagaste a la tarjeta, juntos y por fecha: el mismo pago que ves en Movimientos.
+  const historialAbierto = new Set();
+  function historial(cont, t, hoy) {
+    const movs = S().d.movs.filter((m) => m.tarjetaId === t.id && ((m.tipo === 'gasto' && m.cuenta === 'tarjeta') || m.tipo === 'pago_tarjeta'))
+      .sort((a, b) => (b.fecha === a.fecha ? b.creado - a.creado : b.fecha < a.fecha ? -1 : 1));
+    const nCompras = movs.filter((m) => m.tipo === 'gasto').length, nPagos = movs.length - nCompras;
+    const sec = h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Compras y pagos'),
+      movs.length ? h('span', { class: 'texto-xs suave' }, nCompras + (nCompras === 1 ? ' compra' : ' compras') + ' · ' + nPagos + (nPagos === 1 ? ' pago' : ' pagos')) : null));
+    if (!movs.length) {
+      sec.appendChild(h('div', { class: 'tarjeta vacio' }, h('strong', null, 'Aún no hay compras ni pagos'), 'Cuando compres con esta tarjeta o le pagues, aparecen aquí.'));
+    } else {
+      const todos = historialAbierto.has(t.id), visibles = todos ? movs : movs.slice(0, 8);
+      sec.appendChild(h('div', { class: 'lista' }, visibles.map((m) => C().filaMov(m, hoy, () => C().editarMov(m), true))));
+      if (movs.length > 8) sec.appendChild(h('button', { class: 'btn btn-borde btn-bloque', type: 'button', estilo: { marginTop: '10px' }, onclick: () => { if (todos) historialAbierto.delete(t.id); else historialAbierto.add(t.id); AF.app.redibujar(); } }, todos ? 'Ver menos' : 'Ver los ' + movs.length + ' movimientos'));
+    }
+    cont.appendChild(sec);
   }
 
   /* ------------------------------------------------------------------ lo que viene: una fila por compra */
@@ -6733,8 +7107,8 @@
   }
   async function imagenWrapped(D, r) {
     const w = datosWrapped(D, r), W = 1080, H = 1350, c = g.document.createElement('canvas'); c.width = W; c.height = H;
-    const x = c.getContext('2d'), fam = 'Bricolage, system-ui, sans-serif';
-    try { await Promise.all([g.document.fonts.load('700 60px Bricolage'), g.document.fonts.load('500 40px Bricolage')]); } catch (e) { /* usa la fuente del sistema */ }
+    const x = c.getContext('2d'), fam = 'Jakarta, system-ui, sans-serif';
+    try { await Promise.all([g.document.fonts.load('700 60px Jakarta'), g.document.fonts.load('500 40px Jakarta')]); } catch (e) { /* usa la fuente del sistema */ }
     const fondo = x.createLinearGradient(0, 0, W, H); fondo.addColorStop(0, '#0B1A30'); fondo.addColorStop(1, '#14305A');
     x.fillStyle = fondo; x.fillRect(0, 0, W, H);
     const sol = x.createRadialGradient(W - 200, H - 280, 30, W - 160, H - 240, 380); sol.addColorStop(0, '#F5A33A'); sol.addColorStop(1, '#F28A1B');
@@ -7143,34 +7517,66 @@
   function render(cont) {
     const st = AF.acceso.estado(AF.app.hoy()), p = PLAN.precios;
     const hoy = AF.app.hoy();
-    const cab = h('section', { class: 'nota ' + (st.tipo === 'pro' ? 'pro' : 'info'), estilo: { alignItems: 'center', marginTop: '4px' } }, ico('estrella', 'relleno'), h('div', null,
-      st.tipo === 'pro' ? h('div', null, h('strong', null, 'Eres Pro'), ' hasta el ' + U.fechaCorta(st.hasta, hoy) + '.')
-        : st.tipo === 'prueba' ? h('div', null, h('strong', null, 'Estás probando Pro: ' + (st.diasPrueba === 1 ? 'queda 1 día' : 'quedan ' + st.diasPrueba + ' días')), '. Después sigues con Gratis y no pierdes nada.')
-          : h('div', null, h('strong', null, 'Estás en Gratis'), '. Lo esencial está incluido y no caduca.')));
-    cont.appendChild(cab);
-    if (st.tipo === 'gratis' && !S().d.plan.inicioPrueba) {
-      cont.appendChild(h('button', { class: 'btn btn-voz btn-bloque', type: 'button', estilo: { marginTop: '16px' }, onclick: () => { AF.acceso.iniciarPrueba(hoy); AF.bus.emit('plan'); aviso('Pro activado ' + PLAN.prueba.diasProGratis + ' días'); } }, 'Probar Pro ' + PLAN.prueba.diasProGratis + ' días gratis'));
-      cont.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '8px', textAlign: 'center' } }, 'Sin tarjeta. Si no te convence, sigues en Gratis.'));
-    }
-    // Gratis: lo que ya tienes
-    cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Gratis · incluido siempre')),
-      h('div', { class: 'tarjeta' }, h('ul', { class: 'lista-simple' }, PLAN.pro.gratis.map((t) => h('li', null, ico('ok', 'chico'), h('span', null, t)))))));
-    // Pro: lo que suma
+    const dolar = (n) => $(n, { moneda: 'USD', fijo: true });
+    const ahorro = Math.round((1 - p.anualUSD / (p.mensualUSD * 12)) * 100);
+    let periodo = 'anual';
     const esEcuador = !!PLAN.pais(S().d.ajustes.pais).sri;
     const items = PLAN.pro.pro.filter((x) => esEcuador || !/SRI/.test(x.titulo));
-    cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Pro · lo que suma')),
-      h('div', { class: 'pro-lista' }, items.map((x) => h('div', { class: 'tarjeta pro-item' }, ico('estrella', 'relleno'), h('div', null, h('strong', null, x.titulo), h('span', null, x.texto)))))));
-    // límites, en una línea
-    const lim = Object.keys(PLAN.limites.gratis).filter((k) => LIMITES_TXT[k]).map((k) => LIMITES_TXT[k].toLowerCase() + ': ' + (PLAN.limites.gratis[k] === 0 ? 'ninguna' : PLAN.limites.gratis[k]) + ' en Gratis, sin límite en Pro');
-    cont.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '12px' } }, 'Límites · ' + lim.join(' · ') + '.'));
+
+    // arriba: el título dorado, como en la pantalla Pro de tus otras apps
+    cont.appendChild(h('section', { class: 'pro-hero' },
+      h('span', { class: 'pro-hero-corona', 'aria-hidden': 'true' }, ico('corona')),
+      h('div', { class: 'pro-hero-etq' }, PLAN.app.nombre),
+      h('div', { class: 'pro-hero-titulo' }, 'Pro'),
+      h('p', { class: 'pro-hero-texto' }, 'Más control sobre tu plata, sin límites.')));
+    cont.appendChild(h('section', { class: 'nota ' + (st.tipo === 'pro' ? 'pro' : 'info'), estilo: { alignItems: 'center', marginTop: '14px' } }, ico(st.tipo === 'pro' ? 'estrella' : 'info', st.tipo === 'pro' ? 'relleno' : ''), h('div', null,
+      st.tipo === 'pro' ? h('div', null, h('strong', null, 'Eres Pro'), ' hasta el ' + U.fechaCorta(st.hasta, hoy) + '.')
+        : st.tipo === 'prueba' ? h('div', null, h('strong', null, 'Estás probando Pro: ' + (st.diasPrueba === 1 ? 'queda 1 día' : 'quedan ' + st.diasPrueba + ' días')), '. Después sigues en Gratis y no pierdes nada.')
+          : h('div', null, h('strong', null, 'Estás en Gratis'), '. Lo esencial está incluido y no caduca.'))));
+
     if (st.tipo !== 'pro') {
-      const ahorro = Math.round((1 - p.anualUSD / (p.mensualUSD * 12)) * 100);
-      cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Elige tu plan')),
-        h('div', { estilo: { display: 'flex', flexDirection: 'column', gap: '10px' } },
-          h('button', { class: 'btn btn-primario btn-bloque', type: 'button', onclick: () => comprar('anual') }, 'Anual · ' + $(p.anualUSD, { moneda: 'USD', fijo: true }) + ' al año (ahorras ' + ahorro + ' %)'),
-          h('button', { class: 'btn btn-borde btn-bloque', type: 'button', onclick: () => comprar('mensual') }, 'Mensual · ' + $(p.mensualUSD, { moneda: 'USD', fijo: true }) + ' al mes'),
-          h('button', { class: 'btn-texto', type: 'button', onclick: restaurar }, 'Ya pagué: restaurar mi compra')),
-        h('p', { class: 'texto-xs suave', estilo: { marginTop: '12px' } }, 'El cobro lo hace Google Play y puedes cancelar cuando quieras desde Play. Los precios pueden variar según tu país.')));
+      const toggle = h('div', { class: 'segmentos', estilo: { marginTop: '18px' }, role: 'group', 'aria-label': 'Cada cuánto pagas' });
+      const zona = h('div', { class: 'planes' });
+      const pintar = () => {
+        AF.ui.vaciar(toggle);
+        [['anual', 'Anual · ahorras ' + ahorro + ' %'], ['mensual', 'Mensual']].forEach(([k, t]) => toggle.appendChild(h('button', { type: 'button', 'aria-pressed': periodo === k ? 'true' : 'false', onclick: () => { periodo = k; pintar(); } }, t)));
+        AF.ui.vaciar(zona);
+        const check = (t) => h('li', null, h('span', { class: 'plan-ok' }, ico('ok')), h('span', null, t));
+        zona.appendChild(h('div', { class: 'plan' },
+          h('div', { class: 'plan-nombre' }, 'Gratis'),
+          h('div', { class: 'plan-precio' }, '$0', h('small', null, 'siempre')),
+          h('div', { class: 'plan-sub' }, 'Lo esencial, sin caducar'),
+          h('ul', { class: 'plan-lista' }, (PLAN.pro.gratisCorto || PLAN.pro.gratis).map(check)),
+          st.tipo === 'gratis' ? h('div', { class: 'plan-cambio' }, h('span', { class: 'chip' }, 'Tu plan actual')) : null));
+        zona.appendChild(h('div', { class: 'plan destacado' },
+          h('span', { class: 'plan-etiqueta' }, 'Más popular'),
+          h('div', { class: 'plan-nombre' }, 'Pro'),
+          h('div', { class: 'plan-precio' }, periodo === 'anual' ? dolar(p.anualUSD) : dolar(p.mensualUSD), h('small', null, periodo === 'anual' ? 'al año' : 'al mes')),
+          h('div', { class: 'plan-sub' }, periodo === 'anual' ? 'Son ' + dolar(p.anualUSD / 12) + ' al mes' : 'Cancela cuando quieras'),
+          h('div', { class: 'plan-titulo-lista' }, 'Todo lo de Gratis y además:'),
+          h('ul', { class: 'plan-lista' }, items.map((x) => check(x.titulo))),
+          h('div', { class: 'plan-cambio' }, h('button', { class: 'btn btn-oro btn-bloque btn-chico', type: 'button', onclick: () => comprar(periodo) }, 'Elegir ' + (periodo === 'anual' ? 'anual' : 'mensual')))));
+      };
+      pintar();
+      cont.appendChild(toggle); cont.appendChild(zona);
+      if (st.tipo === 'gratis' && !S().d.plan.inicioPrueba) {
+        cont.appendChild(h('button', { class: 'btn btn-voz btn-bloque', type: 'button', estilo: { marginTop: '18px' }, onclick: () => { AF.acceso.iniciarPrueba(hoy); AF.bus.emit('plan'); aviso('Pro activado ' + PLAN.prueba.diasProGratis + ' días'); } }, 'Probar Pro ' + PLAN.prueba.diasProGratis + ' días gratis'));
+        cont.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '8px', textAlign: 'center' } }, 'Sin tarjeta. Si no te convence, sigues en Gratis.'));
+      }
+    } else {
+      cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Lo que tienes con Pro')),
+        h('div', { class: 'pro-lista' }, items.map((x) => h('div', { class: 'tarjeta pro-item' }, h('span', { class: 'ico' }, ico('estrella', 'relleno')), h('div', null, h('strong', null, x.titulo), h('span', null, x.texto)))))));
+    }
+
+    // Gratis y Pro, fila por fila (solo números)
+    const filas = Object.keys(PLAN.limites.gratis).filter((k) => LIMITES_TXT[k]).map((k) => [LIMITES_TXT[k], PLAN.limites.gratis[k] === 0 ? '—' : String(PLAN.limites.gratis[k])]);
+    cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Cuánto incluye cada plan')),
+      h('div', { class: 'tarjeta', estilo: { padding: '4px 16px' } }, h('div', { class: 'pro-comparar' },
+        h('div', { class: 'cab' }, ''), h('div', { class: 'cab centro' }, 'Gratis'), h('div', { class: 'cab centro' }, 'Pro'),
+        filas.map(([t, g1]) => [h('div', null, t), h('div', { class: 'centro num' }, g1), h('div', { class: 'centro' }, h('span', { class: 'plan-ok', estilo: { background: 'var(--oro)' } }, ico('ok')))]).reduce((a, b) => a.concat(b), [])))));
+    if (st.tipo !== 'pro') {
+      cont.appendChild(h('div', { estilo: { textAlign: 'center', marginTop: '14px' } }, h('button', { class: 'btn-texto', type: 'button', onclick: restaurar }, 'Ya pagué: restaurar mi compra')));
+      cont.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '6px', textAlign: 'center' } }, 'El cobro lo hace Google Play y puedes cancelar cuando quieras. Los precios pueden variar según tu país.'));
     }
   }
   async function comprar(plan) {
@@ -7200,14 +7606,14 @@
   function sri(cont) {
     if (bloqueado(cont, 'sri')) return;
     const D = S().d, anio = Number(AF.app.hoy().slice(0, 4)), r = AF.informes.sri(D, anio), rub = PLAN.sri.rubros;
-    cont.appendChild(h('div', { class: 'horizonte', estilo: { margin: '0 calc(var(--margen) * -1)', borderRadius: '28px' } },
-      h('div', { class: 'cifra-etiqueta' }, 'Rebaja aproximada de impuestos ' + anio), h('div', { class: 'cifra', estilo: { fontSize: '52px' } }, $(r.rebaja)),
-      h('p', { class: 'cifra-pie suave' }, 'Es el ' + Math.round(PLAN.sri.porcentajeRebaja * 100) + ' % de tus gastos deducibles (' + $(r.base) + '), hasta un máximo para tus ' + r.cargas + (r.cargas === 1 ? ' carga' : ' cargas') + ': ' + $(r.tope) + '.')));
+    cont.appendChild(h('div', { class: 'hero-card' },
+      h('div', { class: 'hero-etiqueta' }, 'Rebaja aproximada de impuestos ' + anio), h('div', { class: 'hero-cifra' }, $(r.rebaja)),
+      h('p', { class: 'hero-meta' }, 'Es el ' + Math.round(PLAN.sri.porcentajeRebaja * 100) + ' % de tus gastos deducibles (' + $(r.base) + '), hasta un máximo para tus ' + r.cargas + (r.cargas === 1 ? ' carga' : ' cargas') + ': ' + $(r.tope) + '.')));
     cont.appendChild(h('div', { class: 'nota', estilo: { marginTop: '16px' } }, ico('info'), h('span', null, 'Es una estimación. Solo cuentan gastos con factura a tu nombre y dentro de lo que permite el SRI. Revisa tu formulario de gastos personales' + (PLAN.sri.formularioMes ? ' (se entrega en ' + PLAN.sri.formularioMes + ')' : '') + '.')));
     if (r.total > r.tope) cont.appendChild(h('div', { class: 'nota', estilo: { marginTop: '10px' } }, ico('alerta'), h('span', null, 'Tus gastos deducibles (' + $(r.total) + ') ya pasan el tope de ' + $(r.tope) + '. Lo de más no suma.')));
     else cont.appendChild(h('p', { class: 'texto-sm suave', estilo: { marginTop: '12px' } }, 'Aún podrías deducir ' + $(r.tope - r.total) + ' más antes de llegar al tope.'));
     cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Por rubro')),
-      r.porRubro.length ? h('div', { class: 'lista' }, r.porRubro.map((x) => fila({ icono: '🏛️', titulo: x.nombre, derecha: h('span', { class: 'monto' }, $(x.total)) }))) : h('p', { class: 'suave' }, 'Aún no hay gastos en rubros deducibles este año.')));
+      r.porRubro.length ? h('div', { class: 'lista' }, r.porRubro.map((x) => fila({ icono: ({ alimentacion: '🛒', educacion: '🎓', salud: '💊', vestimenta: '👕', vivienda: '🏠', turismo: '✈️', arte: '🎭', mascotas: '🐶' })[x.rubro] || '🏛️', titulo: x.nombre, derecha: h('span', { class: 'monto' }, $(x.total)) }))) : h('p', { class: 'suave' }, 'Aún no hay gastos en rubros deducibles este año.')));
     const gastos = D.movs.filter((m) => m.tipo === 'gasto' && m.fecha.startsWith(String(anio))).sort((a, b) => b.monto - a.monto).slice(0, 25);
     cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Tus gastos más grandes')), h('p', { class: 'texto-sm suave' }, 'Toca uno para decir si es deducible y de qué rubro.'),
       h('div', { class: 'lista' }, gastos.map((m) => { const rb = m.sri !== undefined ? m.sri : C().catDe(m.cat).sri;
@@ -7356,7 +7762,7 @@
     const v = S().buscar('viajes', id), D = S().d, hoy = AF.app.hoy(); if (!v) { AF.app.atras(); return; }
     const movs = D.movs.filter((m) => m.viajeId === id).sort((a, b) => (b.fecha === a.fecha ? b.creado - a.creado : b.fecha < a.fecha ? -1 : 1));
     const total = movs.reduce((s, m) => s + m.monto, 0), orig = movs.reduce((s, m) => s + (m.montoOriginal || 0), 0);
-    cont.appendChild(h('div', { class: 'horizonte', estilo: { margin: '0 calc(var(--margen) * -1)', borderRadius: '28px' } }, h('div', { class: 'cifra-etiqueta' }, 'Llevas gastado'), h('div', { class: 'cifra', estilo: { fontSize: '52px' } }, $(total)), h('p', { class: 'cifra-pie suave' }, $(orig, { simbolo: PLAN.monedas[v.moneda].simbolo }) + ' ' + v.moneda + ' · cambio 1 ' + D.ajustes.moneda + ' = ' + String(v.tasa).replace('.', ',') + ' ' + v.moneda)));
+    cont.appendChild(h('div', { class: 'hero-card' }, h('div', { class: 'hero-etiqueta' }, 'Llevas gastado'), h('div', { class: 'hero-cifra' }, $(total)), h('p', { class: 'hero-meta' }, $(orig, { simbolo: PLAN.monedas[v.moneda].simbolo }) + ' ' + v.moneda + ' · cambio 1 ' + D.ajustes.moneda + ' = ' + String(v.tasa).replace('.', ',') + ' ' + v.moneda)));
     cont.appendChild(h('div', { estilo: { display: 'flex', gap: '10px', marginTop: '16px' } }, h('button', { class: 'btn btn-voz', type: 'button', estilo: { flex: 1 }, onclick: () => gastoViaje(v) }, 'Agregar gasto'), h('button', { class: 'btn btn-borde', type: 'button', onclick: () => editarTasa(v) }, 'Cambio')));
     cont.appendChild(h('section', { class: 'seccion' }, movs.length ? h('div', { class: 'lista' }, movs.map((m) => fila({ icono: C().catDe(m.cat).icono, titulo: m.desc || C().catDe(m.cat).nombre, sub: $(m.montoOriginal, { simbolo: PLAN.monedas[v.moneda].simbolo }) + ' ' + v.moneda + ' · ' + U.fechaCorta(m.fecha, hoy), derecha: h('span', { class: 'monto gasto' }, '−' + $(m.monto)), onclick: () => C().editarMov(m) }))) : h('div', { class: 'vacio' }, h('strong', null, 'Sin gastos todavía'), 'Agrega el primero.')));
   }
@@ -7503,8 +7909,8 @@
     cont.appendChild(sec('Apariencia'));
     cont.appendChild(h('div', null,
       h('div', { class: 'campo' }, h('label', null, 'Modo'), h('div', { class: 'segmentos' }, [['auto', 'Automático'], ['claro', 'Claro'], ['oscuro', 'Oscuro']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': (a.tema || 'auto') === k ? 'true' : 'false', onclick: () => S().ajustar({ tema: k }) }, t)))),
-      h('div', { class: 'campo' }, h('label', null, 'Color'), h('div', { class: 'opciones' }, PLAN.apariencia.colores.map((c) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': (a.colorApp || 'marino') === c.id ? 'true' : 'false', onclick: () => S().ajustar({ colorApp: c.id }) },
-        h('span', { class: 'muestra-color', estilo: { background: AF.tema.paleta('claro', c.id).voz } }), c.nombre)))),
+      h('div', { class: 'campo' }, h('label', null, 'Color'), h('div', { class: 'opciones' }, PLAN.apariencia.colores.map((c) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': (a.colorApp || 'petroleo') === c.id ? 'true' : 'false', onclick: () => S().ajustar({ colorApp: c.id }) },
+        h('span', { class: 'muestra-doble', estilo: { background: 'linear-gradient(135deg,' + c.muestra[0] + ' 0 50%,' + c.muestra[1] + ' 50% 100%)' } }), c.nombre)))),
       h('div', { class: 'campo' }, h('label', null, 'Gráficas'), h('div', { class: 'segmentos' }, [['barras', 'Barras'], ['lineas', 'Líneas'], ['circulo', 'Círculo']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': (a.grafica || 'barras') === k ? 'true' : 'false', onclick: () => S().ajustar({ grafica: k }) }, t))))));
 
     cont.appendChild(sec('Palabras que aprendí'));
@@ -7648,24 +8054,19 @@
   const raiz = () => d.getElementById('app');
 
   /* ------------------------------------------------------------------ estructura */
-  let vistaEl, pestanasEl, compositorEl;
-  const TABS = [['inicio', 'Inicio', 'inicio'], ['movimientos', 'Movimientos', 'movimientos'], ['tarjetas', 'Tarjetas', 'tarjeta'], ['mas', 'Más', 'mas']];
+  let vistaEl, pestanasEl;
+  const TABS = [['inicio', 'Inicio', 'inicio'], ['movimientos', 'Movimientos', 'movimientos'], null, ['tarjetas', 'Tarjetas', 'tarjeta'], ['mas', 'Más', 'mas']];
 
+  // Barra de abajo flotante: cuatro secciones y, al centro, el micrófono dorado (en TODAS las pantallas principales).
   function armar() {
     if (vistaEl) return;
     vistaEl = h('div', { id: 'vista' });
-    pestanasEl = h('nav', { class: 'pestanas oculto', 'aria-label': 'Secciones' }, TABS.map(([k, t, i]) => h('button', { class: 'pestana', type: 'button', 'data-tab': k, onclick: () => app.ir(k) }, h('span', { class: 'ico-wrap' }, ico(i)), t)));
-    // La barra de abajo ES el campo para escribir: no abre otra pantalla. Con texto, el micrófono se vuelve «enviar».
-    const input = h('input', { class: 'compositor-input', type: 'text', placeholder: 'Dime un gasto o un ingreso', 'aria-label': 'Escribe un gasto, un ingreso o una pregunta', autocomplete: 'off', enterkeyhint: 'send' });
-    const boton = h('button', { class: 'mic', type: 'button', 'aria-label': 'Hablar' }, ico('mic'));
-    const enviar = () => { const t = input.value.trim(); if (!t) return; input.value = ''; input.blur(); pintarBoton(); V().voz.abrir({ texto: t }); };
-    const pintarBoton = () => { AF.ui.vaciar(boton); const hayTexto = !!input.value.trim(); boton.appendChild(ico(hayTexto ? 'enviar' : 'mic')); boton.setAttribute('aria-label', hayTexto ? 'Enviar' : 'Hablar'); };
-    boton.addEventListener('click', () => { if (input.value.trim()) enviar(); else { input.blur(); V().voz.abrir({ modo: 'voz' }); } });
-    input.addEventListener('input', pintarBoton);
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); enviar(); } });
-    compositorEl = h('div', { class: 'compositor oculto' }, h('div', { class: 'compositor-barra' }, input, boton));
-    app.compositorInput = input;
-    const r = raiz(); r.appendChild(vistaEl); r.appendChild(pestanasEl); r.appendChild(compositorEl);
+    pestanasEl = h('nav', { class: 'pestanas oculto', 'aria-label': 'Secciones' }, TABS.map((t) => {
+      if (!t) return h('button', { class: 'pestana-mic', type: 'button', 'aria-label': 'Hablar o escribir un gasto', onclick: () => V().voz.abrir({ modo: 'voz' }) }, ico('mic'), h('span', { class: 'pestana-mic-rotulo' }, 'Hablar'));
+      const [k, nombre, i] = t;
+      return h('button', { class: 'pestana', type: 'button', 'data-tab': k, onclick: () => app.ir(k) }, h('span', { class: 'ico-wrap' }, ico(i)), nombre);
+    }));
+    const r = raiz(); r.appendChild(vistaEl); r.appendChild(pestanasEl);
   }
   function cerrarCapas() { raiz().querySelectorAll('.telon, .hoja, .voz, .aviso-flotante').forEach((e) => e.remove()); }
 
@@ -7673,7 +8074,7 @@
   app.pantalla = function (nodo) {
     armar(); cerrarCapas();
     app.abierta = false;
-    pestanasEl.classList.add('oculto'); compositorEl.classList.add('oculto');
+    pestanasEl.classList.add('oculto');
     AF.ui.vaciar(vistaEl);
     if (nodo) vistaEl.appendChild(nodo);
     AF.tema.aplicar('auto');
@@ -7689,9 +8090,7 @@
     const y = g.scrollY;
     AF.ui.vaciar(vistaEl);
     const tope = app.pila[app.pila.length - 1];
-    // el compositor (hablar / escribir) solo en las cuatro pestañas; en pantallas internas tapa el contenido
-    compositorEl.classList.toggle('oculto', !!tope);
-    vistaEl.classList.toggle('sin-compositor', !!tope);
+    // la barra de abajo queda en todas las pantallas (igual que en las pestañas): así siempre puedes hablar o cambiar de sección
     if (tope) {
       const cuerpo = h('div', { class: 'contenido' });
       const cab = h('header', { class: 'barra-superior' }, h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Atrás', onclick: () => app.atras() }, ico('atras')), h('h1', { class: 'h2' }, tope.titulo));
@@ -7792,7 +8191,7 @@
     app.abierta = true; Sg().marcarEntrada();
     aplicarAjustes();
     cerrarCapas();
-    pestanasEl.classList.remove('oculto'); compositorEl.classList.remove('oculto');
+    pestanasEl.classList.remove('oculto');
     app.tab = 'inicio'; app.pila = [];
     dibujar();
     programarAvisos();

@@ -16,7 +16,7 @@
     app: {
       nombre: 'Asistente Financiero',            // PROVISIONAL (nombre de trabajo)
       nombreCorto: 'Asistente',
-      version: '3.1.0',
+      version: '4.0.0',
       // PROVISIONAL. Ojo: el id del paquete NO se puede cambiar después de publicar en Play.
       idPaquete: 'com.asistentefinanciero.app',
       desarrollador: '',                          // LUIS: nombre de desarrollador en Play (no su nombre personal)
@@ -144,6 +144,8 @@
         'Aviso de gastos innecesarios del mes',
         'Copia de seguridad en tu Google Drive',
       ],
+      // Versión corta de la lista de arriba, para la tarjeta «Gratis» de la pantalla Pro (cabe en media pantalla)
+      gratisCorto: ['Gastos e ingresos sin límite', 'Cuánto te queda hasta tu cobro', 'Movimientos con filtros', '1 tarjeta de crédito', 'Preguntas comunes', 'Copia en tu Google Drive'],
       pro: [
         { titulo: 'Asistente inteligente', texto: 'Entiende cualquier frase y responde cualquier pregunta sobre tu plata.' },
         { titulo: 'Tarjetas sin límite', texto: 'Cuotas, intereses, «¿pago el mínimo o el total?» y avisos de corte y pago.' },
@@ -426,44 +428,98 @@
     // tema.js convierte cada valor en una variable CSS: cambiar un valor cambia toda la app.
     //   panel / panelFondo  = superficies grandes (portada, PIN, pantalla de voz, plástico de tarjeta)
     //   botonFondo          = botones principales   ·   paleta = colores de reserva para íconos que no son una categoría
+    /* Apariencia: TODOS los colores de la app, en este único lugar. tema.js los convierte en variables CSS (--papel, --acento…).
+       `claro` y `oscuro` son los de «Petróleo y oro» (el de origen). Cada color de `colores` cambia solo lo que escribe; lo demás queda igual.
+       Qué es cada cosa:
+         papel / fondoApp  fondo de las pantallas       · hoja  fondo de tarjetas y paneles     · linea  bordes finos
+         tinta / tinta2    texto principal / texto suave · acento  enlaces e íconos activos       · botonFondo  botones principales
+         heroFondo, sobreHero, sobreHero2, heroTrazo  tarjeta grande del saldo (fondo, texto, texto suave, línea decorativa)
+         voz, vozFondo, sobreVoz, vozBrillo  botón del micrófono · oro, oroSuave, sobreOro  lo «Pro»
+         gasto / ingreso / aviso (+Suave, +Vivo)  rojo, verde y ámbar · tabFondo, tabActivoFondo, tabActivoTexto  barra de abajo */
     apariencia: {
       claro: {
-        papel: '#EEF2F8', hoja: '#FFFFFF', tinta: '#0E1A2E', tinta2: '#56647A', linea: '#DDE4EE',
-        panel: '#10233F', panelFondo: 'linear-gradient(165deg,#0B1A30 0%,#13294A 100%)', panelSuave: '#E4ECF8',
-        acento: '#1F5FD6', botonFondo: '#1F5FD6',
-        voz: '#2B6FEA', vozFondo: '#2B6FEA', sobreVoz: '#FFFFFF', naranja: '#E8751A',
-        oro: '#E0A526', oroSuave: '#FBF0D5', sobreOro: '#5C3D00',
-        gasto: '#C62F2F', gastoSuave: '#FBE4E4', gastoVivo: '#E04848',
-        ingreso: '#0E8A5F', ingresoSuave: '#DDF3EA', ingresoVivo: '#1DB57A',
-        aviso: '#8F5200', avisoSuave: '#FFF1D6',
-        sobrePanel: '#FFFFFF', sobrePanel2: '#B9C6DA', sombraColor: 'rgba(15,35,63,0.20)',
+        papel: '#F4EFE5', fondoApp: 'linear-gradient(180deg,#F8F4EB 0%,#F1EBDD 100%)', hoja: '#FFFDF8', tinta: '#0F2A30', tinta2: '#5D6F72', linea: '#E7DFCF',
+        panel: '#0D4350', panelFondo: 'linear-gradient(150deg,#0A3641 0%,#0F5561 100%)', panelSuave: '#E6F0EE',
+        heroFondo: 'linear-gradient(150deg,#0A3A45 0%,#0F5C68 62%,#157683 100%)', sobreHero: '#FFFFFF', sobreHero2: '#B8D6D8', heroTrazo: '#D9AE4A',
+        acento: '#0E6270', botonFondo: 'linear-gradient(135deg,#127886 0%,#0B4F5B 100%)',
+        voz: '#C9962B', vozFondo: 'linear-gradient(150deg,#EBC264 0%,#C28B1F 100%)', sobreVoz: '#2B1B00', vozBrillo: 'rgba(201,150,43,0.45)', naranja: '#D9821F',
+        oro: '#C9962B', oroSuave: '#F8EBC8', sobreOro: '#5E3F00',
+        gasto: '#C23B2E', gastoSuave: '#FBE5E0', gastoVivo: '#E0584A',
+        ingreso: '#127F5A', ingresoSuave: '#DDF2E8', ingresoVivo: '#1DAE7A',
+        aviso: '#8A5200', avisoSuave: '#FBEFD2',
+        sobrePanel: '#FFFFFF', sobrePanel2: '#B8D6D8', sombraColor: 'rgba(40,52,40,0.24)',
+        tabFondo: 'rgba(255,253,248,0.94)', tabActivoFondo: 'linear-gradient(135deg,#127886 0%,#0B4F5B 100%)', tabActivoTexto: '#FFFFFF',
       },
       oscuro: {
-        papel: '#0A1424', hoja: '#111F36', tinta: '#F1F5FB', tinta2: '#9AA9C0', linea: 'rgba(255,255,255,0.09)',
-        panel: '#10233F', panelFondo: 'linear-gradient(165deg,#0B1A30 0%,#14305A 100%)', panelSuave: '#1A2B49',
-        acento: '#6AA5FF', botonFondo: '#2B6FEA',
-        voz: '#2F7BFF', vozFondo: '#2F7BFF', sobreVoz: '#FFFFFF', naranja: '#F28A1B',
-        oro: '#F2B63A', oroSuave: 'rgba(242,182,58,0.15)', sobreOro: '#F2B63A',
-        gasto: '#FF7B7B', gastoSuave: 'rgba(255,107,107,0.15)', gastoVivo: '#FF5C5C',
-        ingreso: '#37D6A1', ingresoSuave: 'rgba(55,214,161,0.15)', ingresoVivo: '#25C58E',
-        aviso: '#FFC873', avisoSuave: 'rgba(255,200,115,0.13)',
-        sobrePanel: '#FFFFFF', sobrePanel2: '#B9C6DA', sombraColor: 'rgba(0,0,0,0.55)',
+        papel: '#061A1E', fondoApp: 'linear-gradient(180deg,#082126 0%,#051519 100%)', hoja: '#0D2A30', tinta: '#EAF4F3', tinta2: '#94ADB0', linea: 'rgba(255,255,255,0.09)',
+        panel: '#0D4350', panelFondo: 'linear-gradient(150deg,#0A3641 0%,#0F5561 100%)', panelSuave: 'rgba(99,211,223,0.12)',
+        heroFondo: 'linear-gradient(150deg,#0B3E4A 0%,#10606C 70%,#17808D 100%)', sobreHero: '#FFFFFF', sobreHero2: '#B8D6D8', heroTrazo: '#E7BB55',
+        acento: '#63D3DF', botonFondo: 'linear-gradient(135deg,#1A8D9C 0%,#0E5E6B 100%)',
+        voz: '#E3B450', vozFondo: 'linear-gradient(150deg,#EBC264 0%,#C28B1F 100%)', sobreVoz: '#2B1B00', vozBrillo: 'rgba(227,180,80,0.38)', naranja: '#F0A23B',
+        oro: '#E7BB55', oroSuave: 'rgba(231,187,85,0.15)', sobreOro: '#F2CD78',
+        gasto: '#FF8478', gastoSuave: 'rgba(255,132,120,0.14)', gastoVivo: '#FF6B5E',
+        ingreso: '#4BDDA9', ingresoSuave: 'rgba(75,221,169,0.14)', ingresoVivo: '#2FCB94',
+        aviso: '#FFCB7A', avisoSuave: 'rgba(255,203,122,0.13)',
+        sobrePanel: '#FFFFFF', sobrePanel2: '#B8D6D8', sombraColor: 'rgba(0,0,0,0.55)',
+        tabFondo: 'rgba(11,38,44,0.94)', tabActivoFondo: 'linear-gradient(135deg,#1A8D9C 0%,#0E5E6B 100%)', tabActivoTexto: '#FFFFFF',
       },
-      // Colores que la persona puede elegir en Más → Ajustes → Apariencia. Solo cambian lo grande, los botones y el micrófono;
-      // ingresos verde y gastos rojo no se tocan. 'azul' es el de origen.
+      // Colores que la persona elige en Más → Ajustes → Apariencia. `muestra` = los dos colores del circulito.
+      // Ingresos verde y gastos rojo se mantienen parecidos en todos para que nunca se confundan.
       colores: [
-        { id: 'marino', nombre: 'Azul', claro: {}, oscuro: {} },
-        { id: 'petroleo', nombre: 'Petróleo',
-          claro: { panel: '#0E3B43', panelFondo: 'linear-gradient(165deg,#09292F 0%,#0F525D 100%)', panelSuave: '#E0EFF2', acento: '#0F6674', botonFondo: '#0F6674', voz: '#0F7F90', vozFondo: '#0F7F90' },
-          oscuro: { panel: '#0E3B43', panelFondo: 'linear-gradient(165deg,#09292F 0%,#0F525D 100%)', panelSuave: '#15303A', papel: '#08171C', hoja: '#0F252C', acento: '#6FD0DE', botonFondo: '#168798', voz: '#1BA3B8', vozFondo: '#1BA3B8' } },
-        { id: 'grafito', nombre: 'Grafito',
-          claro: { panel: '#1F2630', panelFondo: 'linear-gradient(165deg,#161B23 0%,#2C3644 100%)', panelSuave: '#E8ECF1', acento: '#2E3A4B', botonFondo: '#2E3A4B', voz: '#3A4960', vozFondo: '#3A4960' },
-          oscuro: { panel: '#1F2630', panelFondo: 'linear-gradient(165deg,#161B23 0%,#2C3644 100%)', panelSuave: '#232C3A', papel: '#0D1117', hoja: '#161C25', acento: '#B4C2D6', botonFondo: '#4A5A72', voz: '#5C6E8A', vozFondo: '#5C6E8A' } },
-        { id: 'logo', nombre: 'Naranja del logo',
-          claro: { acento: '#C2610C', botonFondo: '#D9690F', voz: '#E8751A', vozFondo: '#E8751A', sobreVoz: '#1A0E00' },
-          oscuro: { acento: '#FFA24D', botonFondo: '#D9690F', voz: '#F28A1B', vozFondo: '#F28A1B', sobreVoz: '#1A0E00' } },
+        { id: 'petroleo', nombre: 'Petróleo y oro', muestra: ['#0F5C68', '#C9962B'], claro: {}, oscuro: {} },
+        { id: 'marino', nombre: 'Marino y cobre', muestra: ['#1D4271', '#C8743B'],
+          claro: { papel: '#E9EEF6', fondoApp: 'linear-gradient(180deg,#EEF2F9 0%,#E2E8F3 100%)', hoja: '#FBFCFE', tinta: '#0F1E36', tinta2: '#5B6A82', linea: '#DCE3EE',
+            panel: '#12294A', panelFondo: 'linear-gradient(150deg,#0F2444 0%,#1D4271 100%)', panelSuave: '#E3EBF7',
+            heroFondo: 'linear-gradient(150deg,#12294A 0%,#1D4271 68%,#27568F 100%)', sobreHero2: '#BCCBE2', heroTrazo: '#D58A55',
+            acento: '#1B4B8A', botonFondo: 'linear-gradient(135deg,#25589F 0%,#143A6E 100%)',
+            voz: '#C8743B', vozFondo: 'linear-gradient(150deg,#E8A06A 0%,#B8612B 100%)', sobreVoz: '#2A1100', vozBrillo: 'rgba(200,116,59,0.45)', naranja: '#D9821F',
+            oro: '#C8934A', oroSuave: '#F6E6CD', sobreOro: '#5E3A10', sobrePanel2: '#BCCBE2', sombraColor: 'rgba(15,35,63,0.22)',
+            tabFondo: 'rgba(251,252,254,0.94)', tabActivoFondo: 'linear-gradient(135deg,#25589F 0%,#143A6E 100%)' },
+          oscuro: { papel: '#0A1426', fondoApp: 'linear-gradient(180deg,#0C182D 0%,#08111F 100%)', hoja: '#111E36', tinta: '#EEF3FB', tinta2: '#98A8C2',
+            panel: '#12294A', panelFondo: 'linear-gradient(150deg,#0F2444 0%,#1D4271 100%)', panelSuave: 'rgba(127,176,255,0.13)',
+            heroFondo: 'linear-gradient(150deg,#142E55 0%,#1F4577 70%,#2C5C99 100%)', sobreHero2: '#BCCBE2', heroTrazo: '#E39A63',
+            acento: '#8DB8FF', botonFondo: 'linear-gradient(135deg,#2E6AB8 0%,#194580 100%)',
+            voz: '#E39A63', vozFondo: 'linear-gradient(150deg,#EBA877 0%,#BE6830 100%)', sobreVoz: '#2A1100', vozBrillo: 'rgba(227,154,99,0.4)', naranja: '#F0A23B',
+            oro: '#E8B77F', oroSuave: 'rgba(232,183,127,0.15)', sobreOro: '#F0C595', sobrePanel2: '#BCCBE2',
+            tabFondo: 'rgba(14,29,54,0.94)', tabActivoFondo: 'linear-gradient(135deg,#2E6AB8 0%,#194580 100%)' } },
+        { id: 'oliva', nombre: 'Oliva', muestra: ['#3F5E22', '#C98A2E'],
+          claro: { papel: '#F3EDE0', fondoApp: 'linear-gradient(180deg,#F7F1E5 0%,#EEE7D5 100%)', hoja: '#FFFCF4', tinta: '#1E2A14', tinta2: '#66705A', linea: '#E5DDC9',
+            panel: '#314B1F', panelFondo: 'linear-gradient(150deg,#2B4219 0%,#4A6B26 100%)', panelSuave: '#E8EFDC',
+            heroFondo: 'linear-gradient(150deg,#2F4A1F 0%,#4A6B26 66%,#5E8230 100%)', sobreHero2: '#CBDDB0', heroTrazo: '#E3C36A',
+            acento: '#46661F', botonFondo: 'linear-gradient(135deg,#5B8030 0%,#3C5A1D 100%)',
+            voz: '#C98A2E', vozFondo: 'linear-gradient(150deg,#E8BA5C 0%,#B97D22 100%)', sobreVoz: '#2B1B00', vozBrillo: 'rgba(201,138,46,0.45)',
+            gasto: '#B8452E', gastoSuave: '#F8E4DC', gastoVivo: '#D95E45', ingreso: '#1F7A4A', ingresoSuave: '#DDF0E3',
+            sobrePanel2: '#CBDDB0', sombraColor: 'rgba(40,50,25,0.24)',
+            tabFondo: 'rgba(255,252,244,0.94)', tabActivoFondo: 'linear-gradient(135deg,#5B8030 0%,#3C5A1D 100%)' },
+          oscuro: { papel: '#10160A', fondoApp: 'linear-gradient(180deg,#131B0C 0%,#0C1107 100%)', hoja: '#192311', tinta: '#F0F4E8', tinta2: '#A3AE93',
+            panel: '#314B1F', panelFondo: 'linear-gradient(150deg,#2B4219 0%,#4A6B26 100%)', panelSuave: 'rgba(168,212,106,0.13)',
+            heroFondo: 'linear-gradient(150deg,#304C1F 0%,#4B6D27 70%,#5F8531 100%)', sobreHero2: '#CBDDB0', heroTrazo: '#E8C874',
+            acento: '#B2DB74', botonFondo: 'linear-gradient(135deg,#6A9438 0%,#456A21 100%)',
+            voz: '#E3B450', vozFondo: 'linear-gradient(150deg,#EBC264 0%,#BE8421 100%)', sobreVoz: '#2B1B00', vozBrillo: 'rgba(227,180,80,0.38)',
+            sobrePanel2: '#CBDDB0',
+            tabFondo: 'rgba(22,32,14,0.94)', tabActivoFondo: 'linear-gradient(135deg,#6A9438 0%,#456A21 100%)' } },
+        { id: 'violeta', nombre: 'Violeta noche', muestra: ['#3B2C9C', '#5CF2C0'],
+          claro: { papel: '#EFECF8', fondoApp: 'linear-gradient(180deg,#F3F0FB 0%,#E8E4F5 100%)', hoja: '#FFFFFF', tinta: '#1A1640', tinta2: '#645E8A', linea: '#E0DCF0',
+            panel: '#1B1750', panelFondo: 'linear-gradient(150deg,#17134A 0%,#3B2C9C 100%)', panelSuave: '#E9E5F8',
+            heroFondo: 'linear-gradient(150deg,#1B1750 0%,#3B2C9C 62%,#5841D6 100%)', sobreHero2: '#C9C2F2', heroTrazo: '#5CF2C0',
+            acento: '#5236D6', botonFondo: 'linear-gradient(135deg,#6B4DF0 0%,#4A31C9 100%)',
+            voz: '#6B4DF0', vozFondo: 'linear-gradient(150deg,#8F73FF 0%,#4B33C9 100%)', sobreVoz: '#FFFFFF', vozBrillo: 'rgba(107,77,240,0.5)', naranja: '#E0832A',
+            oro: '#D69A1F', oroSuave: '#F9EBC6', sobreOro: '#5E3F00',
+            gasto: '#D03A55', gastoSuave: '#FBE3E8', gastoVivo: '#EC5470', ingreso: '#0E8C63', ingresoSuave: '#DAF3EA',
+            sobrePanel2: '#C9C2F2', sombraColor: 'rgba(40,30,110,0.24)',
+            tabFondo: 'rgba(255,255,255,0.94)', tabActivoFondo: 'linear-gradient(135deg,#6B4DF0 0%,#4A31C9 100%)' },
+          oscuro: { papel: '#070A1C', fondoApp: 'radial-gradient(120% 55% at 85% 0%,#251B6B 0%,#070A1C 62%)', hoja: '#12163A', tinta: '#EEF0FF', tinta2: '#9EA3CF', linea: 'rgba(160,150,255,0.16)',
+            panel: '#1B1750', panelFondo: 'linear-gradient(150deg,#17134A 0%,#3B2C9C 100%)', panelSuave: 'rgba(155,135,255,0.15)',
+            heroFondo: 'linear-gradient(150deg,#1D1862 0%,#3A2BA0 68%,#5A45E0 100%)', sobreHero2: '#C9C2F2', heroTrazo: '#5CF2C0',
+            acento: '#A593FF', botonFondo: 'linear-gradient(135deg,#7557FF 0%,#4A31C9 100%)',
+            voz: '#8F73FF', vozFondo: 'linear-gradient(150deg,#9B82FF 0%,#4B33C9 100%)', sobreVoz: '#FFFFFF', vozBrillo: 'rgba(143,115,255,0.55)',
+            oro: '#F0BE4A', oroSuave: 'rgba(240,190,74,0.16)', sobreOro: '#F6D27A',
+            gasto: '#FF7089', gastoSuave: 'rgba(255,112,137,0.15)', gastoVivo: '#FF5A78', ingreso: '#3DE6A8', ingresoSuave: 'rgba(61,230,168,0.14)', ingresoVivo: '#27D497',
+            sobrePanel2: '#C9C2F2', sombraColor: 'rgba(0,0,0,0.6)',
+            tabFondo: 'rgba(18,22,58,0.94)', tabActivoFondo: 'linear-gradient(135deg,#7557FF 0%,#4A31C9 100%)' } },
       ],
-      paleta: ['#F28A1B', '#2F6FD0', '#1DB57A', '#E04848', '#0EA5B7', '#D49A1E', '#4F6D8F', '#14917F', '#C2610C', '#7A8CA3'],
+      // Colores de las categorías en gráficas (anillo y barras). Se reparten en este orden.
+      paleta: ['#0F7C8C', '#D9A53A', '#E0674F', '#6C8F3A', '#6B58D6', '#C2610C', '#2F6FD0', '#B5538A', '#14917F', '#7A8CA3'],
     },
   };
 

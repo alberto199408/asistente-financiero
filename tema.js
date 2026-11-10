@@ -28,7 +28,7 @@
       const oscuro = modo === 'oscuro' || ((!modo || modo === 'auto') && g.matchMedia && g.matchMedia('(prefers-color-scheme: dark)').matches);
       const meta = d.querySelector('meta[name="theme-color"]');
       const a = AF.tema.paleta(oscuro ? 'oscuro' : 'claro', color);
-      if (meta) meta.setAttribute('content', a.panel);
+      if (meta) meta.setAttribute('content', a.papel);
     },
   };
   if (g.document && g.document.head) AF.tema.aplicar('auto');   // primer pintado ya con los colores (sin script en línea)
