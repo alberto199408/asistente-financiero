@@ -676,5 +676,31 @@ h1, h2, h3, p { margin: 0; }
 .barra-cat-cab > span:first-child { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 @media (max-width: 350px) { .pestana { font-size: 9.5px; letter-spacing: -0.03em; } }
 
+/* Ahorro y planes: reparto del cobro, reglas de ahorro automático, orden de deudas */
+.plan-card { background: var(--hoja); border: 1px solid var(--linea); border-radius: var(--radio); padding: 18px 18px 16px; box-shadow: var(--sombra-suave); }
+.plan-cab { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.plan-cab .chip { white-space: nowrap; flex: none; }
+.plan-cifra { font-size: var(--t-2xl); font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.reparto { display: flex; gap: 3px; height: 14px; border-radius: 7px; overflow: hidden; margin: 16px 0 12px; background: var(--panel-suave); }
+.reparto i { display: block; height: 100%; min-width: 4px; }
+.reparto i.libre, .punto.libre { background: var(--linea); }
+.leyenda { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.leyenda li { display: flex; align-items: center; gap: 10px; font-size: var(--t-sm); }
+.leyenda-t { flex: 1; color: var(--tinta2); }
+.punto { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.plan-libre { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--linea); }
+.plan-libre.pasado .plan-cifra { color: var(--gasto); }
+.reglas { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 8px; }
+.regla .fila-texto { min-width: 0; }
+.regla .fila-sub { white-space: normal; }
+.regla { background: var(--hoja); border: 1px solid var(--linea); border-radius: var(--radio); padding: 14px 16px; box-shadow: var(--sombra-suave); }
+.regla.activa { border-color: var(--ingreso); }
+.regla-cab { display: flex; align-items: center; gap: 13px; }
+.regla-botones { display: flex; gap: 10px; margin-top: 12px; align-items: center; }
+.numero-orden { font-weight: 800; font-size: var(--t-md); color: var(--acento); }
+.opcion-fila[aria-pressed="true"] { background: var(--panel-suave); border-radius: 14px; }
+.detalle-calculo { margin-top: 20px; }
+.detalle-calculo summary { cursor: pointer; font-weight: 700; font-size: var(--t-sm); color: var(--acento); min-height: 40px; display: flex; align-items: center; }
+
 /* Teléfonos angostos: los planes se apilan (el Pro primero) para que las listas no se partan en 4 renglones. */
 @media (max-width: 370px) { .planes { grid-template-columns: 1fr; gap: 22px; } .plan.destacado { order: -1; } .plan-sub { min-height: 0; } }

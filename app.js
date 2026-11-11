@@ -747,7 +747,7 @@
 
 /* ===== js/parser.js ===== */
 /* El intérprete de frases (botón único): reglas + diccionario + lo aprendido. Sin internet.
-   interpretar(texto, ctx) -> { tipo: 'registrar' | 'preguntar' | 'corregir' | 'presupuesto' | 'informe' | 'ayuda' | 'desconocido', ... }
+   interpretar(texto, ctx) -> { tipo: 'registrar' | 'preguntar' | 'corregir' | 'presupuesto' | 'informe' | 'pantalla' | 'ayuda' | 'desconocido', ... }
    ctx = { hoy, categorias, dicc (lo aprendido), tarjetas }                                                       */
 (function (g) {
   'use strict';
@@ -758,8 +758,9 @@
   const set = (s) => new Set(s.split(/\s+/).filter(Boolean));
   const V_GASTO = set('gaste gastamos gasto gastado gastaron pague pagamos pagado apague compre compramos comprado pedi consumi done aboné abone inverti cancele cancelamos');  // «apagué» = el dictado oye mal «pagué»; «cancelé» = pagué en varios países
   const V_INGRESO = set('gane ganamos gano ganancia cobre cobramos recibi recibimos ingrese ingresaron vendi vendimos');
-  const FRASES_INGRESO = ['me pagaron', 'me depositaron', 'me llego', 'me llegaron', 'me entro', 'me dieron', 'me regalaron', 'me transfirieron', 'me abonaron', 'me depositaron', 'me pagan', 'ingreso de', 'un ingreso'];
-  const FRASES_GASTO = ['me cobraron', 'me costo', 'me salio', 'un gasto', 'gasto de'];
+  const FRASES_INGRESO = ['me pagaron', 'me depositaron', 'me llego', 'me llegaron', 'me entro', 'me entraron', 'me dieron', 'me regalaron', 'me regalo', 'me transfirieron', 'me abonaron', 'me pagan', 'ingreso de', 'un ingreso', 'me acreditaron',
+    'me devolvieron', 'me devolvio', 'me mandaron', 'me mando', 'me enviaron', 'me envio', 'me prestaron', 'me presto', 'me reembolsaron', 'me reembolso', 'me compraron', 'me giraron', 'me giro', 'me ingresaron', 'me cayo', 'me cayeron', 'me pago'];
+  const FRASES_GASTO = ['me cobraron', 'me costo', 'me salio', 'un gasto', 'gasto de', 'me cobro', 'le di', 'les di', 'le deje', 'les deje', 'deje de propina', 'di de propina', 'le mande', 'le envie', 'le transferi', 'le preste', 'le regale', 'les regale', 'transferi', 'mande', 'envie', 'preste', 'regale'];
   const PARADA = set('el la los las un una unos unas de del en por para con al a y e o mi mis tu tus su sus me se lo que es fue era fueron hoy ayer anoche dolares dolar usd pesos euros soles centavos centavo mas casi como pues entonces porque cuando donde yo cargue cargamos tanquee fui fuimos llene eche echamos pase pasamos sali salimos');
   const MONEDAS = set('dolar dolares usd $ pesos peso euros euro soles sol dolarcitos');
   const OPENER_PREGUNTA = set('cuanto cuantos cuanta cuantas cual cuales dime muestrame desglosame desglosa resumeme resumen cuando donde hay tengo puedo podria alcanza conviene que');
@@ -770,7 +771,9 @@
   const INTERROGATIVAS = set('cuanto cuantos cuanta cuantas cuando cual cuales donde dime dame muestrame demuestrame desglosame desglosa resumeme indicame cuentame explicame necesito saber');
   // Relleno que la gente dice antes de pedir algo: se quita para entender lo que de verdad pidió.
   const RELLENO = ['te hago una consulta', 'tengo una consulta', 'una consulta', 'tengo una pregunta', 'una pregunta', 'quiero saber', 'quisiera saber', 'me gustaria saber', 'necesito saber', 'quiero que me digas', 'puedes decirme', 'podrias decirme', 'me puedes decir', 'me podrias decir',
-    'por favor', 'porfa', 'porfis', 'ayudame', 'oye', 'hola', 'asistente', 'claudia', 'claude', 'a ver', 'bueno', 'eh', 'este', 'mira', 'ok'];
+    'por favor', 'porfa', 'porfis', 'ayudame', 'oye', 'hola', 'asistente', 'a ver', 'bueno', 'eh', 'ay', 'este', 'mira', 'ok'];
+  const INICIO_ORDEN = /^ (?:(?:oye|ey|hey|mira|bueno|ok|listo|ya|disculpa|disculpame|asistente|a ver|eh|ay|este|o sea|por favor|porfa)[,;]? )*(?:(?:quiero|quisiera|necesito|puedes|podrias)? ?(?:anotar|registrar|apuntar|agregar|anadir|guardar|ingresar|meter|anotame|registrame|apuntame)(?: lo siguiente)?(?: que)?|anota(?:me)?(?: que)?|apunta(?:me)?(?: que)?|registra(?:me)?(?: que)?|agrega(?: que)?|guarda(?: que)?|ingresa(?: que)?)[,:;]? /;
+  const CIERRE = /(?: (?:nada mas|nomas|no mas|eso es todo|eso|listo|pues|y ya|ya|gracias|muchas gracias|por favor|porfa|porfis|porfavor|ok|okay|dale|ahi))+[.,;!]*\s*$/;
   // Si la persona se corrige a mitad de frase, vale lo que dijo al final.
   const CORRECCION = ['o mejor dicho', 'mejor dicho', 'o sea', 'es decir', 'quiero decir', 'mas bien', 'perdon', 'digo'];
   // Palabras que no van en el nombre del movimiento (verbos, muletillas, moneda, tarjeta, plazo...).
@@ -790,7 +793,16 @@
     let corte = -1;
     CORRECCION.forEach((c) => { const k = t.lastIndexOf(' ' + c + ' '); if (k > corte) corte = k + c.length + 1; });
     if (corte > 0) t = ' ' + t.slice(corte).trim() + ' ';
-    RELLENO.forEach((r) => { t = t.split(' ' + r + ' ').join(' '); });
+    RELLENO.forEach((r) => {
+      // «una consulta» solo es relleno al empezar la frase («una consulta: cuánto gasté…»); en «compré una consulta médica» es la compra
+      if (/consulta$/.test(r)) { t = t.replace(new RegExp('^ ' + r + '[,;:]? '), ' '); return; }
+      if (r === 'este') { t = t.replace(/ este (?!mes\b|ano\b|semana\b|trimestre\b|anio\b|fin\b|lunes\b|martes\b|miercoles\b|jueves\b|viernes\b|sabado\b|domingo\b)/g, ' '); return; }
+      t = t.replace(new RegExp(' ' + r.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[.,;:]*(?= )', 'g'), '');
+    });
+    t = t.replace(/^ (claude|claudia)(,|;)? (?!pro\b|max\b|plus\b)/, ' '); // «Claude, anota…» es un saludo; «Claude Pro» es una suscripción
+    // La orden de registrar («anota que…», «quiero anotar que…») y el cierre («…nada más», «…gracias») no son parte de lo comprado:
+    // si se quedaran, el nombre sería «Anota zorgblat» y lo que la app aprende sería basura.
+    t = t.replace(INICIO_ORDEN, ' ').replace(CIERRE, ' ');
     return t.replace(/\s+/g, ' ').trim();
   }
 
@@ -880,6 +892,7 @@
     const dicc = ctx.dicc || {};
     for (let i = 0; i < palabras.length; i++) {
       for (let len = Math.min(4, palabras.length - i); len >= 1; len--) {
+        if (len === 1 && PARADA.has(palabras[i])) continue;
         const trozo = palabras.slice(i, i + len);
         const variantes = [trozo.join(' ')];
         const ult = trozo[len - 1];
@@ -914,19 +927,26 @@
     const n = toks.map((t) => t.n);
     let fecha = hoy, hallada = false;
     for (let i = 0; i < n.length; i++) {
+      if (usados.includes(i)) continue; // «antes de ayer»: la «ayer» ya se leyó como parte de la frase
       if (n[i] === 'hoy') { usados.push(i); hallada = true; }
       else if (n[i] === 'ayer') { fecha = U.sumarDias(hoy, -1); usados.push(i); hallada = true; }
       else if (n[i] === 'anoche') { fecha = U.sumarDias(hoy, -1); usados.push(i); hallada = true; }
       else if (n[i] === 'anteayer' || n[i] === 'antier' || n[i] === 'antiayer') { fecha = U.sumarDias(hoy, -2); usados.push(i); hallada = true; }
       else if (n[i] === 'antes' && n[i + 1] === 'de' && n[i + 2] === 'ayer') { fecha = U.sumarDias(hoy, -2); usados.push(i, i + 1, i + 2); hallada = true; }
-      else if (n[i] === 'hace' && toks[i + 1] && toks[i + 1].num != null && /^dias?$/.test(n[i + 2] || '')) { fecha = U.sumarDias(hoy, -toks[i + 1].num); usados.push(i, i + 1, i + 2); hallada = true; }
+      else if (n[i] === 'hace' && (toks[i + 1] && (toks[i + 1].num != null || /^(un|una)$/.test(n[i + 1]) || (n[i + 1] === 'un' && n[i + 2] === 'par'))) && (/^(dias?|semanas?|meses|mes|anos?)$/.test(n[i + 2] || '') || (n[i + 2] === 'par' && n[i + 3] === 'de' && /^(dias|semanas|meses)$/.test(n[i + 4] || '')))) {
+        // «hace 3 días», «hace una semana», «hace dos meses», «hace un par de días»
+        const par = n[i + 2] === 'par'; const k = par ? 2 : (toks[i + 1].num != null ? toks[i + 1].num : 1); const unidad = par ? n[i + 4] : n[i + 2];
+        fecha = /^dias?$/.test(unidad) ? U.sumarDias(hoy, -k) : /^semanas?$/.test(unidad) ? U.sumarDias(hoy, -7 * k) : /^(meses|mes)$/.test(unidad) ? U.sumarMeses(hoy, -k) : U.sumarMeses(hoy, -12 * k);
+        const fin = par ? i + 4 : i + 2; for (let j = i; j <= fin; j++) usados.push(j); hallada = true;
+      }
       else if (DIAS_N.includes(n[i]) && (n[i - 1] === 'el' || n[i - 1] === 'este' || n[i - 1] === 'del')) {
         // el último <día> que ya pasó (o hoy si coincide)
         const objetivo = DIAS_N.indexOf(n[i]);
+        const pasado = n[i + 1] === 'pasado' || n[i + 1] === 'anterior'; // «el martes pasado» dicho un martes = hace 7 días
         let f = hoy;
         for (let k = 0; k < 7; k++) { if (U.deISO(f).getDay() === objetivo) break; f = U.sumarDias(f, -1); }
-        if (U.deISO(hoy).getDay() === objetivo && n[i - 1] !== 'este') f = hoy;
-        fecha = f; usados.push(i - 1, i); hallada = true;
+        if (U.deISO(hoy).getDay() === objetivo && n[i - 1] !== 'este') f = pasado ? U.sumarDias(hoy, -7) : hoy;
+        fecha = f; usados.push(i - 1, i); if (pasado) usados.push(i + 1); hallada = true;
       } else if (toks[i].num != null && n[i + 1] === 'de' && MESES_N.includes(n[i + 2]) && Number.isInteger(toks[i].num) && toks[i].num >= 1 && toks[i].num <= 31) {
         const mes = MESES_N.indexOf(n[i + 2]) + 1;
         let anio = Number(hoy.slice(0, 4));
@@ -946,14 +966,21 @@
     const marca = (re) => { const m = t.match(re); return m; };
     let clave = null, desde, hasta, etiqueta;
     if (/\bhoy\b/.test(t)) { clave = 'hoy'; desde = hasta = hoy; etiqueta = 'hoy'; }
+    else if (/\b(anteayer|antier|antiayer|antes de ayer)\b/.test(t)) { clave = 'anteayer'; desde = hasta = U.sumarDias(hoy, -2); etiqueta = 'anteayer'; }
     else if (/\bayer\b/.test(t)) { clave = 'ayer'; desde = hasta = U.sumarDias(hoy, -1); etiqueta = 'ayer'; }
-    else if (/semana pasada/.test(t)) { clave = 'semana_pasada'; desde = U.sumarDias(U.inicioSemana(hoy), -7); hasta = U.sumarDias(desde, 6); etiqueta = 'la semana pasada'; }
+    else if (/semana (pasada|anterior)/.test(t)) { clave = 'semana_pasada'; desde = U.sumarDias(U.inicioSemana(hoy), -7); hasta = U.sumarDias(desde, 6); etiqueta = 'la semana pasada'; }
     else if (/\bsemana\b/.test(t)) { clave = 'semana'; desde = U.inicioSemana(hoy); hasta = hoy; etiqueta = 'esta semana'; }
     else if (/mes pasado|mes anterior|ultimo mes/.test(t)) { const a = U.sumarMeses(U.inicioMes(hoy), -1); clave = 'mes_pasado'; desde = a; hasta = U.finMes(a); etiqueta = 'el mes pasado'; }
     else if (/ano pasado|ano anterior/.test(t)) { const y = Number(hoy.slice(0, 4)) - 1; clave = 'anio_pasado'; desde = y + '-01-01'; hasta = y + '-12-31'; etiqueta = 'el año pasado'; }
     else if (/\b(este|en el|del) ano\b|\ben el ano\b|\bdel ano\b/.test(t)) { clave = 'anio'; desde = U.inicioAnio(hoy); hasta = hoy; etiqueta = 'este año'; }
-    else if (/ultimos? (\d+) dias/.test(t)) { const k = Number(t.match(/ultimos? (\d+) dias/)[1]); clave = 'dias'; desde = U.sumarDias(hoy, -(k - 1)); hasta = hoy; etiqueta = 'los últimos ' + k + ' días'; }
-    else if (/acumulado|en total|desde siempre|siempre|historico|todo/.test(t)) { clave = 'todo'; desde = '0000-01-01'; hasta = '9999-12-31'; etiqueta = 'en total'; }
+    else if (/ultim[oa]s? (\d+) (dias|semanas|meses)/.test(t)) {
+      const mm = t.match(/ultim[oa]s? (\d+) (dias|semanas|meses)/); const k = Number(mm[1]);
+      clave = 'dias'; hasta = hoy;
+      if (mm[2] === 'dias') { desde = U.sumarDias(hoy, -(k - 1)); etiqueta = 'los últimos ' + k + ' días'; }
+      else if (mm[2] === 'semanas') { desde = U.sumarDias(hoy, -(k * 7 - 1)); etiqueta = 'las últimas ' + k + ' semanas'; }
+      else { desde = U.sumarDias(U.sumarMeses(hoy, -k), 1); etiqueta = 'los últimos ' + k + (k === 1 ? ' mes' : ' meses'); }
+    }
+    else if (/acumulado|en total|desde siempre|siempre|historico|todo/.test(t) && !/\b(mes|semana|ano|hoy|ayer)\b/.test(t) && !MESES_N.some((mm) => new RegExp('\\b' + mm + '\\b').test(t))) { clave = 'todo'; desde = '0000-01-01'; hasta = '9999-12-31'; etiqueta = 'en total'; }
     else {
       const mi = MESES_N.findIndex((mm) => new RegExp('\\b' + mm + '\\b').test(t));
       if (mi >= 0) {
@@ -961,7 +988,7 @@
         desde = y + '-' + U.pad(mi + 1) + '-01'; hasta = U.finMes(desde); clave = 'mes_nombre'; etiqueta = 'en ' + MESES_N[mi];
       } else { clave = 'mes'; desde = U.inicioMes(hoy); hasta = U.finMes(hoy); etiqueta = 'este mes'; }
     }
-    n.forEach((w, i) => { if (/^(hoy|ayer|semana|mes|ano|pasada|pasado|este|esta|acumulado|total|ultimos|ultimo|dias)$/.test(w) || MESES_N.includes(w)) usados.push(i); });
+    n.forEach((w, i) => { if (/^(hoy|ayer|anteayer|antier|antes|semana|semanas|mes|meses|ano|pasada|pasado|este|esta|acumulado|total|ultimos|ultimas|ultimo|ultima|dias)$/.test(w) || MESES_N.includes(w) || (toks[i].num != null && /^ultim/.test(n[i - 1] || '') && /^(dias|semanas|meses)$/.test(n[i + 1] || ''))) usados.push(i); });
     return { clave, desde, hasta, etiqueta, usados };
   }
 
@@ -970,7 +997,9 @@
 
   function detectarCorreccion(toks, n, txt, ctx) {
     const primeras = n.slice(0, 3);
-    const abre = primeras.some((w) => V_CORREGIR.has(w)) || /^(no era|era un|era una|es un|es una|fue un|fue una)\b/.test(txt) || /^deshaz/.test(txt)
+    const sinVerboDeRegistro = !n.some((w) => V_GASTO.has(w) || V_INGRESO.has(w)) && n.length <= 9;
+    const eraMonto = sinVerboDeRegistro && n.some((w, i) => i >= 1 && (w === 'era' || w === 'eran') && ((toks[i + 1] && toks[i + 1].num != null) || (n[i + 1] === 'de' && toks[i + 2] && toks[i + 2].num != null)));
+    const abre = eraMonto || primeras.some((w) => V_CORREGIR.has(w)) || /^(vuelve atras|regresa|retrocede|deja como estaba)\b/.test(txt) || /^(no era|era un|era una|es un|es una|fue un|fue una)\b/.test(txt) || /^deshaz/.test(txt)
       || /^(no,? )?(era|eran|fue|fueron)\b/.test(txt) || /^(el|la) (ultimo|ultima|anterior)\b(?! (mes|ano|semana|dia))/.test(txt) || /^(ese|esa|eso)\b/.test(txt) || /^me equivoque\b/.test(txt);
     if (!abre) return null;
     // "pon" también aparece en "ponme un límite": eso es presupuesto
@@ -978,14 +1007,19 @@
     // "mejor" solo cuenta si pide cambiar algo
     if (n[0] === 'mejor' && !/\b(a|en|como)\b/.test(txt)) return null;
     const accion = {};
+    let piv = null;
     if (n.some((w) => V_BORRAR.has(w))) accion.accion = 'borrar';
     else if (/\bdesha[cz]/.test(txt) || /vuelve atras|deja como estaba/.test(txt)) accion.accion = 'deshacer';
     else {
-      const cant = toks.find((t) => t.num != null);
+      piv = partirCorreccion(toks, n, ctx);
+      const cant = piv ? piv.cant : toks.find((t) => t.num != null);
       const quiereTipoIngreso = /\b(ingreso|ganancia)\b/.test(txt) && !/\bgasto\b/.test(txt.replace(/era (un )?gasto/, ''));
       const quiereTipoGasto = /\bgasto\b/.test(txt) && !/\bingreso\b/.test(txt);
       if (/\bnecesari[oa]\b/.test(txt)) { accion.accion = 'necesidad'; accion.nec = 'N'; }
       else if (/\b(gusto|capricho|lujo)\b/.test(txt)) { accion.accion = 'necesidad'; accion.nec = 'G'; }
+      else if (piv && piv.valor === 'monto') { accion.accion = 'monto'; accion.monto = piv.cant.num; }
+      else if (piv && piv.valor === 'categoria') { accion.accion = 'categoria'; accion.cat = piv.cat.id; accion.catNombre = piv.cat.nombre; }
+      else if (piv && piv.valor === 'tipo') { accion.accion = 'tipo'; accion.nuevoTipo = piv.nuevoTipo; }
       else if (cant && !/\b(a|en|de|como|era)\s+(la |el )?(salud|comida|transporte)/.test(txt) && cant.num != null && /\b(monto|valor|precio|a|por|eran|fue|fueron|era)\b/.test(txt) && !tieneCategoriaPalabra(n, ctx)) {
         accion.accion = 'monto'; accion.monto = cant.num;
       } else {
@@ -1001,12 +1035,38 @@
     }
     // ¿a cuál movimiento se refiere? por defecto, el último
     const objetivo = { cual: 'ultimo' };
-    const dicho = n.filter((w) => !V_CORREGIR.has(w) && !PARADA.has(w) && !/^(ultimo|ultima|anterior|gasto|ingreso|movimiento|registro|categoria|lo|eso|esto|a|en|como|era|monto|valor|precio)$/.test(w) && !/^\d/.test(w));
-    if (accion.accion === 'borrar' || accion.accion === 'monto' || accion.accion === 'necesidad' || accion.accion === 'tipo') {
+    const SOBRA = /^(ultimo|ultima|anterior|gasto|ingreso|movimiento|registro|categoria|lo|eso|esto|ese|esa|a|en|como|era|eran|fue|fueron|monto|valor|precio|no|del|pago|compra)$/;
+    // Si se separó «lo que se nombra» de «el valor nuevo», solo la parte nombrada dice cuál movimiento es.
+    const nombrado = piv ? piv.izq : n.filter((w, i) => toks[i].num == null);
+    const dicho = nombrado.filter((w) => !V_CORREGIR.has(w) && !PARADA.has(w) && !SOBRA.test(w) && !/^\d/.test(w));
+    if (dicho.length && !(accion.accion === 'categoria' && !piv)) {
       const c = clasificar(dicho, dicho.map((_, i) => i), null, ctx);
       if (c.cat) objetivo.cat = c.cat.id;
+      if (accion.accion !== 'deshacer') objetivo.palabras = dicho;
     }
     return Object.assign({ tipo: 'corregir', objetivo }, accion);
+  }
+  /* «cambia el almuerzo a 5», «el taxi era de transporte», «no era comida, era salud»:
+     separa lo que se NOMBRA (izquierda) del valor NUEVO (derecha), buscando el último «a / en / como / por / era» que
+     tenga un valor después. Así «almuerzo» (cuál movimiento) no se confunde con la categoría nueva ni con el monto. */
+  const PIVOTES = set('a en como por era eran fue fueron');
+  function partirCorreccion(toks, n, ctx) {
+    for (let p = n.length - 1; p >= 1; p--) {
+      if (!PIVOTES.has(n[p])) continue;
+      const der = n.slice(p + 1), izq = n.slice(0, p);
+      if (!der.length) continue;
+      const cant = toks.slice(p + 1).find((t) => t.num != null);
+      if (cant) return { izq, der, cant, valor: 'monto' };
+      // se recortan las palabras de enlace de los bordes, pero las de adentro se conservan («cosas de la casa»)
+      const borde = (w) => PARADA.has(w) || V_CORREGIR.has(w) || /^(categoria|gasto|ingreso)$/.test(w);
+      let a0 = 0, b0 = der.length; while (a0 < b0 && borde(der[a0])) a0++; while (b0 > a0 && borde(der[b0 - 1])) b0--;
+      const rest = der.slice(a0, b0);
+      const c = rest.length ? clasificar(rest, rest.map((_, i) => i), null, ctx) : { cat: null };
+      if (c.cat) return { izq, der, cat: c.cat, valor: 'categoria' };
+      if (der.includes('ingreso') || der.includes('ganancia')) return { izq, der, valor: 'tipo', nuevoTipo: 'ingreso' };
+      if (der.includes('gasto')) return { izq, der, valor: 'tipo', nuevoTipo: 'gasto' };
+    }
+    return null;
   }
   function tieneCategoriaPalabra(n, ctx) {
     const rest = n.filter((w) => !V_CORREGIR.has(w) && !PARADA.has(w));
@@ -1029,10 +1089,41 @@
     return { tipo: 'informe', formato: /\bpdf\b/.test(txt) ? 'pdf' : /\b(excel|xlsx)\b/.test(txt) ? 'excel' : /\bcsv\b/.test(txt) ? 'csv' : 'pantalla' };
   }
 
+  // «qué tarjeta pago primero», «plan de mi cobro», «fondo de emergencia», «ahorro automático»: abre esa pantalla (sin montos: con un monto es otra cosa, como «metí 50 al fondo»)
+  const RE_PANTALLAS = [
+    ['deudas', /\b(?:que|cual) (?:tarjeta|deuda|tarjetas|deudas)(?: de las mias)? (?:pago|debo pagar|conviene pagar|me conviene pagar|deberia pagar|pagar) primero\b|\b(?:plan|estrategia|orden) (?:para|de) (?:pagar|salir de|acabar con) (?:mis |las |todas mis )?(?:deudas?|tarjetas?)\b|\bcomo (?:pago|pagar|salgo de|acabo con|termino con) (?:mis |las |todas mis )?(?:deudas|tarjetas)(?: mas rapido| primero)?\b|\b(?:bola de nieve|avalancha)\b|\bsalir de (?:mis )?deudas\b|\bpagar (?:mis )?(?:deudas|tarjetas) mas rapido\b/],
+    ['cobro', /\bplan (?:de|del|para) (?:mi |el |tu )?(?:cobro|sueldo|salario|quincena)\b|\b(?:como|donde|en que) (?:reparto|distribuyo|divido|organizo|aparto) (?:mi |el )?(?:cobro|sueldo|salario|quincena)\b|\b(?:reparte|distribuye|divide|organiza)(?:me)? (?:mi |el )?(?:cobro|sueldo|salario|quincena)\b|\bque hago con (?:mi |el )?(?:cobro|sueldo|salario|quincena)\b|\brepartir (?:mi |el )?(?:cobro|sueldo|salario|quincena)\b/],
+    ['fondo', /\bfondo de emergencias?\b|\bcolchon (?:de|para) emergencias?\b|\bcuanto (?:necesito|debo|deberia|tendria que) (?:tener )?(?:ahorrado )?(?:para|de|en) emergencias?\b/],
+    ['auto', /\bahorro automatico\b|\bahorrar automaticamente\b|\bredondear (?:mis |las )?compras\b|\bredondeo de compras\b|\bapartar (?:un )?porcentaje\b/],
+  ];
+  function detectarPantalla(toks, n, txt) {
+    if (toks.some((t, i) => t.num != null && !numeroDePeriodo(toks, n, i))) return null;
+    if (/\b(?:pague|pagamos|pagaron|compre|gaste|meti|puse|ahorre|cobre|me pagaron|abone|deposite)\b/.test(txt)) return null;     // eso es registrar, no abrir una pantalla
+    for (const [pantalla, re] of RE_PANTALLAS) if (re.test(txt)) return { tipo: 'pantalla', pantalla };
+    return null;
+  }
+
+  // ¿El número i es parte de un periodo/fecha («últimos 7 días», «hace 3 días», «el 5 de noviembre») y no un monto?
+  function numeroDePeriodo(toks, n, i) {
+    if (toks[i].num == null) return false;
+    const sig = n[i + 1] || '', ant = n[i - 1] || '';
+    if (/^(dias?|semanas?|meses|mes|anos?)$/.test(sig) && /^(ultimos?|ultimas?|hace|proximos?|siguientes?|de|en|por|los|las)$/.test(ant)) return true;
+    if (sig === 'de' && MESES_N.includes(n[i + 2] || '')) return true;
+    return false;
+  }
+  // Palabras como «comida» sirven a varias categorías por igual (comida del hogar y comida fuera): al PREGUNTAR se suman todas.
+  function categoriasHermanas(c, tipo, ctx) {
+    if (!c || !c.cat || c.aprendido || !c.palabra) return [];
+    const hits = (indice(ctx.categorias).get(c.palabra) || []).filter((h) => (!tipo || h.cat.tipo === tipo) && h.peso === (indice(ctx.categorias).get(c.palabra).find((x) => x.cat.id === c.cat.id) || {}).peso);
+    return hits.length > 1 ? hits.map((h) => h.cat) : [];
+  }
   function detectarPregunta(toks, n, txt, ctx) {
-    const abre = OPENER_PREGUNTA.has(n[0]) || (n[0] === 'en' && n[1] === 'que') || /^(como voy|como estoy|como me va|a cuanto|me queda|me alcanza|me conviene|que tal)/.test(txt) || /^(por favor |oye |dime |asistente )+(cuanto|cual|como|en que)/.test(txt);
+    const hayMontoReal = toks.some((t, i) => t.num != null && !numeroDePeriodo(toks, n, i));
+    if (/^(tengo|tenemos|debo|debemos|necesito|me toca|nos toca) (que )?(pagar|comprar|gastar|abonar|depositar|cancelar)\b/.test(txt) && !/\?/.test(txt) && hayMontoReal) return null;
+    const sustantivoAbre = !hayMontoReal && /^(mis |mi |el |la |los |las |un |una )?(gastos?|ingresos?|balance|resumen|detalle|total|desglose|egresos?|ahorros?)\b/.test(txt);
+    const abre = sustantivoAbre || OPENER_PREGUNTA.has(n[0]) || (n[0] === 'en' && n[1] === 'que') || /\b(me alcanza|me conviene|conviene comprar|vale la pena|puedo comprar|podria comprar)\b/.test(txt) || /^(como (puedo|podria|hago para|ahorro|le hago|logro|debo)|que me recomiendas|dame (un )?consejos?)\b/.test(txt) || /^(como voy|como estoy|como me va|a cuanto|me queda|me alcanza|me conviene|que tal)/.test(txt) || /^(por favor |oye |dime |asistente )+(cuanto|cual|como|en que)/.test(txt);
     const signo = /\?\s*$/.test(txt) || /^[¿]/.test(txt);
-    const hayMonto = toks.some((t) => t.num != null);
+    const hayMonto = hayMontoReal;
     // Una palabra de pregunta en cualquier parte («dime cuándo…», «…cuánto me falta») sin un monto que registrar: es pregunta.
     const interrogativaDentro = n.some((w) => INTERROGATIVAS.has(w)) || /\b(cada que tiempo|cada cuanto|me toca pagar|me falta|me faltan|consejo|consejos|innecesari|que gastos|que debo hacer)\b/.test(txt);
     if (!abre && !signo && !(interrogativaDentro && !hayMonto)) return null;
@@ -1047,16 +1138,17 @@
     q.sinTarjeta = /\b(sin (contar|hacer cuenta|incluir|tomar en cuenta|considerar|sumar)( de| con| a)?|aparte de|menos|excepto|fuera de|quitando) (la |mi |las |mis |el |los )?(tarjeta|tarjetas|credito)/.test(txt);
     q.cuando = /\b(cuando|que dia|en que fecha|fecha|fechas)\b/.test(txt);
     const hayTarjeta = /\b(tarjeta|tarjetas|visa|mastercard|diners|amex)\b/.test(txt);
-    const hablaDeCuotas = /\b(cuota|cuotas|me falta|me faltan|falta por pagar|cada que tiempo|cada cuanto|me toca pagar|toca pagar|cuantas cuotas|cuanto me falta|me toca (el |mi |la )?pago|toca el pago|el pago de|pago del|pago de la|pago de mi|cuando (lo |la )?pago|proximo pago|siguiente pago|cuando (me )?toca|cuando vence|cuando se paga|cuando pago)\b/.test(txt);
+    const hablaDeCuotas = !/\bme falta para (el |mi )?(cobro|sueldo|cobrar|fin de mes|quincena|que cobre|el pago de mi sueldo)/.test(txt) && /\b(cuota|cuotas|termino de pagar|terminar de pagar|acabo de pagar|cuanto debo (de|del)|me falta|me faltan|falta por pagar|cada que tiempo|cada cuanto|me toca pagar|toca pagar|cuantas cuotas|cuanto me falta|me toca (el |mi |la )?pago|toca el pago|el pago de|pago del|pago de la|pago de mi|pago de|cuando (lo |la )?pago|proximo pago|siguiente pago|cuando (me )?toca|cuando vence|cuando se paga|cuando pago)\b/.test(txt);
     // tema
-    if (/\b(puedo gastar|puedes gastar|me queda|cuanto me queda|cuanto tengo|tengo disponible|disponible|me alcanza para hoy|libre)\b/.test(txt) && !hablaDeCuotas && !hayTarjeta) q.tema = 'disponible';
+    if (/\b(puedo gastar|puedes gastar|me queda|cuanto me queda|cuanto tengo|tengo disponible|disponible|me alcanza para hoy|libre|me falta para (el |mi )?(cobro|sueldo|cobrar|fin de mes|quincena))\b/.test(txt) && !hablaDeCuotas && !hayTarjeta) q.tema = 'disponible';
     else if (/\b(me conviene|conviene comprar|vale la pena)\b/.test(txt) || (/\b(me alcanza|puedo comprar|podria comprar|puedo pagar)\b/.test(txt) && cant)) { q.tema = 'meconviene'; q.monto = cant ? cant.num : null; }
-    else if (/innecesari|no (era|eran|es|son|fue|fueron) necesari|que no (era|eran) necesari|caprichos?\b|compulsiv|superflu|\bde mas\b|\bgustos\b|\bantojos\b/.test(txt) && !/\bhormiga\b/.test(txt)) q.tema = 'innecesarios';
+    else if (/innecesari|no (era|eran|es|son|fue|fueron) necesari|que no (era|eran) necesari|caprichos?\b|compulsiv|superflu|\bde mas\b|\bgustos\b|(?<!\b(?:en|de|y|e) )\bantojos\b/.test(txt) && !/\bhormiga\b/.test(txt)) q.tema = 'innecesarios';
     else if (/\b(consejo|consejos|recomendacion|recomiendas|recomendarias|que debo hacer|que hago para|como ahorro|como puedo ahorrar|ayudame a ahorrar|para evitar|evitar esos gastos|en que puedo recortar|que puedo recortar)\b/.test(txt)) q.tema = 'consejo';
     else if (hablaDeCuotas && !q.sinTarjeta) {
       // ¿pregunta por una compra concreta? («la cuota del playstation», «los pantalones», «la ropa que me compré»)
       const quitar = /^(cuanto|cuanta|cuantas|cuantos|cuando|dime|dame|de|del|la|el|los|las|mi|mis|es|son|cuota|cuotas|me|toca|tocan|pagar|pago|pagos|paga|debo|tengo|que|cada|tiempo|falta|faltan|por|y|con|compre|compra|compras|hice|he|hecho|tarjeta|tarjetas|credito|visa|mastercard|diners|amex|un|una|unos|unas|al|a|en|ya|aun|todavia|vence|vencen|cuanto|proxima|proximo|siguiente|mes|meses|total|se|lo|le|esa|ese|eso|esta|este|oye|quisiera|saber|quiero|necesito|dia|fecha)$/;
-      const nombre = n.filter((w, i) => toks[i].num == null && !quitar.test(w) && !per.usados.includes(i) && !PARADA.has(w));
+      const palBanco = palabrasBanco(ctx);
+      const nombre = n.filter((w, i) => toks[i].num == null && !quitar.test(w) && !per.usados.includes(i) && !PARADA.has(w) && !palBanco.has(w) && !/^(banco|bancos|cooperativa|coop|ay|ah|eh|mmm|hmm)$/.test(w));
       if (nombre.length) { q.tema = 'cuota_compra'; q.compra = nombre.join(' '); }
       else { q.tema = 'tarjeta'; q.tarjetaId = tarjetaDeTexto(n, ctx); }
     }
@@ -1065,34 +1157,103 @@
       q.tarjetaId = tarjetaDeTexto(n, ctx);
       q.deuda = /\b(cuanto debo|deuda|saldo|debo en total|debo en la)\b/.test(txt) && !/\bdebo pagar\b/.test(txt);
     }
-    else if (/\b(en que gasto mas|que gasto mas|donde gasto mas|mayor gasto|gasto mas)\b/.test(txt)) q.tema = 'masgasto';
+    else if (/\b(en que|a donde) (es que )?se me (fue|fueron|va|van)\b/.test(txt)) q.tema = 'desglose';
+    else if (/\bcuant[oa]s? (plata |dinero )?se me (fue|fueron|va|van)\b/.test(txt)) q.tema = 'gastos';
+    else if (/\b(en que (?:gasto|gaste|he gastado) mas|en que es que mas (?:gasto|gaste)|en que mas (?:gasto|gaste|he gastado)|que (?:gasto|gaste) mas|que es lo que mas (?:gasto|gaste)|lo que mas (?:gasto|gaste|he gastado)|donde (?:gasto|gaste|he gastado) mas|mayor gasto|gasto mas|gaste mas)\b/.test(txt)) q.tema = 'masgasto';
     else if (/\bhormiga\b/.test(txt)) q.tema = 'hormiga';
     else if (/\b(ahorr)/.test(txt)) q.tema = 'ahorro';
     else if (/\b(necesari|gusto|vanidad|capricho)/.test(txt)) q.tema = 'innecesarios';
-    else if (/\b(ingres\w*|gane|ganado|ganancias?|cobre|cobrado|sueldo|recibi|recibido)\b/.test(txt) && !/\b(gast|desglos)\b/.test(txt)) q.tema = 'ingresos';
-    else if (/\b(gast|desglos|compre|pague|pagado|salio|salieron|egreso|resumen)/.test(txt)) {
+    else if (/\b(ingres\w*|gane|ganado|ganancias?|cobre|cobrado|sueldo|recibi|recibido|me entro|me entraron|me llego|me llegaron|me depositaron|me pagaron|me pagan)\b/.test(txt) && !/\b(gast|desglos)\b/.test(txt)) q.tema = 'ingresos';
+    else if (/\b(gast|desglos|compre|pague|pagado|salio|salieron|egreso)/.test(txt)) {
       q.tema = /desglos|detall|por categoria|en que/.test(txt) ? 'desglose' : 'gastos';
       const rest = []; const restIdx = [];
-      n.forEach((w, i) => { if (!PARADA.has(w) && toks[i].num == null && !per.usados.includes(i) && !/^(cuanto|cuantos|he|has|hemos|tengo|tenido|gastado|gaste|gasto|gastos|pague|pagado|desglosame|desglosa|dime|dame|muestrame|mis|mi|lo|total|en|por|categoria|categorias|resumen|cuenta|hacer|contar|sin|tarjeta|tarjetas|credito|cuando|fue|fecha|dia)$/.test(w)) { rest.push(w); restIdx.push(i); } });
+      const EXCL = /^(cuanto|cuantos|he|has|hemos|tengo|tenido|gastado|gaste|gasto|gastos|pague|pagado|desglosame|desglosa|dime|dame|muestrame|mis|mi|lo|total|en|por|categoria|categorias|resumen|cuenta|hacer|contar|sin|tarjeta|tarjetas|credito|cuando|fue|fecha|dia|detalle|detalles|plata|dinero|llevo|llevado|que|tanto)$/;
+      const util = (i) => toks[i].num == null && !per.usados.includes(i) && !EXCL.test(n[i]);
+      // las palabras de enlace («de la» en «cosas de la casa») se conservan solo si están ENTRE palabras con contenido
+      n.forEach((w, i) => {
+        if (!util(i)) return;
+        if (!PARADA.has(w)) { rest.push(w); restIdx.push(i); return; }
+        let a = i - 1; while (a >= 0 && PARADA.has(n[a]) && util(a)) a--;
+        let b = i + 1; while (b < n.length && PARADA.has(n[b]) && util(b)) b++;
+        if (a >= 0 && b < n.length && util(a) && util(b) && !PARADA.has(n[a]) && !PARADA.has(n[b])) { rest.push(w); restIdx.push(i); }
+      });
+      // «en comida y en transporte», «en ropa y salud»: varias categorías → se suman y se dice cuánto fue de cada una
+      const trozos = []; let ac = [], ai = [];
+      rest.forEach((w, k) => {
+        if (/^(y|e)$/.test(w)) { if (ac.length) trozos.push([ac, ai]); ac = []; ai = []; return; }
+        if (k > 0 && ac.length && n.slice(restIdx[k - 1] + 1, restIdx[k]).some((x) => /^(y|e)$/.test(x))) { trozos.push([ac, ai]); ac = []; ai = []; } // «en comida Y en transporte»
+        ac.push(w); ai.push(restIdx[k]);
+      });
+      if (ac.length) trozos.push([ac, ai]);
+      if (trozos.length >= 2) {
+        const hallados = trozos.map(([w, i]) => clasificar(w, i, 'gasto', ctx)).filter((x) => x.cat && x.cat.id !== 'deudas');
+        const ids = [];
+        hallados.forEach((x) => { [x.cat].concat(categoriasHermanas(x, 'gasto', ctx)).forEach((cc) => { if (cc && cc.id !== 'deudas' && !ids.includes(cc.id)) ids.push(cc.id); }); });
+        const distintas = new Set(hallados.map((x) => x.cat.id));
+        if (hallados.length === trozos.length && distintas.size >= 2) {
+          q.tema = 'gastos'; q.cats = ids; q.cat = ids[0]; q.catNombre = hallados[0].cat.nombre;
+          q.palabra = hallados.map((x) => x.palabra || x.cat.nombre.toLowerCase()).join(' y ');
+          return q;
+        }
+      }
       const c = clasificar(rest, restIdx, 'gasto', ctx);
-      if (c.cat && c.cat.id !== 'deudas') { q.cat = c.cat.id; q.catNombre = c.cat.nombre; q.palabra = c.palabra || c.cat.nombre.toLowerCase(); q.tema = 'gastos'; }
+      if (c.cat && c.cat.id !== 'deudas') {
+        q.cat = c.cat.id; q.catNombre = c.cat.nombre; q.palabra = c.palabra || c.cat.nombre.toLowerCase(); q.tema = 'gastos';
+        // «la luz y el agua»: son varias cosas → se responde con toda la categoría, no solo con la primera palabra
+        if (rest.some((w, k) => /^(y|e)$/.test(w) && k > 0 && k < rest.length - 1)) q.palabra = c.cat.nombre.toLowerCase();
+        const hermanas = categoriasHermanas(c, 'gasto', ctx).filter((x) => x.id !== 'deudas');
+        if (hermanas.length > 1) q.cats = hermanas.map((x) => x.id);
+      } else if (!c.cat) {
+        // Una palabra que la app no conoce («cuánto gasté en zorgblat»): se busca tal cual en lo que la persona anotó
+        // …y solo lo que viene después de «en», «de», «por», «para», «con» («gasté EN zorgblat»), no los verbos o muletillas sueltas
+        const PREP = /^(en|de|del|por|para|con|al|a|pague|gaste|compre|pagado|gastado|pagamos|gastamos|compramos|pago|gasto|compra)$/;
+        const ART = /^(el|la|los|las|un|una|unos|unas|mi|mis|tu|su|este|esta|ese|esa|esos|esas|estos|estas)$/;
+        const buscar = []; let sigue = false;
+        const despuesDePrep = (i) => { let j = i - 1; while (j >= 0 && ART.test(n[j])) j--; return j >= 0 && PREP.test(n[j]); };
+        restIdx.forEach((i, k) => {
+          const w = rest[k];
+          const tras = despuesDePrep(i) || (sigue && restIdx[k - 1] === i - 1) || (sigue && restIdx[k - 1] === i - 2 && PARADA.has(n[i - 1]));
+          sigue = tras && w.length >= 3 && !SIN_BUSCAR.test(w) && !/mente$/.test(w);
+          if (sigue) buscar.push(w);
+        });
+        if (buscar.length) q.buscar = buscar;
+      }
     }
     else if (/\b(como voy|como estoy|resumen|resumeme|balance|como me va)\b/.test(txt)) q.tema = 'balance';
     else q.tema = 'balance';
     return q;
   }
 
-  function tarjetaDeTexto(n, ctx) {
+  // «No gasté nada», «no pagué la luz», «todavía no cobro»: dice que algo NO pasó. Si en la misma frase hay algo que sí pasó («…pero ayer gasté 12»), se anota eso.
+  function esNegacion(txt) {
+    const neg = /\b(?:(?:aun|todavia|ya|nunca|jamas) no|no|nunca|jamas)\s+(?:me\s+)?(?:he\s+|hemos\s+|ha\s+|han\s+|hube\s+|habia\s+)?(?:gasto|compro|pago|gano|recibo|vendo|gaste|gastado|gastamos|gastaron|compre|comprado|compramos|pague|pagado|pagamos|cobre|cobrado|cobramos|cobro|recibi|recibido|gane|ganado|vendi|vendido|pagan|pagaron|pago|depositaron|depositan|depositado|llego|llegado|llegaron|cayo|abone|abonado|invertido|invertir|he gastado)\b/;
+    if (!neg.test(txt)) return false;
+    const clausulas = txt.split(/\b(?:y|e|pero|aunque|sino|ademas|luego|despues|solo|solamente)\b|[,;]/).map((c) => c.trim()).filter(Boolean);
+    const afirma = clausulas.some((c) => !neg.test(c) && /\d/.test(c) && /\b(gaste|gastado|pague|pagado|compre|comprado|cobre|cobrado|recibi|gane|vendi|me pagaron|me depositaron)\b/.test(c));
+    return !afirma;
+  }
+  // «Voy a comprar…», «quiero gastar…», «debo pagar…», «si gastara…»: todavía no pasó
+  const FUTURO = /\b(voy a|vamos a|va a|quiero|quisiera|queremos|pienso|planeo|pensaba|tengo que|tenemos que|debo|debemos|deberia|necesito|me toca|nos toca|si (?:gasto|gastara|compro|comprara|pagara|pagaria|compraria)|cuando (?:cobre|pague|compre|gane|reciba))\b/;
+  // Palabras de relleno que NO son «lo que compró» cuando se pregunta («cuánto gasté en todo este mes»)
+  const SIN_BUSCAR = /^(cuant\w*|sali\w*|gast\w*|pag\w*|llev\w*|cost\w*|hice|hizo|hecho|hicimos|tuve|tuvo|invert\w*|ocup\w*|fueron|fue|fui|todo|toda|todos|todas|general|cosas?|mes|meses|semana|semanas|ano|anos|dia|dias|vida|mas|menos|casi|ya|tambien|entonces|ahora|aqui|alli|asi|mucho|mucha|muchos|poco|poca|pocos|aprox|siempre|nunca|este|esta|esto|ese|esa|eso|cual|cuales|como|donde|quien|pasado|pasada|proximo|proxima|ultimo|ultima|ultimos|ultimas|anterior|actual|hasta|desde|ahorita|nomas|ok|vale|bueno|pues|oye|mira|favor|porfa|gracias|hola|total|totales|gastos|gastar|gastando|dolares|dolar|centavos|asistente|app|aplicacion|mios|mias|mio|mia|nuestro|nuestros|hoy|ayer|manana|semanal|mensual|diario|anual|quincena|quincenal|trimestre|bimestre|semestre|calcula|calcular|suma|sumar|suman|resumen|reporte|informe|revisa|revisar|dime|dame|muestra|muestrame|saber|quiero|necesito|puedes|podrias|podes|favor|haz|hazme|averigua)$/;
+
+  // Puntúa cada tarjeta según las palabras de su banco / nombre / red que aparecen en el texto normalizado n. [{ id, score }] de mayor a menor.
+  function puntuarTarjetas(n, ctx) {
     const tarjetas = ctx.tarjetas || [];
     const bancos = ctx.bancos || [];
-    let mejor = null, sc = 0;
-    tarjetas.forEach((t) => {
+    return tarjetas.map((t) => {
       const b = bancos.find((x) => x.id === t.bancoId);
       const pal = U.norm([t.nombre, t.banco, b && b.nombre, b && b.corto, t.red, t.nivel].filter(Boolean).join(' ')).split(/\s+/).filter((w) => w && !PARADA.has(w) && !/^(tarjeta|banco|cooperativa|credito|de|del|la|el)$/.test(w));
-      const hit = Array.from(new Set(pal)).filter((w) => n.includes(w)).length;
-      if (hit > sc) { sc = hit; mejor = t.id; }
-    });
-    return mejor;
+      const soloRed = new Set(U.norm([t.red, t.nivel].filter(Boolean).join(' ')).split(/\s+/));
+      const propias = new Set(U.norm([t.nombre, t.banco, b && b.nombre, b && b.corto].filter(Boolean).join(' ')).split(/\s+/));
+      // el nombre del banco pesa 1; «visa»/«mastercard» (la red) pesa menos, porque varias tarjetas comparten red
+      const score = Array.from(new Set(pal)).filter((w) => n.includes(w)).reduce((acc, w) => acc + (soloRed.has(w) && !propias.has(w) ? 0.5 : (soloRed.has(w) ? 0.6 : 1)), 0);
+      return { id: t.id, score };
+    }).sort((a, b) => b.score - a.score);
+  }
+  function tarjetaDeTexto(n, ctx) {
+    const r = puntuarTarjetas(n, ctx);
+    return r.length && r[0].score > 0 ? r[0].id : null;     // en empate gana la primera de la lista (igual que antes)
   }
   // Palabras que nombran un banco o cooperativa (del catálogo y de las tarjetas de la persona).
   function palabrasBanco(ctx) {
@@ -1110,6 +1271,8 @@
     const esTarjetaOBanco = (w) => PAL_TARJETA.has(w) || w === 'banco' || bancoPal.has(w);
     const idxs = []; n.forEach((w, i) => { if (esTarjetaOBanco(w)) idxs.push(i); });
     if (!idxs.length) return null;
+    // «pagué el préstamo del banco», «la hipoteca»: es una deuda, no la tarjeta
+    if (!n.some((w) => PAL_TARJETA.has(w)) && /\b(prestamo|prestamos|hipoteca|hipotecario|letra|cuota del)\b/.test(txt)) return null;
     const conTarjeta = idxs.some((i) => { for (let k = 1; k <= 3; k++) { const a = n[i - k]; if (!a) break; if (/^(con|usando|mediante|desde|a traves de)$/.test(a)) return true; if (!/^(la|mi|el|una|un|las|mis|tarjeta|de|del|credito)$/.test(a)) break; } return false; });
     if (conTarjeta) return null;
     // ¿nombra otra cosa comprada? (luz, ropa, mercado…): entonces es una compra, no un pago a la tarjeta
@@ -1171,6 +1334,9 @@
     for (let i = 0; i < toks.length; i++) {
       // cuotas de 49
       if (/^cuotas?$/.test(n[i])) {
+        // «la cuota del préstamo / del carro / de la casa»: es un préstamo, no una compra con tarjeta
+        const sig = n[i + 1] === 'de' || n[i + 1] === 'del' ? (n[i + 2] === 'la' || n[i + 2] === 'el' ? n[i + 3] : n[i + 2]) : null;
+        if (sig && /^(prestamo|prestamos|carro|auto|vehiculo|moto|credito|casa|departamento|hipoteca|hipotecario|cooperativa|colegio|universidad|terreno|lote|negocio|banco|alicuota)$/.test(sig)) continue;
         let j = i + 1;
         if (/^(mensual|mensuales|fijas?)$/.test(n[j] || '')) j++;
         if (n[j] === 'de') j++;
@@ -1210,8 +1376,14 @@
 
     /* ---- tipo (gasto / ingreso) */
     let tipo = null, verboIdx = [];
-    FRASES_INGRESO.forEach((fr) => { const k = txt.indexOf(fr); if (k >= 0 && !tipo) tipo = 'ingreso'; });
-    FRASES_GASTO.forEach((fr) => { const k = txt.indexOf(fr); if (k >= 0 && !tipo) tipo = 'gasto'; });
+    const enTxt = (fr) => (' ' + txt + ' ').includes(' ' + fr + ' ');
+    FRASES_INGRESO.forEach((fr) => { if (!tipo && enTxt(fr)) tipo = 'ingreso'; });
+    FRASES_GASTO.forEach((fr) => {
+      if (tipo || !enTxt(fr)) return;
+      // «me salió un camello y cobré 14»: aquí «me salió» es un trabajo, no un gasto
+      if (fr === 'me salio' && n.some((w) => V_INGRESO.has(w)) && !/\bme salio (en |por |a )?\$?\d/.test(txt)) return;
+      tipo = 'gasto';
+    });
     for (let i = 0; i < n.length; i++) {
       const w = n[i];
       if (!tipo && V_INGRESO.has(w)) { tipo = 'ingreso'; verboIdx.push(i); }
@@ -1221,14 +1393,15 @@
       if (w === 'saque' && /\bsueldo\b/.test(txt)) { tipo = 'ingreso'; verboIdx.push(i); }
     }
     // frases con "me" + verbo: marcar las dos palabras
-    n.forEach((w, i) => { if (w === 'me' && toks[i + 1] && /^(pagaron|depositaron|llego|llegaron|entro|dieron|regalaron|transfirieron|abonaron|cobraron|costo|salio)$/.test(n[i + 1])) { verboIdx.push(i, i + 1); } });
+    n.forEach((w, i) => { if (w === 'me' && toks[i + 1] && /^(pagaron|pago|depositaron|llego|llegaron|entro|entraron|dieron|regalaron|regalo|transfirieron|abonaron|cobraron|cobro|costo|salio|acreditaron|devolvieron|devolvio|mandaron|mando|enviaron|envio|prestaron|presto|reembolsaron|reembolso|compraron|giraron|giro|ingresaron|cayo|cayeron)$/.test(n[i + 1])) { verboIdx.push(i, i + 1); } });
     let tipoDuda = false;
+    if (!tipo && usaTarjeta) tipo = 'gasto'; // «saqué un celular a 12 meses con la tarjeta»: comprar a crédito es un gasto
     if (!tipo) {
       // sin verbo: ¿hay palabras de ingreso (sueldo, propina, venta)?
       const rest = n.filter((w, i) => !PARADA.has(w) && toks[i].num == null);
       const ci = clasificar(rest, rest.map((_, i) => i), 'ingreso', ctx);
       const cg = clasificar(rest, rest.map((_, i) => i), 'gasto', ctx);
-      if (ci.cat && ci.score > (cg.score || 0)) tipo = 'ingreso';
+      if (ci.cat && (ci.score > (cg.score || 0) || (/\bpropinas?\b/.test(txt) && ci.score >= (cg.score || 0)))) tipo = 'ingreso'; // «propina 5» sin verbo = la recibió (si la dio, dice «le di / dejé»)
       else { tipo = 'gasto'; if (n.includes('saque')) tipoDuda = true; }
     }
     marcar(verboIdx, 'tipo');
@@ -1237,7 +1410,7 @@
     const hayMarca = (i) => (toks[i].n.startsWith('$') || toks[i].n.endsWith('$') || /(usd|dolares|dolar)$/.test(toks[i].n) || (n[i + 1] && MONEDAS.has(n[i + 1])) || (n[i - 1] && n[i - 1] === '$'));
     let cands = [];
     const CANTIDAD = /^(amigos|amigas|personas|persona|gente|ninos|ninas|companeros|invitados|veces|vez|horas|hora|dias|kilos|kilo|libras|libra|litros|litro|galones|galon|unidades|metros)$/;
-    toks.forEach((t, i) => { if (t.num != null && !consumidos.has(i) && !/%$/.test(t.n) && !CANTIDAD.test(n[i + 1] || '')) cands.push(i); });
+    toks.forEach((t, i) => { if (t.num != null && t.num > 0 && !consumidos.has(i) && !/%$/.test(t.n) && !CANTIDAD.test(n[i + 1] || '')) cands.push(i); });
     const puntaje = (i) => {
       let s = 0;
       if (hayMarca(i)) s += 5;
@@ -1313,9 +1486,14 @@
         if (hayMedida && !c.aprendido && (catId === 'comida_fuera' || catId === 'antojos')) catId = 'comida_hogar';
       } else if (tipoItem === 'ingreso') {
         // «me pagaron 800», «cobré», «me depositaron» sin más = el sueldo (es lo normal). Regalos, ventas, premios tienen sus palabras.
-        const sueldoLike = /\b(me pagaron|me pago|me depositaron|me deposito|cobre|cobramos|me cayo|ya me pagaron|me transfirieron|recibi mi pago|me llego el pago|pago de mi trabajo)\b/.test(txt);
-        const ventaLike = /\b(vendi|vendimos|venta|vendido)\b/.test(txt) && ctx.categorias.some((c) => c.id === 'ventas');
-        catId = sueldoLike ? 'sueldo' : ventaLike ? 'ventas' : 'extra'; conf = sueldoLike || ventaLike ? 'alta' : 'media';
+        const sueldoLike = /\b(me pagaron|me pago|me depositaron|me deposito|cobre|cobramos|me cayo|ya me pagaron|me transfirieron|recibi mi pago|me llego el pago|pago de mi trabajo|me acreditaron|me ingresaron)\b/.test(txt);
+        const ventaLike = /\b(vendi|vendimos|venta|vendido|me compraron)\b/.test(txt) && ctx.categorias.some((c) => c.id === 'ventas');
+        // «me regalaron», «me devolvieron», «me mandó mi hermano», «lo que me debían»: dinero que llega, no sueldo
+        const llegaLike = /\b(me regalaron|me regalo|me devolvieron|me devolvio|me mandaron|me mando|me enviaron|me envio|me prestaron|me presto|me reembolsaron|me reembolso|me giraron|me giro|lo que me deb\w+)\b/.test(txt);
+        // «me pagaron 40 por unas clases» = un trabajo aparte, no el sueldo (salvo «por el mes», «por la quincena»…)
+        const porAlgo = sueldoLike && /\bpor (?!(el |la |este |ese |mi |todo |todo el )?(mes|quincena|semana|trabajo|sueldo|rol|nomina|salario|jornada|dia|octubre|noviembre|septiembre|agosto|diciembre)\b)\w+/.test(txt);
+        catId = ventaLike ? 'ventas' : llegaLike ? 'otros_ingresos' : porAlgo ? 'extra' : sueldoLike ? 'sueldo' : 'extra'; conf = ventaLike || llegaLike || sueldoLike ? 'alta' : 'media';
+        if (!ctx.categorias.some((c) => c.id === catId)) catId = 'extra';
       } else if (hayMedida) {
         catId = 'comida_hogar'; conf = 'alta';
       } else { catId = 'otros'; conf = 'ninguna'; }
@@ -1350,6 +1528,7 @@
       if (cat && cat.montoMax && tipoItem === 'gasto' && Number.isInteger(item.monto) && item.monto > cat.montoMax * 2 && item.monto / 100 >= 0.5 && item.monto / 100 <= cat.montoMax && !toks[elegido].n.includes(',') && !toks[elegido].n.includes('.')) {
         item.dudaMonto = [U.r2(item.monto / 100), item.monto];
       }
+      if (tipoItem === 'gasto' && FUTURO.test(txt)) item.futuro = true;
       items.push(item);
     });
 
@@ -1386,30 +1565,44 @@
   /* ---------------------------------------------------------------------- Principal */
   function interpretar(texto, ctx) {
     ctx = Object.assign({ hoy: U.hoyISO(), categorias: AF.PLAN.categorias, dicc: {}, tarjetas: [] }, ctx || {});
-    const crudo = String(texto || '').trim();
+    const crudo = String(texto || '').slice(0, 3000).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(); // sin etiquetas (<b>pan</b>); nadie dicta más de 3.000 letras
     if (!crudo) return { tipo: 'desconocido', texto: '' };
     const depurado = depurar(U.norm(crudo).replace(/[¿?¡!]/g, ' ').replace(/\s+/g, ' ')) || crudo;
     const toks = tokenizar(depurado === U.norm(crudo).replace(/[¿?¡!]/g, ' ').replace(/\s+/g, ' ').trim() ? crudo : depurado + (/\?\s*$/.test(crudo) ? '?' : ''));
     const n = toks.map((t) => t.n);
     const txt = n.join(' ');
-    if (/^(ayuda|que puedes hacer|como funciona|que haces)\b/.test(txt)) return { tipo: 'ayuda', texto: txt };
+    if (/^(ayuda|que puedes hacer|como funciona|que haces)\b/.test(txt) && !toks.some((t) => t.num != null)) return { tipo: 'ayuda', texto: txt };
 
     const cor = detectarCorreccion(toks, n, txt, ctx);
     if (cor) return Object.assign(cor, { texto: txt, partes: partes(toks, new Array(toks.length).fill('')) });
     const pre = detectarPresupuesto(toks, n, txt, ctx);
     if (pre) return Object.assign(pre, { texto: txt });
+    const pan = detectarPantalla(toks, n, txt);
+    if (pan) return Object.assign(pan, { texto: txt });
     const inf = detectarInforme(n, txt);
     if (inf) return Object.assign(inf, { texto: txt, periodo: leerPeriodo(toks, ctx.hoy) });
+    // «cuánto gasté en comida y cuánto gané este mes»: dos preguntas en una frase → se contestan las dos
+    const dos = txt.length > 300 ? null : /^(.+?) (?:y|e|ademas) ((?:cuanto|cuanta|cuantos|cuantas|cual|cuales|en que|dime|dame|como voy|como estoy)\b.*)$/.exec(txt);
+    if (dos && /^(cuanto|cuanta|cuantos|cuantas|cual|cuales|en que|dime|dame|mis |mi )/.test(dos[1]) && !toks.some((t, i) => t.num != null && !numeroDePeriodo(toks, n, i))) {
+      const q1 = interpretar(dos[1], ctx), q2 = interpretar(dos[2], ctx);
+      if (q1.tipo === 'preguntar' && q2.tipo === 'preguntar' && q1.tema !== 'varias' && q2.tema !== 'varias') {
+        const explicito = (q) => q.periodo && q.periodo.usados && q.periodo.usados.length;
+        if (!explicito(q1) && explicito(q2)) q1.periodo = q2.periodo; else if (!explicito(q2) && explicito(q1)) q2.periodo = q1.periodo;
+        return { tipo: 'preguntar', tema: 'varias', varias: [q1, q2], periodo: q2.periodo, texto: txt };
+      }
+    }
     const preg = detectarPregunta(toks, n, txt, ctx);
     if (preg) return preg;
+    // «no gasté nada hoy», «aún no me pagan el sueldo»: no hay nada que anotar
+    if (esNegacion(txt)) return { tipo: 'nada', texto: txt };
 
-    const hayNumero = toks.some((t) => t.num != null);
-    const hayVerbo = n.some((w) => V_GASTO.has(w) || V_INGRESO.has(w)) || FRASES_INGRESO.concat(FRASES_GASTO).some((fr) => txt.includes(fr));
+    const hayNumero = toks.some((t, i) => t.num != null && !numeroDePeriodo(toks, n, i));
+    const hayVerbo = n.some((w) => V_GASTO.has(w) || V_INGRESO.has(w)) || FRASES_INGRESO.concat(FRASES_GASTO).some((fr) => (' ' + txt + ' ').includes(' ' + fr + ' '));
     if (hayNumero || hayVerbo) return interpretarRegistro(toks, n, txt, ctx);
     return { tipo: 'desconocido', texto: txt, partes: partes(toks, new Array(toks.length).fill('')) };
   }
 
-  AF.parser = { interpretar, tokenizar, clasificar, leerPeriodo, leerFecha, depurar, detectarPagoTarjeta };
+  AF.parser = { interpretar, tokenizar, clasificar, leerPeriodo, leerFecha, depurar, detectarPagoTarjeta, puntuarTarjetas, tarjetaDeTexto };
   if (typeof module === 'object' && module.exports) module.exports = AF.parser;
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
@@ -2919,6 +3112,8 @@
   //   − pagos fijos que aún no pagas           − cuotas de tarjeta que vencen antes del cobro (apartadas)
   //   − lo que apartas para metas
   // Las compras con tarjeta no salen de tu bolsillo hoy: se apartan sus cuotas. Si la tarjeta no tiene fechas, la compra cuenta como gasto de una vez.
+  // Aportes de una meta: los que anotó la persona + los que se apartan solos (AF.ahorro, si está cargado)
+  const aportesDe = (d, mt) => (AF.ahorro ? AF.ahorro.aportesDe(d, mt) : (mt.aportes || []));
   function puedesGastarHoy(d, hoy) {
     const cic = ciclo(d, hoy);
     let ingresos = 0, estimado = false;
@@ -2935,14 +3130,18 @@
     });
     const fijos = fijosPendientes(d, cic, hoy);
     let cuotas = 0, metas = 0;
+    const cuotasLista = [], metasLista = [];
     (d.tarjetas || []).forEach((t) => {
       if (!tarjetasConFechas.has(t.id)) return;
       const e = AF.tarjetas.estado(t, d.movs, hoy);
-      e.pendientes.forEach((q) => { if (q.vence < cic.proximo) cuotas += q.pendiente; });
+      e.pendientes.forEach((q) => { if (q.vence < cic.proximo) { cuotas += q.pendiente; cuotasLista.push({ tarjetaId: t.id, nombre: t.nombre, monto: q.pendiente, vence: q.vence }); } });
     });
     (d.metas || []).forEach((mt) => {
-      const aportado = (mt.aportes || []).filter((a) => a.fecha >= cic.inicio).reduce((s, a) => s + a.monto, 0);
-      metas += aportado + Math.max(0, (mt.aporteMensual || 0) - aportado);
+      // lo aportado incluye lo que se aparta solo (% del cobro y redondeo), que se calcula de tus movimientos
+      const aportado = aportesDe(d, mt).filter((a) => a.fecha >= cic.inicio).reduce((s, a) => s + a.monto, 0);
+      const reservado = aportado + Math.max(0, (mt.aporteMensual || 0) - aportado);
+      metas += reservado;
+      metasLista.push({ id: mt.id, nombre: mt.nombre, icono: mt.icono || '🏁', aportado: r2(aportado), reservado: r2(reservado), aporteMensual: mt.aporteMensual || 0 });
     });
     const gastado = r2(antes + hoyG + pagosTarjeta);
     const apartado = r2(fijos.total + cuotas + metas);
@@ -2950,7 +3149,7 @@
     const porDia = r2(Math.max(0, resto) / cic.dias);
     return Object.assign({
       ingresos: r2(ingresos), estimado, gastadoAntes: r2(antes), gastadoHoy: r2(hoyG), pagosTarjeta: r2(pagosTarjeta), comprasConTarjeta: r2(conTarjeta),
-      fijos: fijos.total, fijosLista: fijos.lista, cuotas: r2(cuotas), metas: r2(metas), gastado, apartado,
+      fijos: fijos.total, fijosLista: fijos.lista, cuotas: r2(cuotas), cuotasLista, metas: r2(metas), metasLista, gastado, apartado,
       disponible: r2(ingresos - antes - apartado - pagosTarjeta), resto, porDia, hoyDisponible: r2(porDia), pasado: resto < 0, modo: 'unico',
     }, cic);
   }
@@ -3107,8 +3306,29 @@
     const res = (texto, extra) => Object.assign({ texto, voz: texto.replace(/\$([\d.,]+)/g, (_, n) => n.replace(/\./g, '').replace(',', ' con ') + ' dólares') }, extra);
     const dinero = (v) => $(v);
     const nombreCat = (id) => (q.palabra ? q.palabra : catDe(d, id).nombre.toLowerCase());
+    // ¿La descripción de un movimiento nombra esa palabra? («Netflix», «netflix mensual»; «super» ↔ «Supermercado»; plural o singular)
+    const coincide = (desc, palabras) => {
+      const toks = U.norm(desc || '').split(/\s+/).filter(Boolean);
+      if (!toks.length) return false;
+      const una = (w) => { const vs = [w]; if (w.length > 3 && w.endsWith('es')) vs.push(w.slice(0, -2)); if (w.length > 3 && w.endsWith('s')) vs.push(w.slice(0, -1)); return toks.some((t) => vs.some((v) => t === v || (v.length >= 5 && t.startsWith(v)) || (t.length >= 5 && v.startsWith(t)))); };
+      return (palabras || []).some((p) => { const ws = U.norm(p).split(/\s+/).filter((w) => w && !/^(de|del|la|las|el|los|un|una|unos|unas|para|por|con|en|y|a|al|mi|mis|tu|su)$/.test(w)); return ws.length > 0 && ws.every(una); });
+    };
+    // Respuesta para UNA cosa concreta (no toda una categoría): `cat` = { nombre, total } para decir también lo de toda la categoría
+    const respuestaPalabra = (movs, palabra, cat) => {
+      const total = r2(movs.reduce((s, m) => s + m.monto, 0));
+      const filas = movs.slice(-10).map((m) => ({ icono: catDe(d, m.cat).icono, etiqueta: (m.desc || catDe(d, m.cat).nombre) + ' · ' + fechaBonita(m.fecha), valor: dinero(m.monto) }));
+      const nota = cat ? ' En todo ' + cat.nombre.toLowerCase() + ' gastaste ' + dinero(cat.total) + '.' : '';
+      if (movs.length === 1) return res('Pagaste ' + dinero(total) + ' de ' + palabra + ' el ' + fechaBonita(movs[0].fecha) + '.' + nota, { filas });
+      if (q.cuando) return res('En ' + palabra + ' pagaste ' + dinero(total) + ' ' + per.etiqueta + ', en ' + movs.length + ' pagos: ' + movs.map((m) => dinero(m.monto) + ' el ' + fechaBonita(m.fecha)).join(', ') + '.' + nota, { filas });
+      return res('En ' + palabra + ' gastaste ' + dinero(total) + ' ' + per.etiqueta + ' (' + movs.length + ' pagos).' + nota, { filas });
+    };
 
     switch (q.tema) {
+      // dos preguntas en una frase («cuánto gasté en comida y cuánto gané este mes»): se contestan las dos
+      case 'varias': {
+        const rs = (q.varias || []).map((x) => responder(x, d, hoy, esPro));
+        return res(rs.map((x) => x.texto).join(' '), { filas: [].concat.apply([], rs.map((x) => x.filas || [])).slice(0, 12), voz: rs.map((x) => x.voz).join(' ') });
+      }
       case 'ingresos': {
         const t = totales(d, per.desde, per.hasta);
         if (!t.ingresos) return res('No tienes ingresos registrados ' + per.etiqueta + '.');
@@ -3118,12 +3338,35 @@
       }
       case 'gastos': {
         const t = totales(d, per.desde, per.hasta, { sinTarjeta: !!q.sinTarjeta });
+        const gastosDelPeriodo = () => d.movs.filter((m) => m.tipo === 'gasto' && enRango(m, per.desde, per.hasta) && !(q.sinTarjeta && m.cuenta === 'tarjeta')).sort((a, b) => (a.fecha < b.fecha ? -1 : 1));
+        // Una palabra que la app no conoce («zorgblat»): se busca en lo que la persona anotó, no se responde con el total de todo
+        if (!q.cat && q.buscar && q.buscar.length) {
+          const palabra = q.buscar.join(' ');
+          const movs = gastosDelPeriodo().filter((m) => coincide(m.desc, q.buscar));
+          if (!movs.length) return res('No encontré gastos de «' + palabra + '» ' + per.etiqueta + '.' + (t.gastos ? ' En total gastaste ' + dinero(t.gastos) + '.' : ''));
+          return respuestaPalabra(movs, palabra, null);
+        }
         if (q.cat) {
-          const movs = d.movs.filter((m) => m.tipo === 'gasto' && m.cat === q.cat && enRango(m, per.desde, per.hasta) && !(q.sinTarjeta && m.cuenta === 'tarjeta')).sort((a, b) => (a.fecha < b.fecha ? -1 : 1));
-          const nombre = nombreCat(q.cat);
+          const ids = q.cats && q.cats.length > 1 ? q.cats : [q.cat];
+          let movs = gastosDelPeriodo().filter((m) => ids.includes(m.cat));
+          let nombre = nombreCat(q.cat);
           if (!movs.length) return res('No tienes gastos en ' + nombre + ' ' + per.etiqueta + '.');
+          // «Netflix» o «Spotify» no son todas las suscripciones: si pregunta por una cosa concreta, se suma solo esa
+          const generica = ids.length > 1 || !q.palabra || U.norm(q.palabra) === U.norm(catDe(d, q.cat).nombre) || U.norm(q.palabra) === U.norm(q.cat);
+          if (!generica) {
+            const solo = movs.filter((m) => coincide(m.desc, [q.palabra]));
+            const catNom = catDe(d, q.cat).nombre;
+            if (!solo.length) return res('No encontré gastos de «' + q.palabra + '» ' + per.etiqueta + '; en ' + catNom.toLowerCase() + ' gastaste ' + dinero(r2(movs.reduce((s, m) => s + m.monto, 0))) + (movs.length > 1 ? ' (' + movs.length + ' pagos)' : '') + '.', { filas: movs.slice(-10).map((m) => ({ icono: catDe(d, m.cat).icono, etiqueta: (m.desc || catNom) + ' · ' + fechaBonita(m.fecha), valor: dinero(m.monto) })) });
+            if (solo.length < movs.length) return respuestaPalabra(solo, q.palabra, { nombre: catNom, total: r2(movs.reduce((s, m) => s + m.monto, 0)) });
+          }
           const total = r2(movs.reduce((s, m) => s + m.monto, 0));
           const filas = movs.slice(-10).map((m) => ({ icono: catDe(d, m.cat).icono, etiqueta: (m.desc || catDe(d, m.cat).nombre) + ' · ' + fechaBonita(m.fecha), valor: dinero(m.monto) }));
+          // Un grupo (comida = hogar + fuera): se dice cuánto fue de cada parte
+          if (ids.length > 1) {
+            const partes = ids.map((id) => ({ cat: catDe(d, id), total: r2(movs.filter((m) => m.cat === id).reduce((s, m) => s + m.monto, 0)) })).filter((x) => x.total > 0);
+            const det = partes.length > 1 ? ': ' + partes.map((x) => dinero(x.total) + ' de ' + x.cat.nombre.toLowerCase()).join(' y ') : '';
+            return res('En ' + nombre + ' gastaste ' + dinero(total) + ' ' + per.etiqueta + (movs.length > 1 ? ' (' + movs.length + ' pagos)' : '') + det + '.', { filas: partes.map((x) => ({ icono: x.cat.icono, etiqueta: x.cat.nombre, valor: dinero(x.total) })).concat(filas) });
+          }
           if (q.cuando || movs.length === 1) {
             if (movs.length === 1) return res('Pagaste ' + dinero(total) + ' de ' + nombre + ' el ' + fechaBonita(movs[0].fecha) + '.', { filas });
             return res('En ' + nombre + ' pagaste ' + dinero(total) + ' ' + per.etiqueta + ', en ' + movs.length + ' pagos: ' + movs.map((m) => dinero(m.monto) + ' el ' + fechaBonita(m.fecha)).join(', ') + '.', { filas });
@@ -3150,8 +3393,14 @@
         return res('Gastas más en ' + a.cat.nombre.toLowerCase() + ': ' + dinero(a.total) + ' (' + Math.round(a.pct * 100) + ' % de tus gastos).' + extra, { filas: filasCat(t.porCategoria, 5) });
       }
       case 'balance': {
-        const t = totales(d, per.desde, per.hasta);
-        return res('Ingresos ' + dinero(t.ingresos) + ', gastos ' + dinero(t.gastos) + '. Balance ' + dinero(t.balance) + ' ' + per.etiqueta + '.', { filas: [{ icono: '💼', etiqueta: 'Ingresos', valor: dinero(t.ingresos) }, { icono: '🧾', etiqueta: 'Gastos', valor: dinero(t.gastos) }, { icono: '⚖️', etiqueta: 'Balance', valor: dinero(t.balance) }] });
+        // Misma cuenta que Inicio y Movimientos: balance = ingresos − lo que salió de tu bolsillo (las compras con tarjeta se cuentan al pagarla)
+        const t = resumenMes(d, per.desde, per.hasta);
+        const tarj = (t.conTarjeta ? ' De los gastos, ' + dinero(t.conTarjeta) + ' fueron con tarjeta (se pagan después).' : '') + (t.pagosTarjeta ? ' Pagaste ' + dinero(t.pagosTarjeta) + ' a tus tarjetas.' : '');
+        const filas = [{ icono: '💼', etiqueta: 'Ingresos', valor: dinero(t.ingresos) }, { icono: '🧾', etiqueta: 'Gastos', valor: dinero(t.gastos) }];
+        if (t.conTarjeta) filas.push({ icono: '💳', etiqueta: 'Con tarjeta (se paga después)', valor: dinero(t.conTarjeta) });
+        if (t.pagosTarjeta) filas.push({ icono: '💳', etiqueta: 'Pagado a tarjetas', valor: dinero(t.pagosTarjeta) });
+        filas.push({ icono: '⚖️', etiqueta: 'Balance', valor: dinero(t.balance) });
+        return res('Ingresos ' + dinero(t.ingresos) + ', gastos ' + dinero(t.gastos) + '.' + tarj + ' Balance ' + dinero(t.balance) + ' ' + per.etiqueta + '.', { filas });
       }
       case 'necesario_gusto':
       case 'innecesarios': {
@@ -3174,7 +3423,7 @@
         return res('Gastos hormiga ' + per.etiqueta + ': ' + dinero(h.total) + ' en ' + h.veces + ' compras. Al ritmo actual serían unos ' + dinero(h.alAnio) + ' al año.', { filas: h.porProducto.slice(0, 6).map((p) => ({ icono: p.icono, etiqueta: p.nombre + ' (' + p.veces + ')', valor: dinero(p.total) })) });
       }
       case 'ahorro': {
-        const t = totales(d, per.desde, per.hasta);
+        const t = resumenMes(d, per.desde, per.hasta);
         return res(t.balance >= 0 ? 'Has ahorrado ' + dinero(t.balance) + ' ' + per.etiqueta + '.' : 'Gastaste ' + dinero(-t.balance) + ' más de lo que ganaste ' + per.etiqueta + '.');
       }
       case 'disponible': {
@@ -3336,13 +3585,294 @@
   /* ---------------------------------------------------------- Aplicar una corrección */
   // Busca el movimiento al que se refiere: el último (o el último de una categoría).
   function objetivoDeCorreccion(d, objetivo) {
-    const lista = d.movs.filter((m) => m.tipo !== 'pago_tarjeta' && (!objetivo || !objetivo.cat || m.cat === objetivo.cat));
-    return lista.sort((a, b) => (b.fecha === a.fecha ? b.creado - a.creado : b.fecha < a.fecha ? -1 : 1))[0] || null;
+    const recientes = (l) => l.sort((a, b) => (b.fecha === a.fecha ? b.creado - a.creado : b.fecha < a.fecha ? -1 : 1));
+    const todos = d.movs.filter((m) => m.tipo !== 'pago_tarjeta');
+    if (objetivo && objetivo.palabras && objetivo.palabras.length) {
+      // 1) lo que dijo coincide con lo que escribió en el movimiento («el almuerzo» → «Almuerzo»)
+      const ps = objetivo.palabras.map((w) => U.norm(w)).filter((w) => w.length > 2);
+      const raiz = (w) => (w.length > 4 ? w.replace(/(es|s)$/, '') : w);
+      const porDesc = todos.filter((m) => { const t = U.norm(m.desc || ''); return ps.some((w) => t.includes(raiz(w))); });
+      if (porDesc.length) return recientes(porDesc)[0];
+    }
+    // 2) por categoría («borra el último de comida»), 3) el último
+    const lista = todos.filter((m) => !objetivo || !objetivo.cat || m.cat === objetivo.cat);
+    return recientes(lista)[0] || null;
   }
 
   AF.informes = { totales, resumenMes, ingresosPorCategoria, hormiga, ciclo, cobroDe, ultimoDiaCobro, puedesGastarHoy, disponible: puedesGastarHoy, innecesarios, consejos, presupuestos, alertas, sri, serieMensual, csv, resumenCompartir, responder, objetivoDeCorreccion, catDe,
     estadoFijo, suscripcionesDetectadas, pendientePrestamo, prestamosResumen, reto, conciliar };
   if (typeof module === 'object' && module.exports) module.exports = AF.informes;
+})(typeof window !== 'undefined' ? window : globalThis);
+;
+
+/* ===== js/correcciones.js ===== */
+/* Aplica una corrección dictada («cambia el almuerzo a 5», «ese era de salud», «borra el último», «márcalo como gusto»).
+   Vive aparte de la pantalla para poder probarla con miles de casos, y para que lo que la app APRENDE de cada corrección
+   sea exactamente lo que la prueba comprueba. */
+(function (g) {
+  'use strict';
+  const AF = (g.AF = g.AF || {});
+  const U = AF.util;
+  const $ = (v) => U.dinero(v);
+
+  // S = el almacén (AF.store), r = lo que entendió el parser { accion, objetivo, monto, cat, nec, nuevoTipo }
+  // Aprende una palabra y devuelve cómo olvidarla (para «Deshacer»): si ya tenía algo aprendido, vuelve a eso.
+  function aprender(S, palabra, valor) {
+    const k = U.norm(palabra).trim(); const previo = S.d.diccionario[k];
+    S.aprender(palabra, valor);
+    return () => { if (previo === undefined) S.olvidarAprendido(palabra); else { S.d.diccionario[k] = previo; S.guardar(); } };
+  }
+
+  // Devuelve { ok, linea, pasos, aprendio, olvidar } — pasos = cuántos cambios hay que deshacer si la persona toca «Deshacer».
+  function aplicar(S, r) {
+    const D = S.d;
+    if (r.accion === 'deshacer') {
+      const nota = S.deshacer();
+      return { ok: !!nota, linea: nota ? 'Deshecho: ' + nota.charAt(0).toLowerCase() + nota.slice(1) + '.' : 'No hay nada que deshacer.', pasos: 0 };
+    }
+    const m = AF.informes.objetivoDeCorreccion(D, r.objetivo);
+    if (!m) return { ok: false, linea: 'No encontré ningún movimiento para cambiar.', pasos: 0 };
+    const nombre = '«' + (m.desc || S.categoria(m.cat).nombre) + '» de ' + $(m.monto);
+    if (r.accion === 'borrar') { S.borrar('movs', m.id, 'Borré ' + nombre); return { ok: true, linea: 'Borré ' + nombre + '.', pasos: 1, id: m.id }; }
+    if (r.accion === 'categoria') {
+      const c = S.categoria(r.cat), vieja = S.categoria(m.cat);
+      const patch = { cat: c.id }; if (m.tipo === 'gasto' && (m.nec === vieja.nec || m.nec == null)) patch.nec = c.nec || null;
+      S.editar('movs', m.id, patch, 'Cambié ' + nombre + ' a ' + c.nombre);
+      // La app aprende: la próxima vez que digas esa palabra, ya sabe dónde va.
+      const olvidar = m.desc ? aprender(S, m.desc, c.id) : null;
+      return { ok: true, linea: 'Listo, cambié ' + nombre + ' a ' + c.nombre.toLowerCase() + '.' + (m.desc ? ' Ya sé que «' + m.desc.toLowerCase() + '» va ahí.' : ''), pasos: 1, id: m.id, aprendio: m.desc || null, olvidar };
+    }
+    if (r.accion === 'monto') { S.editar('movs', m.id, { monto: r.monto }, 'Cambié el monto'); return { ok: true, linea: 'Listo, ahora son ' + $(r.monto) + '.', pasos: 1, id: m.id }; }
+    if (r.accion === 'necesidad') {
+      S.editar('movs', m.id, { nec: r.nec }, 'Cambié necesario/innecesario');
+      // También se aprende si ESO es necesario o es un gusto para esta persona
+      const olvidar = m.desc && m.tipo === 'gasto' ? aprender(S, m.desc, { cat: m.cat, nec: r.nec }) : null;
+      return { ok: true, linea: 'Listo, ' + nombre + ' ahora cuenta como ' + (r.nec === 'N' ? 'necesario' : 'innecesario') + '.', pasos: 1, id: m.id, aprendio: olvidar ? m.desc : null, olvidar };
+    }
+    if (r.accion === 'tipo') {
+      const cat = S.categorias(r.nuevoTipo)[0].id;
+      S.editar('movs', m.id, { tipo: r.nuevoTipo, cat, nec: null }, 'Cambié el tipo');
+      return { ok: true, linea: 'Listo, ahora es un ' + r.nuevoTipo + '.', pasos: 1, id: m.id };
+    }
+    return { ok: false, noEntendi: true, linea: 'No entendí qué quieres cambiar.', pasos: 0 };
+  }
+
+  AF.correcciones = { aplicar };
+  if (typeof module === 'object' && module.exports) module.exports = AF.correcciones;
+})(typeof window !== 'undefined' ? window : globalThis);
+;
+
+/* ===== js/ahorro.js ===== */
+/* Ahorro y planes: cuentas puras (sin pantalla) para
+   · el «Plan de tu cobro»: lo que ya se va (pagos fijos y tarjetas), lo que apartas para tus metas y lo que queda libre;
+   · el «Ahorro automático»: un % de tu cobro y/o el redondeo de cada compra, que van solos a una meta;
+   · la plantilla de «Fondo de emergencia»: de 3 a 6 meses de tus gastos NECESARIOS reales;
+   · el «Plan para pagar deudas»: qué tarjeta pagar primero (avalancha o bola de nieve) y en cuántos meses terminas.
+   Todo sale de tus datos: lo que falta (una tasa, un pago mínimo) se pide, nunca se inventa.
+   Lo que se aparta solo NO se guarda como aporte aparte: se calcula de tus movimientos, así que si editas o borras el
+   cobro o la compra, el aporte cambia solo y «Deshacer» siempre deja todo cuadrado. */
+(function (g) {
+  'use strict';
+  const AF = (g.AF = g.AF || {});
+  const U = AF.util, PLAN = AF.PLAN;
+  const r2 = (n) => U.r2(n);
+  const catDe = (d, id) => (PLAN.categorias.concat(d.categorias || [])).find((c) => c.id === id) || { id, nombre: id, nec: null };
+
+  /* ====================================================== lo que se aparta solo */
+  // [{ id, metaId, fecha, monto, auto: 'cobro' | 'redondeo', deMov, nota }]
+  function derivados(d) {
+    const out = [];
+    const a = d.ajustes || {}, cfg = PLAN.ahorro;
+    const metas = new Set((d.metas || []).map((m) => m.id));
+    const cobro = a.ahorroAuto, red = a.redondeo;
+    const sueldoCats = cfg.porcentaje.categoriasCobro;
+    if (cobro && cobro.activo && cobro.pct > 0 && metas.has(cobro.metaId)) {
+      d.movs.forEach((m) => {
+        if (m.tipo !== 'ingreso' || !sueldoCats.includes(m.cat) || (m.creado || 0) < (cobro.desde || 0)) return;
+        const monto = r2((m.monto * cobro.pct) / 100);
+        if (monto >= 0.01) out.push({ id: 'auto-c-' + m.id, metaId: cobro.metaId, fecha: m.fecha, monto, auto: 'cobro', deMov: m.id, nota: cobro.pct + ' % de tu cobro' });
+      });
+    }
+    if (red && red.activo && red.paso > 0 && metas.has(red.metaId)) {
+      d.movs.forEach((m) => {
+        if (m.tipo !== 'gasto' || (m.creado || 0) < (red.desde || 0) || m.pagoFijoId) return;
+        if (cfg.redondeo.excluirCategorias.includes(m.cat) || m.monto > cfg.redondeo.montoMax) return;
+        const sobra = r2(Math.ceil(m.monto / red.paso - 1e-9) * red.paso - m.monto);
+        if (sobra >= 0.01) out.push({ id: 'auto-r-' + m.id, metaId: red.metaId, fecha: m.fecha, monto: sobra, auto: 'redondeo', deMov: m.id, nota: 'Redondeo de «' + (m.desc || catDe(d, m.cat).nombre) + '»' });
+      });
+    }
+    return out;
+  }
+  const aportesDe = (d, mt) => (mt.aportes || []).concat(derivados(d).filter((x) => x.metaId === mt.id));
+  const ahorrado = (d, mt) => r2(aportesDe(d, mt).reduce((s, a) => s + a.monto, 0));
+
+  // Prende, cambia o apaga una regla. Lo ya apartado con la regla anterior se CONGELA (pasa a ser aporte normal): cambiar el % no cambia el pasado.
+  function configurar(S, tipo, cfg) {
+    const D = S.d, clave = tipo === 'redondeo' ? 'redondeo' : 'ahorroAuto';
+    const previa = D.ajustes[clave];
+    const metaPrev = previa && previa.activo ? (D.metas || []).find((m) => m.id === previa.metaId) : null;
+    if (metaPrev) {
+      const congelar = derivados(D).filter((x) => x.metaId === metaPrev.id && x.auto === (tipo === 'redondeo' ? 'redondeo' : 'cobro'));
+      if (congelar.length) S.editar('metas', metaPrev.id, { aportes: (metaPrev.aportes || []).concat(congelar.map((x) => ({ id: U.uid(), fecha: x.fecha, monto: x.monto, nota: x.nota }))) }, 'Fijé lo apartado solo');
+    }
+    // «desde»: solo cuentan los movimientos que se registren a partir de ahora (nunca uno que ya estaba, aunque lo hayas anotado en el mismo milisegundo)
+    const nueva = Object.assign({}, cfg, { desde: Math.max(Date.now(), D.movs.reduce((mx, x) => Math.max(mx, x.creado || 0), 0) + 1) });
+    S.ajustar({ [clave]: nueva });
+    return nueva;
+  }
+
+  /* ====================================================== plan de tu cobro */
+  function planCobro(d, hoy) {
+    const I = AF.informes;
+    const cic = I.ciclo(d, hoy);
+    const p = I.puedesGastarHoy(d, hoy);
+    const cobro = p.ingresos;
+    // pagos fijos del ciclo (los pagados también: el plan no cambia a mitad del mes)
+    const fijos = [];
+    (d.pagosFijos || []).forEach((pf) => {
+      if (pf.activo === false) return;
+      const vence = U.proximoDia(cic.inicio, pf.dia);
+      if (vence >= cic.proximo) return;
+      const pago = d.movs.find((m) => m.pagoFijoId === pf.id && m.fecha >= cic.inicio);
+      fijos.push({ id: pf.id, nombre: pf.nombre, monto: r2(pf.monto), vence, pagado: !!pago, atrasado: !pago && vence < hoy, suscripcion: !!pf.suscripcion });
+    });
+    fijos.sort((x, y) => (x.vence < y.vence ? -1 : x.vence > y.vence ? 1 : 0));
+    // tarjetas: cuotas que vencen antes del próximo cobro + lo que ya pagaste a esa tarjeta en este ciclo
+    const tarjetas = [];
+    (d.tarjetas || []).forEach((t) => {
+      if (!(t.diaCorte && t.diaVencimiento)) return;
+      const cuotas = p.cuotasLista.filter((q) => q.tarjetaId === t.id);
+      const pagado = r2(d.movs.filter((m) => m.tipo === 'pago_tarjeta' && m.tarjetaId === t.id && m.fecha >= cic.inicio && m.fecha <= hoy).reduce((s, m) => s + m.monto, 0));
+      const pendiente = r2(cuotas.reduce((s, q) => s + q.monto, 0));
+      if (pendiente + pagado <= 0) return;
+      const vence = cuotas.map((q) => q.vence).sort()[0] || null;
+      tarjetas.push({ id: t.id, nombre: t.nombre, monto: r2(pendiente + pagado), pendiente, pagado, vence });
+    });
+    tarjetas.sort((x, y) => ((x.vence || '9') < (y.vence || '9') ? -1 : 1));
+    const metas = p.metasLista.filter((m) => m.reservado > 0.004);
+    const auto = [];
+    const a = d.ajustes || {};
+    if (a.ahorroAuto && a.ahorroAuto.activo) { const m = (d.metas || []).find((x) => x.id === a.ahorroAuto.metaId); if (m) auto.push({ tipo: 'cobro', pct: a.ahorroAuto.pct, metaNombre: m.nombre, monto: r2(derivados(d).filter((x) => x.auto === 'cobro' && x.metaId === m.id && x.fecha >= cic.inicio).reduce((s, x) => s + x.monto, 0)) }); }
+    if (a.redondeo && a.redondeo.activo) { const m = (d.metas || []).find((x) => x.id === a.redondeo.metaId); if (m) auto.push({ tipo: 'redondeo', paso: a.redondeo.paso, metaNombre: m.nombre, monto: r2(derivados(d).filter((x) => x.auto === 'redondeo' && x.metaId === m.id && x.fecha >= cic.inicio).reduce((s, x) => s + x.monto, 0)) }); }
+    const totalFijos = r2(fijos.reduce((s, x) => s + x.monto, 0));
+    const totalTarjetas = r2(tarjetas.reduce((s, x) => s + x.monto, 0));
+    const totalMetas = r2(metas.reduce((s, x) => s + x.reservado, 0));
+    const comprometido = r2(totalFijos + totalTarjetas + totalMetas);
+    const libre = r2(cobro - comprometido);
+    const diasCiclo = Math.max(1, U.diasEntre(cic.inicio, cic.proximo));
+    const sinCobro = !(cobro > 0);
+    return {
+      ciclo: { inicio: cic.inicio, proximo: cic.proximo, dias: diasCiclo, diasQuedan: cic.dias, etiqueta: cic.etiqueta, modo: cic.modo },
+      cobro, estimado: p.estimado, sinCobro,
+      fijos, totalFijos, tarjetas, totalTarjetas, metas, totalMetas, auto,
+      comprometido, libre, libreDia: r2(Math.max(0, libre) / diasCiclo), pasado: libre < 0,
+      pctComprometido: cobro > 0 ? Math.min(1, comprometido / cobro) : 0,
+      teQueda: p.resto,                                         // lo mismo que dice Inicio (ya descontando lo gastado)
+      destacar: !sinCobro && !p.estimado && U.diasEntre(cic.inicio, hoy) < PLAN.ahorro.cobro.diasDestacar,
+    };
+  }
+
+  /* ====================================================== fondo de emergencia */
+  function fondoEmergencia(d, hoy) {
+    const cfg = PLAN.ahorro.fondo;
+    const meses = [];
+    for (let k = 1; k <= cfg.mesesAtras; k++) {
+      const ini = U.sumarMeses(U.inicioMes(hoy), -k), fin = U.finMes(ini);
+      const gs = d.movs.filter((m) => m.tipo === 'gasto' && m.fecha >= ini && m.fecha <= fin);
+      if (gs.length < cfg.minGastosPorMes) continue;
+      let nec = 0, total = 0;
+      gs.forEach((m) => { total += m.monto; const n = m.nec !== undefined && m.nec !== null ? m.nec : catDe(d, m.cat).nec; if (n === 'N') nec += m.monto; });
+      meses.push({ mes: ini, necesarios: r2(nec), total: r2(total), gastos: gs.length });
+    }
+    const fondoMeta = (d.metas || []).find((m) => m.esFondo) || null;
+    if (!meses.length) {
+      const parcial = r2(d.movs.filter((m) => m.tipo === 'gasto' && m.fecha >= U.inicioMes(hoy) && m.fecha <= hoy).reduce((s, m) => s + m.monto, 0));
+      return { disponible: false, mesesConDatos: 0, parcial, fondoMeta, motivo: 'Aún no tengo un mes completo de gastos tuyos. Cuando termine este mes (o tengas al menos ' + cfg.minGastosPorMes + ' gastos en un mes) calculo tu fondo con datos reales.' };
+    }
+    const prom = (f) => r2(meses.reduce((s, m) => s + m[f], 0) / meses.length);
+    const necesarios = prom('necesarios'), todos = prom('total');
+    const base = necesarios > 0 ? 'necesarios' : 'todos';
+    const mensual = base === 'necesarios' ? necesarios : todos;
+    const opciones = []; for (let n = cfg.mesesMin; n <= cfg.mesesMax; n++) opciones.push({ meses: n, monto: r2(mensual * n) });
+    const ahorradoFondo = fondoMeta ? ahorrado(d, fondoMeta) : 0;
+    return {
+      disponible: true, mesesConDatos: meses.length, meses, promedioNecesarios: necesarios, promedioTotal: todos, base, mensual, opciones,
+      sugerido: opciones.find((o) => o.meses === cfg.mesesPorDefecto) || opciones[0],
+      fondoMeta, ahorrado: ahorradoFondo, cobertura: mensual > 0 ? r2(ahorradoFondo / mensual) : 0,
+    };
+  }
+
+  /* ====================================================== plan para pagar deudas */
+  // Simula pagar todas las deudas a la vez: cada mes se paga el mínimo de cada una y lo que sobra del presupuesto va a la prioritaria.
+  function simular(deudas, estrategia, extra) {
+    const maxMeses = PLAN.deudas.maxMeses;
+    const ds = deudas.map((x) => ({ id: x.id, nombre: x.nombre, saldo: x.capital, tasaM: (x.tasa || 0) / 100 / 12, min: x.minimo || 0, cerrada: 0 }));
+    const presupuesto = r2(ds.reduce((s, x) => s + x.min, 0) + (extra || 0));
+    const prioridad = (lista) => lista.slice().sort(estrategia === 'avalancha' ? (a, b) => b.tasaM - a.tasaM || a.saldo - b.saldo : (a, b) => a.saldo - b.saldo || b.tasaM - a.tasaM);
+    let mes = 0, intereses = 0; const cierres = [];
+    while (ds.some((x) => x.saldo > 0.004) && mes < maxMeses) {
+      mes++;
+      ds.forEach((x) => { if (x.saldo > 0) { const i = r2(x.saldo * x.tasaM); x.saldo = r2(x.saldo + i); intereses += i; } });
+      let disp = presupuesto;
+      ds.forEach((x) => { if (x.saldo <= 0) return; const pg = Math.min(x.min, x.saldo); x.saldo = r2(x.saldo - pg); disp = r2(disp - pg); });
+      prioridad(ds.filter((x) => x.saldo > 0.004)).forEach((x) => { if (disp <= 0.004) return; const pg = Math.min(disp, x.saldo); x.saldo = r2(x.saldo - pg); disp = r2(disp - pg); });
+      ds.forEach((x) => { if (x.saldo <= 0.004 && !x.cerrada) { x.cerrada = mes; x.saldo = 0; cierres.push({ id: x.id, nombre: x.nombre, mes }); } });
+    }
+    return { meses: mes, termina: ds.every((x) => x.saldo <= 0.004), intereses: r2(intereses), cierres };
+  }
+  // Pagando solo el mínimo de cada una (sin extra ni «rodar» lo que se libera)
+  function soloMinimos(deudas) {
+    let meses = 0, intereses = 0, termina = true;
+    deudas.forEach((x) => {
+      const r = simular([x], 'bola', 0);
+      meses = Math.max(meses, r.meses); intereses += r.intereses; if (!r.termina) termina = false;
+    });
+    return { meses, intereses: r2(intereses), termina };
+  }
+
+  function planDeudas(d, hoy, opc) {
+    opc = opc || {};
+    const extra = Math.max(0, Number(opc.extra) || 0);
+    const deudas = [];
+    (d.tarjetas || []).forEach((t) => {
+      const e = AF.tarjetas.estado(t, d.movs, hoy);
+      if (!(e.deudaTotal > 0.004)) return;
+      deudas.push({ id: t.id, nombre: t.nombre, saldo: e.deudaTotal, capital: e.capitalPendiente, tasa: t.tasaAnual != null ? Number(t.tasaAnual) : null, minimo: e.pagoMinimo != null && e.pagoMinimo > 0 ? e.pagoMinimo : null,
+        vence: e.proximoVence, aPagarProximo: e.aPagarProximo });
+    });
+    const personas = (d.prestamos || []).filter((p) => !p.pagado && p.direccion !== 'me_deben').map((p) => ({ persona: p.persona, saldo: AF.informes.pendientePrestamo(p) }));
+    const totalPersonas = r2(personas.reduce((s, x) => s + x.saldo, 0));
+    if (!deudas.length) return { hayDeudas: false, deudas: [], personas, totalPersonas };
+    const faltan = [];
+    deudas.forEach((x) => { if (x.tasa == null) faltan.push({ id: x.id, nombre: x.nombre, dato: 'tasa' }); if (x.minimo == null) faltan.push({ id: x.id, nombre: x.nombre, dato: 'minimo' }); });
+    const sinTasa = deudas.some((x) => x.tasa == null), sinMinimo = deudas.some((x) => x.minimo == null);
+
+    // los que no tienen tasa van al final de la avalancha (no se sabe cuánto cuestan)
+    const conTasa = deudas.filter((x) => x.tasa != null).sort((a, b) => b.tasa - a.tasa || a.saldo - b.saldo), desconocidas = deudas.filter((x) => x.tasa == null).sort((a, b) => a.saldo - b.saldo);
+    const avalancha = conTasa.concat(desconocidas);
+    const bola = deudas.slice().sort((a, b) => a.saldo - b.saldo || (b.tasa || 0) - (a.tasa || 0));
+    const total = r2(deudas.reduce((s, x) => s + x.saldo, 0));
+    const simulable = !sinTasa && !sinMinimo;
+    let sim = null, recomendada = 'bola';
+    if (simulable) {
+      const a = simular(deudas, 'avalancha', extra), b = simular(deudas, 'bola', extra), base = soloMinimos(deudas);
+      sim = { avalancha: a, bola: b, soloMinimos: base, extra, presupuesto: r2(deudas.reduce((s, x) => s + x.minimo, 0) + extra) };
+      // la avalancha gasta menos intereses; la bola de nieve cierra la primera antes. Se recomienda la que menos cuesta (si empatan, la bola de nieve, que motiva más)
+      recomendada = a.termina && (!b.termina || a.intereses < b.intereses - 0.005) ? 'avalancha' : 'bola';
+    } else if (!sinTasa) recomendada = 'avalancha';
+    const orden = recomendada === 'avalancha' ? avalancha : bola;
+    return {
+      hayDeudas: true, deudas, total, personas, totalPersonas, faltan, simulable, sim, recomendada,
+      ordenAvalancha: avalancha.map((x) => x.id), ordenBola: bola.map((x) => x.id),
+      primera: orden[0], motivoPrimera: recomendada === 'avalancha'
+        ? (orden[0].tasa != null ? 'Es la que más intereses te cobra (' + String(orden[0].tasa).replace('.', ',') + ' % al año).' : 'Es la primera de tu lista.')
+        : 'Es la más pequeña: la cierras rápido y liberas su pago para la siguiente.',
+      ahorroIntereses: sim && sim[recomendada].termina && sim.soloMinimos.termina ? r2(sim.soloMinimos.intereses - sim[recomendada].intereses) : null,
+    };
+  }
+
+  AF.ahorro = { derivados, aportesDe, ahorrado, configurar, planCobro, fondoEmergencia, simular, soloMinimos, planDeudas };
+  if (typeof module === 'object' && module.exports) module.exports = AF.ahorro;
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
 
@@ -3401,7 +3931,7 @@
       if (valida(a, mo, d)) return iso(a, mo, d);
     }
     const n = U.norm(texto);
-    m = n.match(/\b(\d{1,2})\s+(?:de\s+)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre|ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)\.?(?:\s+(?:de(?:l)?\s+)?(\d{4}))?/);
+    m = n.match(/(?<![\d.,])\b(\d{1,2})\s+(?:de\s+)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre|ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)\b\.?(?:\s+(?:de(?:l)?\s+)?(\d{4}))?/);
     if (m) {
       const nombre = m[2] === 'setiembre' ? 'septiembre' : m[2];
       let mo = MESES_N.indexOf(nombre) + 1; if (!mo) mo = MESES_ABR.indexOf(nombre) + 1;
@@ -3419,7 +3949,7 @@
   const nombrePropio = (t) => String(t).toLowerCase().split(/\s+/).filter(Boolean).map((w, i) => (i > 0 && MENORES.has(w) ? w : /^(?:[a-z]\.){2,}$/.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1))).join(' ');
 
   /* -------------------------------------------------------------------- tipo */
-  const RE_INGRESO = /(deposito|depositaron|acredit|recibiste|has recibido|recibida|recibido|transferencia recibida|ingreso a tu cuenta|ingreso a su cuenta|abono a tu cuenta|abono en tu cuenta|nomina|sueldo|reembolso|devolucion|te pagaron|te enviaron|te transfirieron|pago recibido|credito a tu cuenta)/;
+  const RE_INGRESO = /(reverso|reversion|reversado|nota de credito|deposito|depositaron|acredit|recibiste|has recibido|recibida|recibido|transferencia recibida|ingreso a tu cuenta|ingreso a su cuenta|abono a tu cuenta|abono en tu cuenta|nomina|sueldo|reembolso|devolucion|te pagaron|te enviaron|te transfirieron|pago recibido|credito a tu cuenta)/;
   const RE_GASTO = /(compra|consumo|pago|pagaste|debito|retiro|retiraste|cargo|enviaste|transferencia enviada|transferiste|compraste|debitado|debitaron|gastaste|consumiste|se realizo|transaccion)/;
   function tipoDe(texto) {
     const n = U.norm(texto);
@@ -3441,8 +3971,15 @@
       const limpio = toks.join(' ').replace(/[.,;:*]+$/, '').trim();
       if (limpio.length >= 3 && /[A-ZÁÉÍÓÚÑ]{3}/.test(limpio)) return limpio;
     }
-    const m = texto.match(/\ben\s+([A-Za-zÁÉÍÓÚÑáéíóúñ0-9][A-Za-zÁÉÍÓÚÑáéíóúñ0-9 .&'\-]{2,30}?)(?=\s*(?:[.,;]|\bcon\b|\bel\b|\bla\b|\bpor\b|\bfecha\b|\btarjeta\b|$))/);
-    return m ? m[1].trim() : '';
+    // sin mayúsculas («compra en uber *trip por…»): lo que sigue a «en», menos «terminada en 4821» y menos un número suelto
+    const re = /\ben\s+([A-Za-zÁÉÍÓÚÑáéíóúñ0-9][A-Za-zÁÉÍÓÚÑáéíóúñ0-9 .&'*\-]{2,30}?)(?=\s*(?:[.,;]|\bcon\b|\bel\b|\bla\b|\bpor\b|\bfecha\b|\btarjeta\b|$))/g;
+    let m;
+    while ((m = re.exec(texto))) {
+      const antes = U.norm(texto.slice(Math.max(0, m.index - 14), m.index)), cand = m[1].trim();
+      if (/(terminad[ao]s?|termina|finaliza\w*)\s*$/.test(antes) || /^[\d\s.,*x-]+$/i.test(cand)) continue;
+      return cand;
+    }
+    return '';
   }
 
   /* ---------------------------------------------------------------- categoría */
@@ -3454,6 +3991,30 @@
     return c.cat ? { cat: c.cat.id, conf: c.aprendido || c.score >= 2 ? 'alta' : 'media' } : { cat: base, conf: 'ninguna' };
   }
 
+
+  // Los últimos 4 números de la tarjeta: «terminada en 4821», «****4821», «tarjeta de crédito 4821». Nunca un monto («tarjeta por $2.056,55»).
+  function ultimos4(t) {
+    const fin = '(?![\\d.,]\\d|[-/]\\d)';                        // ni un monto («2.056,55») ni una fecha («2026-10-22»)
+    const pats = [
+      new RegExp('(?:terminad[ao]s?|termina|finaliza(?:d[ao])?|acabad[ao]|que\\s+termina)\\s+en\\s*[:*•xX.\\s-]*(\\d{4})\\b' + fin, 'i'),
+      new RegExp('[*xX•]{2,}[\\s-]*(\\d{4})\\b' + fin),
+      new RegExp('tarjeta(?:\\s+de\\s+(?:credito|crédito|debito|débito))?(?:\\s+(?:visa|mastercard|master\\s*card|diners|amex))?\\s*(?:no\\.?|n[°º]|numero|número|#)?\\s*[:.-]?\\s*(\\d{4})\\b' + fin, 'i'),
+    ];
+    for (const re of pats) { const m = t.match(re); if (m) return m[1]; }
+    return null;
+  }
+
+  // Cuál de los montos del mensaje es el de la operación. Los avisos suelen traer también el saldo, el cupo o una comisión:
+  // esos se descartan (salvo que sean lo único que hay). Entre los demás manda el que lleva símbolo, y luego el que tiene decimales.
+  const RE_NO_ES_LA_OPERACION = /(saldo|disponible|cupo|limite|balance|acumulado|sobregiro|comision|iva|propina|cargo por servicio|costo|tarifa|minimo|puntos)\s*(?:actual|disponible|total|de la tarjeta|de tu cuenta|en tu cuenta|en su cuenta|de su cuenta)?\s*(?:es|de|:|=|-|a|por)?\s*(?:usd|us\$|\$)?\s*$/;
+  function montoDelAviso(t, ms) {
+    if (!ms.length) return null;
+    const antes = (x) => U.norm(t.slice(Math.max(0, x.pos - 45), x.pos));
+    const buenos = ms.filter((x) => !RE_NO_ES_LA_OPERACION.test(antes(x)));
+    const lista = buenos.length ? buenos : ms;
+    return lista.find((x) => x.simbolo) || lista.find((x) => x.decimales) || null;
+  }
+
   /* ------------------------------------------------------------------ mensaje del banco */
   // Un mensaje (SMS, correo copiado, texto compartido). Devuelve { ok, tipo, monto, fecha, desc, cat, catConfianza, tarjeta4, duda:[] }
   function bancario(texto, ctx) {
@@ -3461,12 +4022,12 @@
     const hoy = ctx.hoy || U.hoyISO();
     const t = String(texto || '').replace(/\s+/g, ' ').trim();
     const ms = montosEn(t);
-    const elegido = ms.find((x) => x.simbolo) || ms.find((x) => x.decimales) || null;
+    const elegido = montoDelAviso(t, ms);
     const tp = tipoDe(t);
     const desc = comercio(t);
     const c = categoriaDe(desc || t, tp.tipo, ctx);
     const f = fecha(t, hoy);
-    const t4 = (t.match(/(?:terminad[ao]s?\s+en|termina\s+en|tarjeta[^\d]{0,16}|[*xX•]{2,})\s*(\d{4})\b/i) || [])[1] || null;
+    const t4 = ultimos4(t);
     const duda = [];
     if (!elegido) duda.push('monto');
     if (tp.duda) duda.push('tipo');
@@ -3485,6 +4046,125 @@
       if (conPlata.length >= 2) trozos = conPlata;
     }
     return trozos.map((x) => Object.assign(bancario(x, ctx), { texto: x })).filter((x) => x.ok);
+  }
+  // Igual, pero cada mensaje se lee con aviso() (tarjeta, pago a tarjeta, cuotas…). Devuelve { lista: [ok], descartados: [{ texto, motivoNo }] }.
+  function avisosVarios(texto, ctx) {
+    const t = String(texto || '').trim();
+    if (!t) return { lista: [], descartados: [] };
+    let trozos = t.split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean);
+    if (trozos.length === 1) {
+      const lineas = t.split(/\n/).map((x) => x.trim()).filter(Boolean);
+      const conPlata = lineas.filter((l) => montosEn(l).length && fecha(l, (ctx && ctx.hoy) || U.hoyISO()));
+      if (conPlata.length >= 2) trozos = conPlata;
+    }
+    const lista = [], descartados = [];
+    trozos.forEach((x) => { const r = aviso(x, ctx); if (r.ok) lista.push(Object.assign(r, { texto: x })); else descartados.push({ texto: x, motivoNo: r.motivoNo }); });
+    return { lista, descartados };
+  }
+
+
+  /* ------------------------------------------------------------------ aviso completo del banco */
+  // Lo que NO es un movimiento: claves y códigos, promociones, recordatorios de pago.
+  const CUE_OPERACION = /\b(?:compra|consumo|pago|retiro|debito|deposito|transferencia|abono|cargo)\s+(?:de|por|en|realizad[oa]|exitos[oa]|aprobad[oa]|recibid[oa])\b|\b(?:pagaste|compraste|retiraste|recibiste|transferiste|enviaste|debitaron|se debito|se realizo|se acredito|has recibido|hemos recibido|recibimos)\b/;
+  const RE_RECHAZADA = /\b(?:rechazad[oa]s?|declinad[oa]s?|denegad[oa]s?|fallid[oa]s?|anulad[oa]s?|cancelad[oa]s?|no autorizad[oa]|sin fondos|fondos insuficientes|no se pudo|no pudo|intento de|no fue posible|no se completo)\b/;
+  const RE_PROMO = /\b(?:promocion|promociones|descuento|oferta|aprovecha|sorteo|ganate|gana|cupon|campana|beneficio|exclusivo|participa|regalo)\b/;
+  const RE_CLAVE = /\b(?:codigo|clave|token|otp|contrasena|pin|verificacion|verifica|nunca compartas|no compartas)\b/;
+  const RE_RECORDATORIO = /\b(?:vence|vencimiento|fecha (?:limite|maxima) de pago|pago minimo|pago total|estado de cuenta|recordatorio|recuerda|debes pagar|tienes que pagar|pendiente de pago|saldo a pagar|saldo pendiente|tu proximo pago|proximo pago)\b/;
+  const RE_SOLO_SALDO = /\b(?:cupo|saldo)\b/;                                  // «su cupo disponible es $1.200»: informa, no es una operación
+  const RE_OPERACION_FECHA = /\b(?:compra|consumo|retiro|debito|deposito|transferencia)\s+(?:de|por|en|con)\b/;
+  const YA_PASO = /\b(?:realizad[oa]|recibid[oa]|recibimos|exitos[oa]|aprobad[oa]|acreditad[oa]|debitad[oa]|cobrad[oa]|registrad[oa]|se realizo|se debito|pagaste|compraste|hemos recibido|has recibido)\b/;
+  const RED_TARJETA = '(?:tarjeta|visa|mastercard|master card|diners|amex|american express)';
+  const RE_PAGO_PALABRA = /\b(?:pago|pagaste|pagamos|abono|abonaste|cancelacion|cancelaste)\b/;
+  // Cada mención de la tarjeta («con tu tarjeta de crédito Visa» / «de su tarjeta Visa»): si la precede «con / usando / mediante / desde» es el MEDIO de pago; si no, es lo que se paga.
+  function pagoATarjeta(n) {
+    if (!RE_PAGO_PALABRA.test(n) || /\b(compra|compraste|consumo|consumiste)\b/.test(n)) return false;
+    const re = /(?:\b(con|usando|mediante|desde|a traves de)\s+(?:tu\s+|su\s+|la\s+|una\s+)?)?(?:\btarjeta(?:\s+de\s+(?:credito|debito))?(?:\s+(?:visa|mastercard|master card|diners|amex|american express))?|\b(?:visa|mastercard|master card|diners|amex|american express))\b/g;
+    let m, hay = false;
+    while ((m = re.exec(n))) { if (!m[1]) { hay = true; break; } }
+    return hay;
+  }
+  const RE_DEBITO = /\b(?:debito|debit\w*|cajero|atm|retiro|retiraste|deuna|payphone|transferencia|transferiste|enviaste)\b|cuenta\s+(?:de\s+)?(?:ahorros?|corriente)/;
+  const RE_CREDITO = /\b(?:tarjeta\s+(?:de\s+)?credito|tc|credito\s+(?:visa|mastercard|diners)|visa|mastercard|master card|diners|amex|american express)\b/;
+
+  // ¿A cuál de tus tarjetas se refiere? Primero por los últimos 4 números; si no, por el nombre del banco o de la red.
+  // por: 'ultimos4' | 'nombre' | 'red' | 'unica' | null.  duda = conviene que la persona lo confirme.
+  function tarjetaDelAviso(n, t4, ctx, debito) {
+    const tarjetas = ctx.tarjetas || [];
+    if (!tarjetas.length) return { tarjetaId: null, por: null, duda: false };
+    if (t4) {
+      const t = tarjetas.find((x) => String(x.ultimos4 || '') === t4);
+      if (t) return { tarjetaId: t.id, por: 'ultimos4', duda: false };
+    }
+    if (debito) return { tarjetaId: null, por: null, duda: false };
+    const sinNumero = tarjetas.filter((x) => !x.ultimos4);                               // los últimos 4 son opcionales: si hay números que no coinciden con ninguna, esa tarjeta es otra
+    const candidatas = t4 ? sinNumero : tarjetas;
+    if (!candidatas.length) return { tarjetaId: null, por: null, duda: false };
+    const esCredito = RE_CREDITO.test(n);
+    const puntos = AF.parser && AF.parser.puntuarTarjetas ? AF.parser.puntuarTarjetas(n, Object.assign({}, ctx, { tarjetas: candidatas })) : [];
+    const a = puntos[0], b = puntos[1];
+    if (a && a.score >= 1) return { tarjetaId: a.id, por: 'nombre', duda: !!(b && b.score >= a.score) || !esCredito };
+    if (a && a.score > 0) return { tarjetaId: a.id, por: 'red', duda: true };
+    if (esCredito && candidatas.length === 1) return { tarjetaId: candidatas[0].id, por: 'unica', duda: true };
+    return { tarjetaId: null, por: null, duda: esCredito };
+  }
+
+  // «a 6 meses», «12 cuotas», «diferido», «sin intereses»…  null si es una compra de una sola cuota.
+  function cuotasDelAviso(n) {
+    const m = n.match(/\b(?:a|en|diferid[oa]s?\s+(?:a|en)|plazo\s+de)\s+(\d{1,2})\s+(?:meses|cuotas|pagos)\b/) || n.match(/\b(\d{1,2})\s+(?:meses|cuotas|pagos)\b/);
+    const dif = /\bdiferid[oa]s?\b|\bcuotas?\b|\ba plazos?\b/.test(n);
+    const meses = m ? Number(m[1]) : null;
+    if (meses === 1) return null;
+    if (!dif && !(meses && meses >= 2)) return null;
+    const cr = { modo: 'diferido' };
+    if (meses && meses >= 2 && meses <= 72) cr.meses = meses;
+    if (/\bsin\s+intereses?\b/.test(n)) cr.interes = false; else if (/\bcon\s+intereses?\b/.test(n)) cr.interes = true;
+    return cr;
+  }
+
+  // Lee un aviso del banco entero. Devuelve { ok, motivoNo?, tipo: 'gasto'|'ingreso'|'pago_tarjeta', monto, fecha, desc, cat, catConfianza,
+  //   cuenta, tarjetaId, tarjetaPor, credito, tarjeta4, duda: [] }   (ctx = { hoy, categorias, dicc, tarjetas, bancos })
+  function aviso(texto, ctx) {
+    ctx = ctx || {};
+    const t = String(texto || '').replace(/\s+/g, ' ').trim();
+    const n = U.norm(t);
+    const vacio = (motivoNo) => ({ ok: false, motivoNo, tipo: 'gasto', monto: null, duda: [] });
+    const hayOperacion = CUE_OPERACION.test(n);
+    if (RE_RECHAZADA.test(n)) return vacio('rechazada');
+    if (RE_CLAVE.test(n) && !hayOperacion) return vacio('clave');
+    if (RE_PROMO.test(n) && !hayOperacion) return vacio('promo');
+    if (RE_RECORDATORIO.test(n) && !YA_PASO.test(n) && !RE_OPERACION_FECHA.test(n)) return vacio('recordatorio');
+    if (RE_SOLO_SALDO.test(n) && !hayOperacion && !YA_PASO.test(n)) return vacio('saldo');
+    const x = bancario(t, ctx);
+    if (!x.ok) return Object.assign(x, { motivoNo: 'sin_monto' });
+    const esPagoATarjeta = pagoATarjeta(n);
+    const debito = !esPagoATarjeta && RE_DEBITO.test(n) && !(RE_CREDITO.test(n) && !/\bdebito\b/.test(n));
+    const tj = tarjetaDelAviso(n, x.tarjeta4, ctx, debito);
+    const duda = x.duda.slice();
+    const out = Object.assign({}, x, { duda, cuenta: 'efectivo', tarjetaId: null, tarjetaPor: null, credito: null });
+    if (/\b(?:reverso|reversion|reversado|devolucion|devolvieron|reembolso|nota de credito)\b/.test(n) && out.tipo !== 'pago_tarjeta') { out.tipo = 'ingreso'; if (!duda.includes('tipo')) duda.push('tipo'); out.cat = out.cat === 'otros' ? 'otros_ingresos' : out.cat; }
+    if (esPagoATarjeta) {
+      out.tipo = 'pago_tarjeta'; out.cat = null; out.catConfianza = 'alta';
+      const i = duda.indexOf('categoria'); if (i >= 0) duda.splice(i, 1);
+      const j = duda.indexOf('tipo'); if (j >= 0) duda.splice(j, 1);
+      if (tj.tarjetaId) { out.tarjetaId = tj.tarjetaId; out.tarjetaPor = tj.por; if (tj.duda) duda.push('tarjeta'); }
+      else if ((ctx.tarjetas || []).length) duda.push('tarjeta');
+      else { out.tipo = 'gasto'; out.cat = 'deudas'; out.motivoNota = 'Pago a una tarjeta que no tienes agregada.'; }
+      return out;
+    }
+    if (out.tipo === 'gasto' && tj.tarjetaId) {
+      out.cuenta = 'tarjeta'; out.tarjetaId = tj.tarjetaId; out.tarjetaPor = tj.por; if (tj.duda) duda.push('tarjeta');
+      const cr = cuotasDelAviso(n);
+      if (cr) out.credito = cr;
+    } else if (out.tipo === 'gasto' && !debito && tj.duda) duda.push('tarjeta');
+    return out;
+  }
+
+  // ¿Ya tienes anotado algo igual? Mismo tipo y monto, a ±1 día (y la misma tarjeta si es de tarjeta). Se avisa, no se bloquea.
+  function repetido(p, movs, opc) {
+    const tol = opc && opc.dias != null ? opc.dias : 1;
+    if (!p || !(p.monto > 0)) return null;
+    return (movs || []).find((m) => m.tipo === p.tipo && Math.abs(m.monto - p.monto) < 0.005 && Math.abs(U.diasEntre(m.fecha, p.fecha)) <= tol
+      && (p.tipo === 'pago_tarjeta' || (p.cuenta === 'tarjeta' && m.cuenta === 'tarjeta') ? m.tarjetaId === p.tarjetaId : true)) || null;
   }
 
   /* --------------------------------------------------------------------- factura */
@@ -3569,7 +4249,7 @@
     return out;
   }
 
-  AF.lector = { montosEn, fecha, tipoDe, comercio, bancario, bancarioVarios, factura, estadoCuenta, enmascarar };
+  AF.lector = { montosEn, fecha, tipoDe, comercio, bancario, bancarioVarios, avisosVarios, aviso, repetido, factura, estadoCuenta, enmascarar };
   if (typeof module === 'object' && module.exports) module.exports = AF.lector;
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
@@ -4518,7 +5198,7 @@
   };
   /* ------------------------------------------------------ versión web: saber si hay una versión nueva y aplicarla */
   // La compilación la escribe scripts/construir-web.js (huella de todos los archivos). En desarrollo queda sin escribir y no se busca nada.
-  const COMPILACION = '35b186599f';
+  const COMPILACION = 'c3ba7933a2';
   const esCompilada = /^[0-9a-f]{10}$/.test(COMPILACION);
   let registro = null, nuevaCompilacion = null, ultimaBusqueda = 0;
   const oyentesVersion = [];
@@ -5255,6 +5935,15 @@
     return h('div', { estilo: { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px' } }, lista.map((a) => h('button', { class: 'nota', type: 'button', estilo: { width: '100%', textAlign: 'left' }, role: 'status', onclick: () => AF.app.ir(a.accion || 'inicio') }, ico('alerta'), h('span', null, a.texto))));
   }
 
+  /* --------------------------------------------------------------- por revisar */
+  // Avisos del banco, facturas o textos que esperan tu «Guardar». Nada cuenta hasta que los confirmas.
+  function porRevisar() {
+    const n = V.bandeja ? V.bandeja.pendientes().length : 0;
+    if (!n) return null;
+    return h('button', { class: 'nota info', type: 'button', estilo: { width: '100%', textAlign: 'left', marginTop: '16px' }, onclick: () => AF.app.abrir('Por revisar', (c) => V.bandeja.render(c)) },
+      ico('papel'), h('span', null, h('strong', null, n === 1 ? 'Tienes 1 cosa por revisar. ' : 'Tienes ' + n + ' cosas por revisar. '), 'Toca para confirmarlas o descartarlas.'));
+  }
+
   /* --------------------------------------------------------------- gastos del mes (anillo) */
   // El total es TODO lo que compraste en el mes: el mismo «Gastos» que ves en Movimientos.
   function gastosDelMes(D, hoy) {
@@ -5383,7 +6072,7 @@
     cont.appendChild(dictar());
     const cuerpo = h('div', { class: 'contenido' });
     cuerpo.appendChild(atajos());
-    [avisos(D, hoy), gastosDelMes(D, hoy), ingresosVsGastos(D, hoy), resumenesChicos(D, hoy), metaYLimite(D, hoy), ultimos(D, hoy), pro()].forEach((s) => s && cuerpo.appendChild(s));
+    [porRevisar(), avisos(D, hoy), V.ahorro ? V.ahorro.tarjetaInicio(D, hoy) : null, gastosDelMes(D, hoy), ingresosVsGastos(D, hoy), resumenesChicos(D, hoy), metaYLimite(D, hoy), ultimos(D, hoy), pro()].forEach((s) => s && cuerpo.appendChild(s));
     cuerpo.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '22px', textAlign: 'center' } }, PLAN.app.avisoLegal));
     cont.appendChild(cuerpo);
   }
@@ -5545,9 +6234,21 @@
       case 'corregir': return vistaCorregir(r, texto);
       case 'presupuesto': return vistaPresupuesto(r, texto);
       case 'informe': cerrar(); return V.informesUI.abrir({ formato: r.formato, periodo: r.periodo });
+      case 'pantalla': cerrar(); return V.ahorro.abrirPantalla(r.pantalla);
       case 'ayuda': return vistaAyuda();
+      case 'nada': return vistaNada(texto);
       default: return vistaNoEntendi(texto);
     }
+  }
+
+  /* ------------------------------------------------------------------------- nada */
+  // «No gasté nada hoy», «aún no me pagan»: no hay nada que anotar, y la app lo dice en vez de pedir un monto.
+  function vistaNada(texto) {
+    const linea = 'Entendido, no anoté nada.';
+    pintar([cabeza(), h('div', { class: 'voz-cuerpo', estilo: { alignItems: 'center', textAlign: 'center' } }, h('div', { class: 'mic-grande ok' }, ico('ok')), h('p', { class: 'frase' }, '«' + texto + '»'), h('p', { class: 'voz-respuesta' }, linea)),
+      h('div', { class: 'voz-pie' }, btnPrim('Listo', cerrar), btnTxt('Sí quería anotar algo', () => { escribir(''); }))]);
+    hablar(linea);
+    setTimeout(() => { if (capa && vivo && capa.querySelector('.mic-grande.ok')) cerrar(); }, 3200);
   }
 
   /* ------------------------------------------------------------------- registrar */
@@ -5622,6 +6323,10 @@
     // Preguntas de duda: monto raro, palabra ambigua
     function dudas(it) {
       const out = [];
+      if (it.futuro) out.push(h('div', { class: 'duda-caja' }, h('p', null, 'Esto suena a algo que todavía no pagas. ¿Ya lo pagaste?'),
+        h('div', { class: 'opciones' },
+          h('button', { type: 'button', class: 'opcion', onclick: () => { it.futuro = false; dibujar(); } }, 'Sí, anótalo hoy'),
+          h('button', { type: 'button', class: 'opcion', onclick: () => { cerrar(); aviso('Listo, no anoté nada. Cuando lo pagues, dímelo.'); } }, 'Todavía no'))));
       if (it.dudaMonto) out.push(h('div', { class: 'duda-caja' }, h('p', null, '¿Fue ' + $(it.dudaMonto[0]) + ' o ' + $(it.dudaMonto[1]) + '?'),
         h('div', { class: 'opciones' }, it.dudaMonto.map((v) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': it.monto === v ? 'true' : 'false', onclick: () => { it.monto = v; it.dudaMonto = null; dibujar(); } }, $(v))))));
       if (it.duda) out.push(h('div', { class: 'duda-caja' }, h('p', null, it.duda.texto),
@@ -5647,7 +6352,7 @@
           const linea = h('button', { class: 'entendido-item', type: 'button', 'aria-expanded': abierto === idx ? 'true' : 'false', onclick: () => { abierto = abierto === idx ? -1 : idx; dibujar(); } },
             h('div', { class: 'ico' }, c.icono), h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, it.desc || c.nombre), h('div', { class: 'fila-sub' }, c.nombre + (it.tipo === 'gasto' && it.nec === 'G' ? ' · innecesario' : ''))),
             h('span', { class: 'monto ' + (it.tipo === 'ingreso' ? 'ingreso' : it.tipo === 'pago_tarjeta' ? 'pago' : 'gasto') }, (it.tipo === 'ingreso' ? '+' : '−') + $(it.monto)));
-          return abierto === idx ? h('div', null, linea, dudas(it), h('div', { estilo: { paddingLeft: '8px' } }, filasDetalle(it))) : h('div', null, linea, it.duda || it.dudaMonto ? dudas(it) : null);
+          return abierto === idx ? h('div', null, linea, dudas(it), h('div', { estilo: { paddingLeft: '8px' } }, filasDetalle(it))) : h('div', null, linea, it.duda || it.dudaMonto || it.futuro ? dudas(it) : null);
         })));
       }
       const avisos = [];
@@ -5736,35 +6441,15 @@
   /* --------------------------------------------------------------------- corregir */
   function vistaCorregir(r, texto) {
     const D = S().d;
-    const fin = (linea, deshacerPasos) => {
+    const fin = (linea, deshacerPasos, olvidar) => {
       pintar([cabeza(), h('div', { class: 'voz-cuerpo', estilo: { alignItems: 'center', textAlign: 'center' } }, h('div', { class: 'mic-grande ok' }, ico('ok')), h('p', { class: 'voz-respuesta' }, linea)),
-        h('div', { class: 'voz-pie' }, btnPrim('Listo', cerrar), deshacerPasos ? btnTxt('Deshacer', () => { for (let i = 0; i < deshacerPasos; i++) S().deshacer(); cerrar(); aviso('Lo dejé como estaba'); }) : null)]);
+        h('div', { class: 'voz-pie' }, btnPrim('Listo', cerrar), deshacerPasos ? btnTxt('Deshacer', () => { for (let i = 0; i < deshacerPasos; i++) S().deshacer(); if (olvidar) olvidar(); cerrar(); aviso('Lo dejé como estaba'); }) : null)]);
       hablar(linea);
       setTimeout(() => { if (capa && vivo && capa.querySelector('.mic-grande.ok')) cerrar(); }, 3200);
     };
-    if (r.accion === 'deshacer') {
-      const nota = S().deshacer();
-      return fin(nota ? 'Deshecho: ' + nota.charAt(0).toLowerCase() + nota.slice(1) + '.' : 'No hay nada que deshacer.', 0);
-    }
-    const m = AF.informes.objetivoDeCorreccion(D, r.objetivo);
-    if (!m) return fin('No encontré ningún movimiento para cambiar.', 0);
-    const nombre = '«' + (m.desc || S().categoria(m.cat).nombre) + '» de ' + $(m.monto);
-    if (r.accion === 'borrar') { S().borrar('movs', m.id, 'Borré ' + nombre); return fin('Borré ' + nombre + '.', 1); }
-    if (r.accion === 'categoria') {
-      const c = S().categoria(r.cat), vieja = S().categoria(m.cat);
-      const patch = { cat: c.id }; if (m.tipo === 'gasto' && (m.nec === vieja.nec || m.nec == null)) patch.nec = c.nec || null;
-      S().editar('movs', m.id, patch, 'Cambié ' + nombre + ' a ' + c.nombre);
-      if (m.desc) S().aprender(m.desc, c.id);
-      return fin('Listo, cambié ' + nombre + ' a ' + c.nombre.toLowerCase() + '.' + (m.desc ? ' Ya sé que «' + m.desc.toLowerCase() + '» va ahí.' : ''), 1);
-    }
-    if (r.accion === 'monto') { S().editar('movs', m.id, { monto: r.monto }, 'Cambié el monto'); return fin('Listo, ahora son ' + $(r.monto) + '.', 1); }
-    if (r.accion === 'necesidad') { S().editar('movs', m.id, { nec: r.nec }, 'Cambié necesario/innecesario'); return fin('Listo, ' + nombre + ' ahora cuenta como ' + (r.nec === 'N' ? 'necesario' : 'innecesario') + '.', 1); }
-    if (r.accion === 'tipo') {
-      const cat = S().categorias(r.nuevoTipo)[0].id;
-      S().editar('movs', m.id, { tipo: r.nuevoTipo, cat, nec: null }, 'Cambié el tipo');
-      return fin('Listo, ahora es un ' + r.nuevoTipo + '.', 1);
-    }
-    return vistaNoEntendi(texto, 'No entendí qué quieres cambiar.');
+    const res = AF.correcciones.aplicar(S(), r);
+    if (res.noEntendi) return vistaNoEntendi(texto, res.linea);
+    return fin(res.linea, res.pasos, res.olvidar);
   }
 
   /* ------------------------------------------------------------------ presupuesto */
@@ -5795,6 +6480,7 @@
   const EJEMPLOS_AYUDA = [
     ['Pagué 30 de luz', 'Registrar un gasto'], ['Me pagaron 500', 'Registrar un ingreso'], ['Pagué 30 de luz y 12 de internet', 'Varios a la vez'], ['Pagué la tarjeta 200', 'Pago a tu tarjeta'],
     ['Cuánto gasté este mes', 'Preguntar'], ['Cuánto me queda', 'Lo que te queda'], ['Qué gastos innecesarios hice', 'Tus gustos del mes'], ['Cambia el último a salud', 'Corregir'], ['Borra el último', 'Borrar'],
+    ['Qué tarjeta pago primero', 'Tu plan de deudas'], ['Plan de mi cobro', 'Repartir tu cobro'],
   ];
   function vistaAyuda() {
     pintar([cabeza('Qué puedo hacer'), h('div', { class: 'voz-cuerpo' }, h('p', { class: 'voz-respuesta' }, 'Háblame como le hablarías a alguien. Por ejemplo:'), h('div', { class: 'entendido' }, EJEMPLOS_AYUDA.map(([f, t]) => h('button', { class: 'entendido-fila', type: 'button', onclick: () => procesar(f) }, h('span', { class: 'texto-sm' }, '«' + f + '»'), h('span', { class: 'entendido-etiqueta' }, t))))), h('div', { class: 'voz-pie' }, btnPrim('Hablar', escuchar, 'btn-voz'), btnTxt('Cerrar', cerrar))]);
@@ -6221,6 +6907,8 @@
         cuerpo.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Próximos pagos')),
           h('div', { class: 'lista' }, pagos.map(({ t, e }) => fila({ icono: AF.ui.ico('calendario'), titulo: t.nombre, sub: 'Vence el ' + fechaLarga(e.proximoVence) + (e.diasParaVencer <= 3 ? ' · ' + (e.diasParaVencer <= 0 ? 'hoy' : 'en ' + e.diasParaVencer + (e.diasParaVencer === 1 ? ' día' : ' días')) : ''), derecha: h('span', { class: 'monto' }, $(e.aPagarProximo)), onclick: () => AF.app.abrir(t.nombre, (c) => detalle(c, t.id)) })))));
       }
+      if (D.tarjetas.some((t) => visto(t, hoy).deudaTotal > 0.004)) cuerpo.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'lista' }, fila({ icono: '📉', titulo: 'Plan para pagar deudas', sub: 'Qué tarjeta pagar primero y en cuántos meses terminas',
+        derecha: AF.acceso.tiene('planDeudas') ? ico('derecha') : AF.ui.chipPro(), onclick: () => V.ahorro.abrirDeudas() }))));
       cuerpo.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '24px' } }, 'Los valores son estimados con lo que registraste. Si tu banco dice otra cosa, toca la tarjeta y usa «Ajustar con mi estado de cuenta».'));
     }
     cont.appendChild(cuerpo);
@@ -6583,15 +7271,23 @@
   }
 
   function registrarPago(t, e) {
-    const inp = h('input', { class: 'entrada grande', inputmode: 'decimal', value: e.aPagarProximo ? String(e.aPagarProximo).replace('.', ',') : '', 'aria-label': 'Monto pagado' });
+    // El campo empieza VACÍO (si traía «85» y la persona escribía «50», quedaba «8550»). Los montos sugeridos son botones que reemplazan el campo.
+    const inp = h('input', { class: 'entrada grande', inputmode: 'decimal', value: '', placeholder: '0,00', 'aria-label': 'Monto pagado' });
+    const poner = (v) => { inp.value = String(U.r2(v)).replace('.', ','); inp.focus(); };
+    const sug = [];
+    if (e.aPagarProximo > 0) sug.push([(e.proximoVence ? 'Lo que vence' : 'A pagar') + ' · ' + $(e.aPagarProximo), e.aPagarProximo]);
+    if (e.pagoMinimo > 0 && e.pagoMinimo < e.aPagarProximo) sug.push(['Mínimo · ' + $(e.pagoMinimo), e.pagoMinimo]);
+    if (e.deudaTotal > 0 && e.deudaTotal > (e.aPagarProximo || 0) + 0.005) sug.push(['Toda la deuda · ' + $(e.deudaTotal), e.deudaTotal]);
     const fecha = h('input', { class: 'entrada', type: 'date', value: AF.app.hoy(), max: AF.app.hoy() });
-    hoja({ titulo: 'Registrar un pago', cuerpo: h('div', null, h('p', { class: 'suave', estilo: { marginTop: '4px' } }, 'No cuenta como gasto: solo baja lo que debes de ' + t.nombre + '.'), campo('Monto pagado', inp), campo('Fecha', fecha)),
+    hoja({ titulo: 'Registrar un pago', cuerpo: h('div', null, h('p', { class: 'suave', estilo: { marginTop: '4px' } }, 'No cuenta como gasto: solo baja lo que debes de ' + t.nombre + '.'), campo('Monto pagado', inp),
+      sug.length ? h('div', { class: 'chips-filtro', role: 'group', 'aria-label': 'Montos sugeridos', estilo: { marginTop: '10px' } }, sug.map(([txt, v]) => h('button', { type: 'button', class: 'chip-filtro', onclick: () => poner(v) }, txt))) : null,
+      campo('Fecha', fecha)),
       acciones: [{ texto: 'Guardar pago', clase: 'btn-primario', onclick: () => {
         const v = U.parseNumero(inp.value); if (!(v > 0)) { inp.focus(); return false; }
         S().agregar('movs', { tipo: 'pago_tarjeta', monto: U.r2(v), fecha: fecha.value || AF.app.hoy(), tarjetaId: t.id, cat: null, desc: 'Pago ' + t.nombre }, 'Pagué ' + t.nombre);
         aviso('Pago registrado', { texto: 'Deshacer', onclick: () => S().deshacer() });
       } }] });
-    setTimeout(() => inp.select(), 150);
+    setTimeout(() => inp.focus(), 150);
   }
 
   function ajustar(t) {
@@ -6611,7 +7307,7 @@
       } }] });
   }
 
-  V.tarjetas = { render, formTarjeta, asistente, visto };
+  V.tarjetas = { render, formTarjeta, asistente, visto, detalle };
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
 
@@ -6697,7 +7393,8 @@
 
   /* ======================================================================= METAS DE AHORRO */
   const ICONOS_META = ['🏝️', '🏠', '🚗', '🎓', '💻', '📱', '💍', '🛟', '🎁', '🏁'];
-  const ahorrado = (m) => U.r2((m.aportes || []).reduce((s, a) => s + a.monto, 0));
+  // Lo ahorrado = lo que aportaste + lo que se aparta solo (% del cobro y redondeo: AF.ahorro lo calcula de tus movimientos)
+  const ahorrado = (m) => (AF.ahorro ? AF.ahorro.ahorrado(S().d, m) : U.r2((m.aportes || []).reduce((s, a) => s + a.monto, 0)));
   function ritmoMeta(m, hoy) {
     const falta = U.r2(Math.max(0, m.objetivo - ahorrado(m)));
     if (falta === 0) return '¡Meta lograda!';
@@ -6715,6 +7412,10 @@
     else cont.appendChild(h('div', { class: 'lista' }, D.metas.map((m) => { const a = ahorrado(m), pct = m.objetivo ? a / m.objetivo : 0;
       return bloque({ icono: m.icono || '🏁', titulo: m.nombre, sub: $(a) + ' de ' + $(m.objetivo), derecha: h('span', { class: 'monto' }, Math.round(pct * 100) + ' %'), progreso: pct, nivel: pct >= 1 ? 'ok' : '',
         nota: ritmoMeta(m, hoy), onclick: () => AF.app.abrir(m.nombre, (c) => detalleMeta(c, m.id)) }); })));
+    cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Ahorra más fácil')), h('div', { class: 'lista' }, [
+      AF.ui.fila({ icono: '🪙', titulo: 'Ahorro automático', sub: 'Aparta solo un % de tu cobro o el redondeo', derecha: ico('derecha'), onclick: () => AF.app.abrir('Ahorro automático', (c) => V.ahorro.ahorroAutomatico(c)) }),
+      D.metas.some((m) => m.esFondo) ? null : AF.ui.fila({ icono: '🛟', titulo: 'Fondo de emergencia', sub: '3 a 6 meses de tus gastos necesarios', derecha: ico('derecha'), onclick: () => AF.app.abrir('Fondo de emergencia', (c) => V.ahorro.fondo(c)) }),
+      AF.ui.fila({ icono: '💰', titulo: 'Plan de tu cobro', sub: 'A dónde se va y cuánto queda libre', derecha: ico('derecha'), onclick: () => AF.app.abrir('Plan de tu cobro', (c) => V.ahorro.planCobro(c)) })])));
     return masBtn('Nueva meta', () => formMeta(null));
   }
   function detalleMeta(cont, id) {
@@ -6727,13 +7428,14 @@
       h('div', null, h('div', { class: 'plastico-pie' }, h('span', null, 'Meta ' + $(m.objetivo)), h('span', { class: 'suave' }, 'Faltan ' + $(Math.max(0, m.objetivo - a)))), h('div', { class: 'cupo' }, h('i', { estilo: { width: pct * 100 + '%' } })))));
     cont.appendChild(h('p', { class: 'suave', estilo: { margin: '14px 0 0' } }, ritmoMeta(m, hoy)));
     cont.appendChild(h('div', { estilo: { display: 'flex', gap: '10px', marginTop: '16px' } }, boton('Aportar o retirar', 'btn-voz', () => formAporte(m)), h('button', { class: 'btn btn-borde', type: 'button', 'aria-label': 'Editar meta', onclick: () => formMeta(m) }, ico('editar'))));
-    const ap = (m.aportes || []).slice().sort((x, y) => (x.fecha < y.fecha ? 1 : -1));
+    const auto = AF.ahorro ? AF.ahorro.derivados(S().d).filter((x) => x.metaId === m.id) : [];
+    const ap = (m.aportes || []).concat(auto).sort((x, y) => (x.fecha < y.fecha ? 1 : x.fecha > y.fecha ? -1 : 0));
     cont.appendChild(seccion('Movimientos de esta meta', ap.length ? h('div', { class: 'lista' }, ap.map((x) => h('div', { class: 'fila' },
       h('div', { class: 'ico ' + (x.monto >= 0 ? 'ingreso' : 'gasto') }, x.monto >= 0 ? '＋' : '－'),
-      h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, x.monto >= 0 ? 'Aporte' : 'Retiro'), h('div', { class: 'fila-sub' }, diaMes(x.fecha))),
+      h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, x.auto ? (x.auto === 'cobro' ? 'Apartado de tu cobro' : 'Redondeo') : x.monto >= 0 ? 'Aporte' : 'Retiro'), h('div', { class: 'fila-sub' }, diaMes(x.fecha) + (x.auto ? ' · ' + x.nota : ''))),
       h('span', { class: 'monto ' + (x.monto >= 0 ? 'ingreso' : 'gasto') }, (x.monto >= 0 ? '+' : '−') + $(Math.abs(x.monto))),
-      h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Quitar este movimiento', onclick: () => { S().editar('metas', m.id, { aportes: m.aportes.filter((z) => z.id !== x.id) }, 'Quité un aporte'); } }, ico('basura')))))
-      : h('p', { class: 'suave' }, 'Aún no has aportado. Toca «Aportar» cuando separes plata para esta meta.')));
+      x.auto ? null : h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Quitar este movimiento', onclick: () => { S().editar('metas', m.id, { aportes: m.aportes.filter((z) => z.id !== x.id) }, 'Quité un aporte'); } }, ico('basura')))))
+      : h('p', { class: 'suave' }, 'Aún no has aportado. Toca «Aportar o retirar» cuando separes plata para esta meta.')));
     cont.appendChild(h('div', { estilo: { textAlign: 'center', marginTop: '24px' } }, h('button', { class: 'btn-texto btn-peligro', type: 'button', onclick: async () => { if (await eliminar('metas', m.id, '¿Eliminar la meta «' + m.nombre + '»?', 'Se borra la meta y sus aportes. Tus gastos no se tocan.', 'Eliminé una meta')) AF.app.atras(); } }, 'Eliminar esta meta')));
   }
   function formAporte(m) {
@@ -6948,7 +7650,337 @@
       x.ahorro ? h('span', { class: 'monto ingreso' }, '≈ ' + $(x.ahorro)) : null)))));
   }
 
-  V.finanzas = { presupuestos, metas, fijos, prestamos, suscripciones, retos, ritmoMeta, ahorrado, mensajeCobro };
+  V.finanzas = { presupuestos, metas, fijos, prestamos, suscripciones, retos, ritmoMeta, ahorrado, mensajeCobro, formMeta, detalleMeta, ui: { boton, masBtn, intro, vacio, progreso, seccion, bloque, entradaMonto, errorEl } };
+})(typeof window !== 'undefined' ? window : globalThis);
+;
+
+/* ===== js/vistas/ahorro.js ===== */
+/* Ahorro y planes (pantallas): «Plan de tu cobro», «Ahorro automático», «Fondo de emergencia» y «Plan para pagar deudas».
+   Las cuentas están en ahorro.js (sin pantalla, con pruebas); aquí solo se muestran y se piden los datos que falten. */
+(function (g) {
+  'use strict';
+  const AF = (g.AF = g.AF || {});
+  const { h, ico, hoja, aviso, campo, fila } = AF.ui;
+  const U = AF.util, PLAN = AF.PLAN;
+  const V = (AF.vistas = AF.vistas || {});
+  const S = () => AF.store, C = () => V.comun, A = () => AF.ahorro, F = () => V.finanzas.ui;
+  const $ = (n) => U.dinero(n);
+  const num = (el) => U.parseNumero(el.value);
+  const coma = (n) => String(n).replace('.', ',');
+  const uno = (n) => coma(Math.round(n * 10) / 10);                                     // 2,5
+  const diaMesC = (iso) => U.deISO(iso).getDate() + ' ' + U.MESES_CORTOS[U.deISO(iso).getMonth()];
+  const plural = (n, a, b) => n + ' ' + (n === 1 ? a : b);
+  const abrir = (titulo, f) => AF.app.abrir(titulo, (c) => f(c));
+  const mesAnio = (iso) => U.nombreMes(iso) + ' de ' + iso.slice(0, 4);
+  const registrarCobro = () => C().formMovimiento({ inicial: { tipo: 'ingreso', cat: 'sueldo', monto: S().d.ajustes.sueldo || '' }, alGuardar: (m) => C().guardarMov(m) });
+  const aclaracion = () => h('p', { class: 'texto-xs suave', estilo: { marginTop: '18px' } }, 'Aquí solo llevo la cuenta: el dinero de verdad lo pasas tú a tu cuenta de ahorro cuando quieras.');
+
+  /* ===================================================================================== PLAN DE TU COBRO */
+  const COLORES = { fijos: 'var(--acento)', tarjetas: 'var(--oro)', metas: 'var(--ingreso)' };
+
+  function reparto(p) {
+    const partes = [['fijos', 'Pagos fijos', p.totalFijos], ['tarjetas', 'Tarjetas', p.totalTarjetas], ['metas', 'Metas y ahorro', p.totalMetas]];
+    const base = Math.max(p.cobro, p.comprometido) || 1;
+    const pct = (v) => Math.max(0, (v / base) * 100);
+    const barra = h('div', { class: 'reparto', role: 'img', 'aria-label': 'Reparto de tu cobro: ' + partes.filter((x) => x[2] > 0).map((x) => x[1] + ' ' + $(x[2])).join(', ') + (p.libre > 0 ? ', libre ' + $(p.libre) : '') },
+      partes.filter((x) => x[2] > 0).map((x) => h('i', { estilo: { width: pct(x[2]) + '%', background: COLORES[x[0]] } })),
+      p.libre > 0 ? h('i', { class: 'libre', estilo: { width: pct(p.libre) + '%' } }) : null);
+    const leyenda = h('ul', { class: 'leyenda' }, partes.filter((x) => x[2] > 0).map((x) => h('li', null, h('span', { class: 'punto', estilo: { background: COLORES[x[0]] }, 'aria-hidden': 'true' }), h('span', { class: 'leyenda-t' }, x[1]), h('span', { class: 'monto' }, $(x[2])))),
+      h('li', null, h('span', { class: 'punto libre', 'aria-hidden': 'true' }), h('span', { class: 'leyenda-t' }, 'Libre'), h('span', { class: 'monto' + (p.pasado ? ' gasto' : '') }, (p.pasado ? '−' : '') + $(Math.abs(p.libre)))));
+    return [barra, leyenda];
+  }
+
+  function planCobro(cont) {
+    const { intro, vacio, boton, seccion, bloque } = F();
+    const D = S().d, hoy = AF.app.hoy(), p = A().planCobro(D, hoy);
+    cont.appendChild(intro('A dónde se va tu cobro y cuánto te queda libre. Todo sale de lo que ya registraste.'));
+    if (p.sinCobro) {
+      cont.appendChild(vacio('Aún no registras tu cobro', 'Anótalo y te armo el plan: pagos fijos, tarjetas, metas y lo que queda libre.', 'Registrar mi cobro', registrarCobro));
+      return;
+    }
+    if (p.estimado) {
+      cont.appendChild(h('div', { class: 'nota info', estilo: { marginBottom: '12px' } }, ico('info'), h('span', null, h('strong', null, 'Uso tu sueldo de ' + $(p.cobro) + '. '), 'Aún no registras el cobro de este ciclo; cuando lo anotes, el plan usa lo que de verdad te pagaron. ',
+        h('button', { class: 'enlace', type: 'button', onclick: registrarCobro }, 'Registrar mi cobro'))));
+    }
+    // tarjeta principal: cobro, reparto y lo libre
+    const ciclo = p.ciclo;
+    const gastosDia = U.r2(p.libre - p.teQueda);
+    cont.appendChild(h('section', { class: 'plan-card', 'aria-label': 'Reparto de tu cobro' },
+      h('div', { class: 'plan-cab' }, h('div', null, h('div', { class: 'suave texto-sm' }, p.estimado ? 'Tu sueldo (estimado)' : 'Tu cobro de este ciclo'), h('div', { class: 'plan-cifra' }, $(p.cobro))),
+        h('span', { class: 'chip' }, ico('calendario'), ciclo.diasQuedan === 1 ? 'Queda 1 día' : 'Quedan ' + ciclo.diasQuedan + ' días')),
+      ...reparto(p),
+      h('div', { class: 'plan-libre' + (p.pasado ? ' pasado' : '') },
+        h('div', { class: 'suave texto-sm' }, p.pasado ? 'Te faltan' : 'Te queda libre'), h('div', { class: 'plan-cifra' }, $(Math.abs(p.libre))),
+        h('div', { class: 'suave texto-sm' }, p.pasado ? 'Tus pagos y lo que apartas superan tu cobro. Mira abajo qué puedes mover.' : p.libre > 0 ? 'Unos ' + $(p.libreDia) + ' al día durante los ' + ciclo.dias + ' días de este ciclo.' : 'Todo tu cobro ya tiene destino.')),
+      gastosDia >= 0.005 ? h('p', { class: 'texto-sm suave', estilo: { margin: '12px 0 0' } }, 'Ya gastaste ' + $(gastosDia) + ' del día a día, por eso en Inicio ves ' + (p.teQueda > 0 ? $(p.teQueda) : 'que ya no te queda') + '.') : null));
+
+    // pagos fijos
+    if (p.fijos.length) {
+      cont.appendChild(seccion('Pagos fijos', h('div', { class: 'lista' }, p.fijos.map((x) => {
+        const pf = D.pagosFijos.find((y) => y.id === x.id) || {};
+        return fila({ icono: S().categoria(pf.cat || 'otros').icono, tono: x.atrasado ? 'gasto' : '', titulo: x.nombre, sub: x.pagado ? 'Pagado' : x.atrasado ? 'Atrasado · venció el ' + diaMesC(x.vence) : 'Vence el ' + diaMesC(x.vence),
+          derecha: h('span', { class: 'monto' + (x.pagado ? ' suave' : '') }, $(x.monto)), onclick: () => abrir('Pagos fijos', V.finanzas.fijos) });
+      }))));
+    }
+    // tarjetas
+    if (p.tarjetas.length) {
+      cont.appendChild(seccion('Tarjetas', h('div', { class: 'lista' }, p.tarjetas.map((x) => fila({ icono: ico('tarjeta'), titulo: x.nombre,
+        sub: (x.pendiente > 0 ? 'Falta pagar ' + $(x.pendiente) + (x.vence ? ' · vence el ' + diaMesC(x.vence) : '') : 'Ya la pagaste') + (x.pagado > 0 && x.pendiente > 0 ? ' · ya pagaste ' + $(x.pagado) : ''),
+        derecha: h('span', { class: 'monto' + (x.pendiente <= 0 ? ' suave' : '') }, $(x.monto)), onclick: () => abrir(x.nombre, (c) => V.tarjetas.detalle(c, x.id)) })))));
+    }
+    // metas y ahorro automático
+    if (p.metas.length || p.auto.length) {
+      const filas = p.metas.map((x) => { const falta = U.r2(x.reservado - x.aportado);
+        return fila({ icono: x.icono, titulo: x.nombre, sub: x.aportado > 0 ? 'Ya apartaste ' + $(x.aportado) + (falta > 0.004 ? ' · falta ' + $(falta) : ' · listo este ciclo') : 'Aparta ' + $(x.reservado) + ' al mes', derecha: h('span', { class: 'monto' }, $(x.reservado)), onclick: () => abrir('Metas', V.finanzas.metas) }); });
+      p.auto.forEach((x) => filas.push(fila({ icono: x.tipo === 'cobro' ? '🪙' : '🔄', titulo: x.tipo === 'cobro' ? x.pct + ' % de tu cobro' : 'Redondeo de compras', sub: 'Va a «' + x.metaNombre + '» · ya sumó ' + $(x.monto) + ' en este ciclo', derecha: ico('derecha'), onclick: () => abrir('Ahorro automático', ahorroAutomatico) })));
+      cont.appendChild(seccion('Metas y ahorro', h('div', { class: 'lista' }, filas)));
+    }
+    if (!p.fijos.length && !p.tarjetas.length && !p.metas.length) cont.appendChild(h('div', { class: 'nota info' }, ico('info'), h('span', null, 'Aún no tienes pagos fijos, tarjetas con fechas ni metas con aporte. Cuando los agregues, aquí ves cuánto de tu cobro ya tiene destino.')));
+    if (p.pasado) cont.appendChild(h('div', { class: 'nota', estilo: { marginTop: '14px' } }, ico('alerta'), h('span', null, h('strong', null, 'Para respirar: '), 'baja el aporte de alguna meta este mes, pasa una cuota o revisa tus pagos fijos y suscripciones.')));
+    cont.appendChild(h('div', { estilo: { display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '22px' } },
+      boton('Apartar un % de mi cobro solo', 'btn-voz', () => abrir('Ahorro automático', ahorroAutomatico)),
+      boton('Fondo de emergencia', 'btn-borde', () => abrir('Fondo de emergencia', fondo))));
+  }
+
+  /* ===================================================================================== AHORRO AUTOMÁTICO */
+  const metasLista = () => S().d.metas.map((m) => ({ id: m.id, nombre: m.nombre, icono: m.icono || '🏁' }));
+  const ultimoCobro = (D) => { const l = D.movs.filter((m) => m.tipo === 'ingreso' && PLAN.ahorro.porcentaje.categoriasCobro.includes(m.cat)).sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0)); return l.length ? l[0].monto : D.ajustes.sueldo || null; };
+
+  // Elegir a qué meta va. Si no hay metas, ofrece crear una.
+  function selectorMeta(e, alCambiar) {
+    const caja = h('div', { class: 'opciones' });
+    const pintar = () => { AF.ui.vaciar(caja); metasLista().forEach((m) => caja.appendChild(h('button', { type: 'button', class: 'opcion', 'aria-pressed': e.metaId === m.id ? 'true' : 'false', onclick: () => { e.metaId = m.id; pintar(); if (alCambiar) alCambiar(); } }, m.icono + ' ' + m.nombre))); };
+    pintar();
+    return caja;
+  }
+  function sinMetas(api) {                                       // api: función que devuelve la hoja (todavía no existe cuando se arma el cuerpo)
+    const { boton } = F();
+    return h('div', null, h('p', { class: 'suave', estilo: { margin: '6px 0 14px' } }, 'Primero necesitas una meta a donde vaya lo que se aparta.'),
+      h('div', { estilo: { display: 'flex', flexDirection: 'column', gap: '10px' } }, boton('🛟 Fondo de emergencia', 'btn-primario', () => { api().cerrar(); abrir('Fondo de emergencia', fondo); }), boton('Crear otra meta', 'btn-borde', () => { api().cerrar(); V.finanzas.formMeta(null); })));
+  }
+
+  function formCobro() {
+    const { entradaMonto, errorEl } = F();
+    const D = S().d, cfg = PLAN.ahorro.porcentaje, previo = D.ajustes.ahorroAuto && D.ajustes.ahorroAuto.activo ? D.ajustes.ahorroAuto : null;
+    if (!D.metas.length) { let api; api = hoja({ titulo: 'Apartar un % de tu cobro', cuerpo: sinMetas(() => api), acciones: [{ texto: 'Cerrar', clase: 'btn-borde' }] }); return; }
+    const e = { metaId: previo ? previo.metaId : D.metas[0].id };
+    const pct = entradaMonto(previo ? previo.pct : cfg.sugeridos[1], '10', 'Porcentaje'), err = errorEl(), vista = h('p', { class: 'texto-sm suave', estilo: { marginTop: '10px' } });
+    const chips = h('div', { class: 'opciones' });
+    const base = ultimoCobro(D);
+    const pintar = () => {
+      const v = num(pct);
+      AF.ui.vaciar(chips); cfg.sugeridos.forEach((s) => chips.appendChild(h('button', { type: 'button', class: 'opcion', 'aria-pressed': v === s ? 'true' : 'false', onclick: () => { pct.value = String(s); pintar(); } }, s + ' %')));
+      vista.textContent = !(v > 0) ? '' : base ? 'Con un cobro de ' + $(base) + ' apartarías ' + $(U.r2((base * Math.min(v, cfg.maximo)) / 100)) + ' cada vez.' : 'Cada vez que registres tu cobro, aparto ese porcentaje.';
+    };
+    pct.addEventListener('input', pintar);
+    pintar();
+    hoja({ titulo: 'Apartar un % de tu cobro',
+      cuerpo: h('div', null, h('p', { class: 'suave', estilo: { margin: '4px 0 12px' } }, 'Cada vez que registres tu cobro, aparto este porcentaje para tu meta. Solo cuenta lo que registres desde ahora.'),
+        campo('Porcentaje de tu cobro', h('div', null, chips, h('div', { estilo: { marginTop: '10px' } }, pct)), 'Hasta ' + cfg.maximo + ' %.'), vista, campo('¿Para qué meta?', selectorMeta(e)), err),
+      acciones: [{ texto: 'Cancelar', clase: 'btn-borde' }, { texto: previo ? 'Guardar cambios' : 'Activar', clase: 'btn-primario', onclick: () => {
+        const v = num(pct);
+        if (!(v > 0) || v > cfg.maximo) { err.textContent = 'Escribe un porcentaje entre 1 y ' + cfg.maximo + '.'; pct.focus(); return false; }
+        A().configurar(S(), 'cobro', { activo: true, pct: U.r2(v), metaId: e.metaId });
+        aviso('Listo: aparto el ' + coma(U.r2(v)) + ' % de cada cobro desde ahora');
+      } }] });
+  }
+
+  function formRedondeo() {
+    const D = S().d, cfg = PLAN.ahorro.redondeo, previo = D.ajustes.redondeo && D.ajustes.redondeo.activo ? D.ajustes.redondeo : null;
+    if (!C().requiere('ahorroRedondeo')) return;
+    if (!D.metas.length) { let api; api = hoja({ titulo: 'Redondear tus compras', cuerpo: sinMetas(() => api), acciones: [{ texto: 'Cerrar', clase: 'btn-borde' }] }); return; }
+    const e = { paso: previo ? previo.paso : cfg.pasoPorDefecto, metaId: previo ? previo.metaId : D.metas[0].id };
+    const pasos = h('div', { class: 'opciones' }), vista = h('p', { class: 'texto-sm suave', estilo: { marginTop: '10px' } });
+    const pintar = () => {
+      AF.ui.vaciar(pasos); cfg.pasos.forEach((s) => pasos.appendChild(h('button', { type: 'button', class: 'opcion', 'aria-pressed': e.paso === s ? 'true' : 'false', onclick: () => { e.paso = s; pintar(); } }, 'Al ' + $(s))));
+      const ej = 3.4, sobra = U.r2(Math.ceil(ej / e.paso - 1e-9) * e.paso - ej);
+      vista.textContent = 'Si compras algo de ' + $(ej) + ', se redondea a ' + $(U.r2(ej + sobra)) + ' y aparto ' + $(sobra) + ' para tu meta. Las compras de más de ' + $(cfg.montoMax) + ' no se redondean.';
+    };
+    pintar();
+    hoja({ titulo: 'Redondear tus compras',
+      cuerpo: h('div', null, h('p', { class: 'suave', estilo: { margin: '4px 0 12px' } }, 'Cada gasto que registres se redondea hacia arriba y la diferencia suma a tu meta, sin que lo sientas.'),
+        campo('Redondear', pasos), vista, campo('¿Para qué meta?', selectorMeta(e))),
+      acciones: [{ texto: 'Cancelar', clase: 'btn-borde' }, { texto: previo ? 'Guardar cambios' : 'Activar', clase: 'btn-primario', onclick: () => {
+        A().configurar(S(), 'redondeo', { activo: true, paso: e.paso, metaId: e.metaId });
+        aviso('Listo: redondeo tus compras desde ahora');
+      } }] });
+  }
+
+  async function apagar(tipo) {
+    const txt = tipo === 'cobro' ? 'Dejo de apartar el porcentaje de tus próximos cobros. Lo que ya apartaste se queda en tu meta.' : 'Dejo de redondear tus próximas compras. Lo que ya apartaste se queda en tu meta.';
+    if (!(await C().confirmar({ titulo: '¿Apagarlo?', texto: txt, si: 'Apagar' }))) return;
+    A().configurar(S(), tipo, { activo: false });
+    aviso('Apagado');
+  }
+
+  function ahorroAutomatico(cont) {
+    const { intro, seccion, bloque, boton } = F();
+    const D = S().d, a = D.ajustes;
+    cont.appendChild(intro('Aparta plata para tus metas sin acordarte. Funciona con lo que registras: si editas o borras un cobro o una compra, lo apartado se ajusta solo.'));
+    const meta = (id) => D.metas.find((m) => m.id === id);
+    const apartado = (tipo) => U.r2(A().derivados(D).filter((x) => x.auto === tipo).reduce((s, x) => s + x.monto, 0));
+    const bloqueRegla = (o) => {
+      const on = o.cfg && o.cfg.activo && meta(o.cfg.metaId);
+      return h('div', { class: 'regla' + (on ? ' activa' : '') },
+        h('div', { class: 'regla-cab' }, h('div', { class: 'ico ' + (on ? 'ingreso' : 'neutro') }, o.icono), h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, o.titulo, o.pro && !AF.acceso.tiene('ahorroRedondeo') ? AF.ui.chipPro() : null), h('div', { class: 'fila-sub' }, on ? o.on(o.cfg, meta(o.cfg.metaId)) : o.off))),
+        on ? h('p', { class: 'texto-sm', estilo: { margin: '10px 0 0' } }, 'Apartado desde que lo activaste: ', h('strong', null, $(apartado(o.tipo)))) : null,
+        h('div', { class: 'regla-botones' }, on ? [boton('Cambiar', 'btn-borde btn-chico', o.abrir), boton('Apagar', 'btn-texto btn-peligro', () => apagar(o.tipo))] : [boton('Activar', 'btn-primario btn-chico', o.abrir)]));
+    };
+    cont.appendChild(h('div', { class: 'reglas' },
+      bloqueRegla({ tipo: 'cobro', icono: '🪙', titulo: 'Un % de cada cobro', cfg: a.ahorroAuto, off: 'Cuando registres tu cobro, aparto una parte para tu meta.', on: (c, m) => coma(c.pct) + ' % de cada cobro → ' + m.nombre, abrir: formCobro }),
+      bloqueRegla({ tipo: 'redondeo', icono: '🔄', titulo: 'Redondeo de compras', pro: true, cfg: a.redondeo, off: 'Cada compra sube al siguiente ' + $(PLAN.ahorro.redondeo.pasoPorDefecto) + ' y la diferencia va a tu meta.', on: (c, m) => 'Compras al ' + $(c.paso) + ' → ' + m.nombre, abrir: formRedondeo })));
+    cont.appendChild(aclaracion());
+    if (!D.metas.length) cont.appendChild(h('div', { class: 'nota info', estilo: { marginTop: '14px' } }, ico('info'), h('span', null, 'Para activarlo necesitas una meta. Puedes empezar con tu ', h('button', { class: 'enlace', type: 'button', onclick: () => abrir('Fondo de emergencia', fondo) }, 'fondo de emergencia'), '.')));
+  }
+
+  /* ===================================================================================== FONDO DE EMERGENCIA */
+  const nombreDeMes = (iso) => U.nombreMes(iso) + ' ' + iso.slice(0, 4);
+  function crearFondo(meses, monto) {
+    const D = S().d, cfg = PLAN.ahorro.fondo, previo = D.metas.find((m) => m.esFondo);
+    if (previo) { S().editar('metas', previo.id, { objetivo: U.r2(monto), fondoMeses: meses }, 'Ajusté mi fondo de emergencia'); aviso('Fondo ajustado a ' + (meses ? plural(meses, 'mes', 'meses') : $(monto))); return; }
+    if (!AF.acceso.puedeAgregar('metas', D.metas.length)) return C().pedirLimite('metas', 'meta de ahorro', 'metas de ahorro');
+    S().agregar('metas', { nombre: cfg.nombre, icono: cfg.icono, objetivo: U.r2(monto), aporteMensual: null, fechaMeta: null, aportes: [], esFondo: true, fondoMeses: meses || null }, 'Creé mi fondo de emergencia');
+    const nueva = S().d.metas.find((m) => m.esFondo);
+    aviso('Fondo de emergencia creado');
+    if (nueva && !(S().d.ajustes.ahorroAuto && S().d.ajustes.ahorroAuto.activo)) {
+      C().confirmar({ titulo: '¿Lo vamos llenando solo?', texto: 'Puedo apartar un porcentaje de cada cobro para tu fondo, sin que te acuerdes.', si: 'Sí, configurarlo', no: 'Ahora no' }).then((si) => { if (si) formCobro(); });
+    }
+  }
+  function formFondoManual() {
+    const { entradaMonto, errorEl } = F();
+    const monto = entradaMonto('', '0', 'Monto'), err = errorEl();
+    hoja({ titulo: 'Tu fondo de emergencia', cuerpo: h('div', null, h('p', { class: 'suave', estilo: { margin: '4px 0 12px' } }, 'Una guía: de ' + PLAN.ahorro.fondo.mesesMin + ' a ' + PLAN.ahorro.fondo.mesesMax + ' meses de lo que necesitas gastar para vivir (comida, arriendo, servicios, transporte).'), campo('¿Cuánto quieres juntar?', monto), err),
+      acciones: [{ texto: 'Cancelar', clase: 'btn-borde' }, { texto: 'Crear fondo', clase: 'btn-primario', onclick: () => { const v = num(monto); if (!(v > 0)) { err.textContent = 'Escribe un monto mayor que cero.'; monto.focus(); return false; } crearFondo(null, v); } }] });
+    setTimeout(() => monto.focus(), 200);
+  }
+  const NOTA_MESES = { 3: 'Lo mínimo recomendado', 6: 'Si tu ingreso varía' };
+  const memoFondo = { meses: null };
+
+  function fondo(cont) {
+    const { intro, vacio, boton, seccion, bloque, progreso } = F();
+    const D = S().d, hoy = AF.app.hoy(), fe = A().fondoEmergencia(D, hoy), cfg = PLAN.ahorro.fondo;
+    cont.appendChild(intro('Un colchón para imprevistos: de ' + cfg.mesesMin + ' a ' + cfg.mesesMax + ' meses de lo que de verdad necesitas gastar.'));
+    if (fe.fondoMeta) {
+      const m = fe.fondoMeta, pct = m.objetivo ? Math.min(1, fe.ahorrado / m.objetivo) : 0;
+      cont.appendChild(h('div', { class: 'lista' }, bloque({ icono: m.icono || cfg.icono, titulo: m.nombre, sub: $(fe.ahorrado) + ' de ' + $(m.objetivo), derecha: h('span', { class: 'monto' }, Math.round(pct * 100) + ' %'), progreso: pct, nivel: pct >= 1 ? 'ok' : '',
+        nota: fe.disponible && fe.mensual > 0 ? 'Con lo que llevas cubres ' + uno(fe.cobertura) + (fe.cobertura === 1 ? ' mes' : ' meses') + ' de tus gastos' + (fe.base === 'necesarios' ? ' necesarios.' : '.') : null, onclick: () => abrir(m.nombre, (c) => V.finanzas.detalleMeta(c, m.id)) })));
+    }
+    if (!fe.disponible) {
+      if (!fe.fondoMeta) cont.appendChild(vacio('Aún no tengo datos suficientes', fe.motivo, 'Poner mi propio monto', formFondoManual));
+      else cont.appendChild(h('p', { class: 'suave', estilo: { marginTop: '14px' } }, fe.motivo));
+      return;
+    }
+    const sel = memoFondo.meses && fe.opciones.some((o) => o.meses === memoFondo.meses) ? memoFondo.meses : fe.fondoMeta && fe.fondoMeta.fondoMeses && fe.opciones.some((o) => o.meses === fe.fondoMeta.fondoMeses) ? fe.fondoMeta.fondoMeses : fe.sugerido.meses;
+    const elegida = fe.opciones.find((o) => o.meses === sel);
+    cont.appendChild(h('div', { class: 'plan-card', estilo: { marginTop: '14px' } },
+      h('div', { class: 'suave texto-sm' }, fe.base === 'necesarios' ? 'Cada mes necesitas unos' : 'Cada mes gastas unos'), h('div', { class: 'plan-cifra' }, $(fe.mensual)),
+      h('p', { class: 'texto-sm suave', estilo: { margin: '8px 0 0' } }, fe.base === 'necesarios' ? 'Es el promedio de tus gastos necesarios (arriendo, comida, servicios, transporte…) de ' + (fe.mesesConDatos === 1 ? 'el último mes completo.' : 'los últimos ' + fe.mesesConDatos + ' meses completos.')
+        : 'Aún no marcas gastos como «necesarios», así que usé todos tus gastos de ' + (fe.mesesConDatos === 1 ? 'el último mes completo.' : 'los últimos ' + fe.mesesConDatos + ' meses completos.') + ' Marca los necesarios y te lo afino.')));
+    cont.appendChild(seccion('¿Cuántos meses quieres cubrir?', h('div', { class: 'lista' }, fe.opciones.map((o) => h('button', { type: 'button', class: 'fila fila-boton opcion-fila', 'aria-pressed': o.meses === sel ? 'true' : 'false', onclick: () => { memoFondo.meses = o.meses; AF.app.redibujar(); } },
+      h('div', { class: 'ico ' + (o.meses === sel ? 'ingreso' : 'neutro') }, String(o.meses)), h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, plural(o.meses, 'mes', 'meses')), NOTA_MESES[o.meses] ? h('div', { class: 'fila-sub' }, NOTA_MESES[o.meses]) : null),
+      h('span', { class: 'monto' }, $(o.monto)))))));
+    const yaIgual = fe.fondoMeta && U.r2(fe.fondoMeta.objetivo) === elegida.monto;
+    cont.appendChild(h('div', { estilo: { marginTop: '18px', display: 'flex', flexDirection: 'column', gap: '10px' } }, yaIgual ? h('p', { class: 'suave texto-sm', estilo: { textAlign: 'center' } }, 'Tu meta ya está en ' + plural(sel, 'mes', 'meses') + ' (' + $(elegida.monto) + ').')
+      : boton(fe.fondoMeta ? 'Ajustar mi fondo a ' + plural(sel, 'mes', 'meses') + ' (' + $(elegida.monto) + ')' : 'Crear mi fondo de ' + plural(sel, 'mes', 'meses') + ' (' + $(elegida.monto) + ')', 'btn-primario', () => crearFondo(sel, elegida.monto)), ));
+    if (fe.fondoMeta) cont.lastChild.appendChild(boton('Apartar un % de mi cobro para el fondo', 'btn-borde', () => abrir('Ahorro automático', ahorroAutomatico)));
+    cont.appendChild(h('details', { class: 'detalle-calculo' }, h('summary', null, 'Cómo lo calculé'),
+      h('div', { class: 'lista' }, fe.meses.map((m) => fila({ icono: '📅', titulo: nombreDeMes(m.mes), sub: m.gastos + ' gastos', derecha: h('span', { class: 'monto' }, $(fe.base === 'necesarios' ? m.necesarios : m.total)) })))));
+  }
+
+  /* ===================================================================================== PLAN PARA PAGAR DEUDAS */
+  const memoDeudas = { extra: 0, est: null };
+  function formDatosDeuda(d) {
+    const { errorEl } = F();
+    const t = S().buscar('tarjetas', d.id); if (!t) return;
+    const tasa = h('input', { class: 'entrada', inputmode: 'decimal', placeholder: 'Ej.: 16,5', value: t.tasaAnual != null ? coma(t.tasaAnual) : '', 'aria-label': 'Tasa anual' });
+    const min = h('input', { class: 'entrada', inputmode: 'decimal', placeholder: 'Ej.: 5', value: t.pagoMinimoPct != null ? coma(t.pagoMinimoPct) : '', 'aria-label': 'Pago mínimo' });
+    const err = errorEl();
+    hoja({ titulo: t.nombre, cuerpo: h('div', null, h('p', { class: 'suave', estilo: { margin: '4px 0 12px' } }, 'Estos dos datos salen de tu estado de cuenta o de la app de tu banco. Yo no los invento.'),
+      campo('Tasa de interés anual (%)', tasa, 'Si no la sabes, mira «tasa efectiva anual» en tu estado de cuenta.'), campo('Pago mínimo (% de lo que debes)', min, 'Qué parte del total te piden como mínimo.'), err),
+      acciones: [{ texto: 'Cancelar', clase: 'btn-borde' }, { texto: 'Guardar', clase: 'btn-primario', onclick: () => {
+        const a = tasa.value.trim() ? num(tasa) : null, b = min.value.trim() ? num(min) : null;
+        if ((a != null && !(a >= 0 && a <= 200)) || (b != null && !(b > 0 && b <= 100))) { err.textContent = 'Revisa los números: la tasa va de 0 a 200 y el mínimo de 1 a 100.'; return false; }
+        S().editar('tarjetas', t.id, { tasaAnual: a, pagoMinimoPct: b }, 'Completé datos de ' + t.nombre); aviso('Datos guardados');
+      } }] });
+  }
+  function formExtra() {
+    const { entradaMonto, errorEl } = F();
+    const monto = entradaMonto(memoDeudas.extra || '', '0', 'Extra al mes'), err = errorEl();
+    hoja({ titulo: 'Extra cada mes', cuerpo: h('div', null, h('p', { class: 'suave', estilo: { margin: '4px 0 12px' } }, 'Cuánto puedes pagar de más cada mes, además de los mínimos.'), campo('Extra al mes', monto), err),
+      acciones: [{ texto: 'Cancelar', clase: 'btn-borde' }, { texto: 'Calcular', clase: 'btn-primario', onclick: () => { const v = monto.value.trim() ? num(monto) : 0; if (!(v >= 0) || v > 100000) { err.textContent = 'Escribe un monto válido.'; return false; } memoDeudas.extra = U.r2(v); AF.app.redibujar(); } }] });
+    setTimeout(() => monto.focus(), 200);
+  }
+
+  function deudas(cont) {
+    const { intro, vacio, boton, seccion } = F();
+    const D = S().d, hoy = AF.app.hoy();
+    const pd = A().planDeudas(D, hoy, { extra: memoDeudas.extra });
+    cont.appendChild(intro('Qué tarjeta pagar primero y en cuántos meses terminas, usando tus datos.'));
+    if (!pd.hayDeudas) {
+      cont.appendChild(vacio('No debes nada en tarjetas', 'No veo saldo pendiente en tus tarjetas. Si compras a cuotas o con la tarjeta, aquí te armo el plan.'));
+      if (pd.totalPersonas > 0) cont.appendChild(notaPersonas(pd));
+      return;
+    }
+    const minimos = pd.deudas.every((x) => x.minimo != null) ? U.r2(pd.deudas.reduce((s, x) => s + x.minimo, 0)) : null;
+    cont.appendChild(h('div', { class: 'resumen-dos' }, h('div', null, h('div', { class: 'dato-etiqueta suave' }, 'Debes en tarjetas'), h('div', { class: 'dato-valor' }, $(pd.total))),
+      h('div', null, h('div', { class: 'dato-etiqueta suave' }, 'Mínimos al mes'), h('div', { class: 'dato-valor' }, minimos != null ? $(minimos) : '—'))));
+
+    // datos que faltan: se piden, no se inventan
+    const por = {}; pd.faltan.forEach((f) => { (por[f.id] = por[f.id] || { id: f.id, nombre: f.nombre, datos: [] }).datos.push(f.dato === 'tasa' ? 'la tasa anual' : 'el pago mínimo'); });
+    Object.values(por).forEach((x) => cont.appendChild(h('div', { class: 'nota', estilo: { marginTop: '12px' } }, ico('alerta'), h('span', null, h('strong', null, x.nombre + ': falta ' + x.datos.join(' y ') + '. '), 'Sin eso no puedo calcular los meses ni los intereses. ', h('button', { class: 'enlace', type: 'button', onclick: () => formDatosDeuda(x) }, 'Completar')))));
+
+    const orden = (ids) => ids.map((id) => pd.deudas.find((x) => x.id === id));
+    if (!pd.simulable) {
+      cont.appendChild(seccion('Mientras tanto, este es el orden', h('div', { class: 'lista' }, orden(pd.recomendada === 'avalancha' ? pd.ordenAvalancha : pd.ordenBola).map((x, i) => filaDeuda(x, i, null, i === 0 ? pd.motivoPrimera : null)))));
+      cont.appendChild(h('p', { class: 'texto-sm suave', estilo: { marginTop: '10px' } }, pd.recomendada === 'avalancha' ? 'Ordenadas de la que más intereses cobra a la que menos.' : 'Ordenadas de la más pequeña a la más grande.'));
+    } else {
+      const est = memoDeudas.est || pd.recomendada, sim = pd.sim, r = sim[est], base = sim.soloMinimos;
+      cont.appendChild(h('div', { estilo: { marginTop: '18px' } }, h('div', { class: 'segmentos', role: 'group', 'aria-label': 'Forma de pagar' }, [['avalancha', 'Avalancha'], ['bola', 'Bola de nieve']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': est === k ? 'true' : 'false', onclick: () => { memoDeudas.est = k; AF.app.redibujar(); } }, t + (pd.recomendada === k ? ' ✓' : '')))),
+        h('p', { class: 'texto-sm suave', estilo: { margin: '10px 0 0' } }, est === 'avalancha' ? 'Pagas primero la que más intereses cobra: es la que menos te cuesta en total.' : 'Pagas primero la más pequeña: cierras una rápido y te animas. Cuesta un poco más en intereses.') ));
+      cont.appendChild(h('div', { estilo: { marginTop: '16px' } }, h('div', { class: 'texto-sm', estilo: { fontWeight: 700, marginBottom: '8px' } }, '¿Cuánto extra puedes pagar al mes?'),
+        h('div', { class: 'opciones' }, [0].concat(PLAN.deudas.extraSugerido).map((v) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': memoDeudas.extra === v ? 'true' : 'false', onclick: () => { memoDeudas.extra = v; AF.app.redibujar(); } }, v === 0 ? 'Solo mínimos' : '+' + $(v))),
+          h('button', { type: 'button', class: 'opcion', 'aria-pressed': ![0].concat(PLAN.deudas.extraSugerido).includes(memoDeudas.extra) ? 'true' : 'false', onclick: formExtra }, ![0].concat(PLAN.deudas.extraSugerido).includes(memoDeudas.extra) ? '+' + $(memoDeudas.extra) : 'Otro'))));
+      // resultado
+      const termina = r.termina;
+      const ahorro = termina && base.termina ? U.r2(base.intereses - r.intereses) : null;
+      cont.appendChild(h('div', { class: 'plan-card', estilo: { marginTop: '16px' } },
+        termina ? [h('div', { class: 'suave texto-sm' }, 'Terminas de pagar en'), h('div', { class: 'plan-cifra' }, plural(r.meses, 'mes', 'meses')), h('div', { class: 'suave texto-sm' }, 'Aprox. en ' + mesAnio(U.sumarMeses(hoy, r.meses)) + ' · pagando ' + $(sim.presupuesto) + ' al mes en total.')]
+          : [h('div', { class: 'suave texto-sm' }, 'Con este pago'), h('div', { class: 'plan-cifra' }, 'No terminas'), h('div', { class: 'suave texto-sm' }, 'Los intereses se comen lo que pagas. Sube el extra para que la deuda baje.')],
+        termina ? h('div', { class: 'resumen-dos', estilo: { marginTop: '14px' } }, h('div', null, h('div', { class: 'dato-etiqueta suave' }, 'Intereses que pagarías'), h('div', { class: 'dato-valor' }, $(r.intereses))),
+          h('div', null, h('div', { class: 'dato-etiqueta suave' }, ahorro != null && ahorro > 0.004 ? 'Ahorras vs. solo mínimos' : 'Solo mínimos'), h('div', { class: 'dato-valor' }, ahorro != null && ahorro > 0.004 ? $(ahorro) : base.termina ? plural(base.meses, 'mes', 'meses') : 'Nunca termina'))) : null));
+      cont.appendChild(seccion('Paga en este orden', h('div', { class: 'lista' }, orden(est === 'avalancha' ? pd.ordenAvalancha : pd.ordenBola).map((x, i) => { const c = r.cierres.find((y) => y.id === x.id); return filaDeuda(x, i, c ? c.mes : null, i === 0 ? (est === 'avalancha' ? (x.tasa != null ? 'Es la que más intereses te cobra (' + coma(x.tasa) + ' % al año).' : 'Es la primera de tu lista.') : 'Es la más pequeña: la cierras rápido y liberas su pago para la siguiente.') : null); }))));
+      if (est !== pd.recomendada && sim[pd.recomendada].termina && r.termina) {
+        const dif = U.r2(r.intereses - sim[pd.recomendada].intereses);
+        if (dif > 0.004) cont.appendChild(h('p', { class: 'texto-sm suave', estilo: { marginTop: '10px' } }, 'Con la forma recomendada pagarías ' + $(dif) + ' menos de intereses.'));
+      }
+      const primera = orden(est === 'avalancha' ? pd.ordenAvalancha : pd.ordenBola)[0];
+      cont.appendChild(h('div', { estilo: { marginTop: '18px' } }, boton('Ir a ' + primera.nombre, 'btn-primario', () => abrir(primera.nombre, (c) => V.tarjetas.detalle(c, primera.id)))));
+    }
+    if (pd.totalPersonas > 0) cont.appendChild(notaPersonas(pd));
+    cont.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '22px' } }, 'Es una simulación con los datos que pusiste. Tu banco puede calcular los intereses de otra forma: confirma con tu estado de cuenta.'));
+  }
+  function filaDeuda(x, i, mesCierre, motivo) {
+    return fila({ icono: h('span', { class: 'numero-orden' }, String(i + 1)), titulo: x.nombre, sub: (motivo ? motivo + ' ' : '') + (mesCierre ? 'La terminas en el mes ' + mesCierre + '.' : '') + (!motivo && !mesCierre && x.tasa != null ? coma(x.tasa) + ' % al año' : ''),
+      derecha: h('span', { class: 'monto' }, $(x.saldo)), onclick: () => abrir(x.nombre, (c) => V.tarjetas.detalle(c, x.id)) });
+  }
+  const notaPersonas = (pd) => h('div', { class: 'nota info', estilo: { marginTop: '16px' } }, ico('info'), h('span', null, h('strong', null, 'También le debes ' + $(pd.totalPersonas) + ' a ' + plural(pd.personas.length, 'persona', 'personas') + '. '), 'Ahí no cuento intereses; míralo en ',
+    h('button', { class: 'enlace', type: 'button', onclick: () => abrir('Préstamos', V.finanzas.prestamos) }, 'Préstamos'), '.'));
+
+  const abrirDeudas = () => { if (C().requiere('planDeudas')) abrir('Plan para pagar deudas', deudas); };
+
+  /* ===================================================================================== TARJETA EN INICIO */
+  // El día del cobro (y el siguiente) Inicio invita a repartirlo.
+  function tarjetaInicio(D, hoy) {
+    if (!AF.acceso.tiene('planCobro')) return null;
+    const p = A().planCobro(D, hoy);
+    if (!p.destacar) return null;
+    return h('section', { class: 'seccion' }, h('button', { class: 'tip', type: 'button', onclick: () => abrir('Plan de tu cobro', planCobro) },
+      h('span', { class: 'ico' }, '💰'), h('span', { estilo: { flex: 1 } }, h('strong', null, 'Ya cobraste: repártelo'), h('span', null, p.pasado ? 'Tus pagos superan tu cobro. Míralo antes de gastar.' : 'Te quedan ' + $(p.libre) + ' libres después de tus pagos y tu ahorro.')), ico('adelante', 'chico')));
+  }
+
+  // Desde la voz o el texto: «qué tarjeta pago primero», «plan de mi cobro»…
+  const abrirPantalla = (cual) => ({ cobro: () => abrir('Plan de tu cobro', planCobro), fondo: () => abrir('Fondo de emergencia', fondo), auto: () => abrir('Ahorro automático', ahorroAutomatico), deudas: abrirDeudas }[cual] || (() => {}))();
+  V.ahorro = { planCobro, ahorroAutomatico, fondo, deudas, abrirDeudas, abrirPantalla, tarjetaInicio, formCobro, formRedondeo };
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
 
@@ -7256,7 +8288,7 @@
   const V = (AF.vistas = AF.vistas || {});
   const S = () => AF.store, C = () => V.comun, N = () => AF.nativo, L = () => AF.lector, I = () => AF.informes;
   const $ = (n) => U.dinero(n);
-  const ctx = () => ({ hoy: AF.app.hoy(), categorias: S().categorias(), dicc: S().d.diccionario });
+  const ctx = () => ({ hoy: AF.app.hoy(), categorias: S().categorias(), dicc: S().d.diccionario, tarjetas: S().d.tarjetas, bancos: AF.bancos ? AF.bancos.lista(S().d.ajustes.pais) : [] });
   const ORIGEN = { factura: ['🧾', 'Factura'], banco: ['🏦', 'Mensaje del banco'], captura: ['📷', 'Captura'], texto: ['📝', 'Texto'] };
   const diaMes = (iso) => U.deISO(iso).getDate() + ' ' + U.MESES_CORTOS[U.deISO(iso).getMonth()];
 
@@ -7264,10 +8296,24 @@
   // x = salida del lector ({ok, tipo, monto, fecha, desc, cat, items, tarjeta4, duda}) o null si no se entendió nada
   function agregarABandeja(origen, texto, x) {
     const prop = x && x.ok ? { tipo: x.tipo, monto: x.monto, cat: x.cat, desc: x.desc || '', fecha: x.fecha } : null;
-    const t4 = x && x.tarjeta4 ? x.tarjeta4 : null;
-    const tj = t4 ? S().d.tarjetas.find((t) => t.ultimos4 === t4) : null;
-    if (prop && tj && prop.tipo === 'gasto') { prop.cuenta = 'tarjeta'; prop.tarjetaId = tj.id; }
-    return S().agregar('bandeja', { origen, texto: String(texto || '').slice(0, 2000), propuesta: prop, items: x && x.items ? x.items : [], dividir: false, tarjeta4: t4, duda: x ? x.duda : ['monto'], hecho: false }, 'Llegó algo a la bandeja');
+    let duda = x ? (x.duda || []).slice() : ['monto'];
+    if (prop) {
+      // La tarjeta: la que ya decidió el lector (aviso del banco: últimos 4 o nombre del banco) o, en una factura, la de los últimos 4 números
+      const tj = x.tarjetaId ? S().buscar('tarjetas', x.tarjetaId) : x.tarjeta4 ? S().d.tarjetas.find((t) => t.ultimos4 === x.tarjeta4) : null;
+      // Si el aviso no dice cuál tarjeta es, NO se elige sola: la persona la escoge en la lista (así no baja la deuda de otra tarjeta sin querer)
+      const dudaTj = duda.includes('tarjeta');
+      if (prop.tipo === 'pago_tarjeta') { prop.tarjetaId = tj && !dudaTj ? tj.id : null; prop.cat = null; prop.desc = tj && !dudaTj ? 'Pago ' + tj.nombre : 'Pago de tarjeta'; }
+      else if (tj && !dudaTj && prop.tipo === 'gasto' && (x.cuenta === 'tarjeta' || !x.cuenta)) { prop.cuenta = 'tarjeta'; prop.tarjetaId = tj.id; if (x.credito) prop.credito = x.credito; }
+      else if (dudaTj && prop.tipo === 'gasto' && x.credito) prop.credito = x.credito;   // las cuotas se recuerdan; la tarjeta la elige la persona
+    }
+    const it = { origen, texto: String(texto || '').slice(0, 2000), propuesta: prop, items: x && x.items ? x.items : [], dividir: false, tarjeta4: x && x.tarjeta4 ? x.tarjeta4 : null, duda, hecho: false };
+    // ¿ya lo tienes anotado, o ya llegó por otro mensaje?
+    if (prop) {
+      const igual = L().repetido(prop, S().d.movs), cola = L().repetido(prop, pendientes().map((b) => b.propuesta).filter(Boolean), { dias: 0 });
+      if (igual) it.repetido = { en: 'movs', fecha: igual.fecha, desc: igual.desc || '' };
+      else if (cola) it.repetido = { en: 'bandeja', fecha: cola.fecha, desc: cola.desc || '' };
+    }
+    return S().agregar('bandeja', it, 'Llegó algo a la bandeja');
   }
   const pendientes = () => S().d.bandeja.filter((b) => !b.hecho);
   const plural = (n, uno, varios) => n + ' ' + (n === 1 ? uno : varios);
@@ -7283,9 +8329,10 @@
   }
 
   function movDe(p) {
+    if (p.tipo === 'pago_tarjeta') return { tipo: 'pago_tarjeta', monto: U.r2(p.monto), fecha: p.fecha, tarjetaId: p.tarjetaId, cat: null, desc: p.desc || 'Pago de tarjeta' };
     const m = { tipo: p.tipo, monto: U.r2(p.monto), cat: p.cat, desc: p.desc || '', fecha: p.fecha, cuenta: p.cuenta || 'efectivo' };
     if (p.tipo === 'gasto') m.nec = S().categoria(p.cat).nec || null;
-    if (m.cuenta === 'tarjeta') { m.tarjetaId = p.tarjetaId; m.credito = { modo: 'corriente' }; }
+    if (m.cuenta === 'tarjeta') { m.tarjetaId = p.tarjetaId; m.credito = p.credito && p.credito.modo === 'diferido' ? Object.assign({}, p.credito) : { modo: 'corriente' }; }
     return m;
   }
   // Productos de una factura, solo si caben dentro del total. Lo que falte (IVA, propina, redondeo) va en una línea aparte
@@ -7320,7 +8367,7 @@
         'Comparte un mensaje de tu app del banco o de WhatsApp y elige «' + PLAN.app.nombreCorto + '». También puedes sacar una foto a una factura o pegar el texto.'));
     } else {
       cont.appendChild(h('div', { class: 'lista', estilo: { marginTop: '8px' } }, pend.map(tarjetaItem)));
-      const validos = pend.filter((x) => x.propuesta);
+      const validos = pend.filter((x) => x.propuesta && !x.repetido && !(x.duda || []).includes('tarjeta'));
       if (validos.length >= 2) cont.appendChild(h('div', { estilo: { marginTop: '18px' } }, h('button', { class: 'btn btn-primario btn-bloque', type: 'button', onclick: () => {
         const u = conDeshacer(() => validos.reduce((s, x) => s + guardarItem(x), 0)); aviso(plural(u.resultado, 'movimiento guardado', 'movimientos guardados'), u.accion);
       } }, 'Guardar los ' + validos.length)));
@@ -7332,11 +8379,33 @@
   function tarjetaItem(it) {
     const p = it.propuesta, [em, nom] = ORIGEN[it.origen] || ORIGEN.texto;
     const cuerpo = h('div', { class: 'bloque' });
-    cuerpo.appendChild(h('div', { class: 'bloque-fila' }, h('div', { class: 'bloque-cab' }, h('div', { class: 'ico ' + (p ? (p.tipo === 'ingreso' ? 'ingreso' : 'gasto') : '') }, p ? S().categoria(p.cat).icono : em),
+    const esPago = p && p.tipo === 'pago_tarjeta', tjDe = p && p.tarjetaId ? S().buscar('tarjetas', p.tarjetaId) : null;
+    const cuotas = p && p.credito && p.credito.modo === 'diferido' ? 'Compra diferida: ' + (p.credito.meses ? 'a ' + p.credito.meses + ' meses' : 'a cuotas') + (p.credito.interes === false ? ' sin intereses' : p.credito.interes === true ? ' con intereses' : '') + '.' : '';
+    // ¿habrá selector de tarjeta? Entonces el nombre de la tarjeta ya se ve ahí y no se repite en la línea chica (que se corta en el teléfono).
+    const falta = !!(p && S().d.tarjetas.length && (it.duda || []).includes('tarjeta'));
+    const haySel = !!(p && p.tipo !== 'ingreso' && S().d.tarjetas.length && (esPago || (it.duda || []).includes('tarjeta') || p.cuenta === 'tarjeta') && (S().d.tarjetas.length > 1 || (it.duda || []).includes('tarjeta')));
+    cuerpo.appendChild(h('div', { class: 'bloque-fila' }, h('div', { class: 'bloque-cab' }, h('div', { class: 'ico ' + (p ? (p.tipo === 'ingreso' ? 'ingreso' : esPago ? 'neutro' : 'gasto') : '') }, p ? (esPago ? ico('tarjeta') : S().categoria(p.cat).icono) : em),
       h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, p ? (p.desc || S().categoria(p.cat).nombre) : 'No pude leer un monto'),
-        h('div', { class: 'fila-sub' }, p ? S().categoria(p.cat).nombre + ' · ' + diaMes(p.fecha) + (p.cuenta === 'tarjeta' ? ' · ' + (S().buscar('tarjetas', p.tarjetaId) || { nombre: 'tarjeta' }).nombre : '') : nom)),
-      p ? h('span', { class: 'monto ' + (p.tipo === 'ingreso' ? 'ingreso' : 'gasto') }, (p.tipo === 'ingreso' ? '+' : '−') + $(p.monto)) : null)));
-    if (it.duda && it.duda.length && p) cuerpo.appendChild(h('div', { class: 'bloque-nota' }, 'Revisa: ' + it.duda.map((d) => ({ monto: 'el monto', tipo: 'si es gasto o ingreso', fecha: 'la fecha', categoria: 'la categoría' }[d] || d)).join(', ') + '.'));
+        h('div', { class: 'fila-sub' }, p ? (esPago ? 'Pago de tarjeta' : S().categoria(p.cat).nombre) + ' · ' + diaMes(p.fecha) + (p.cuenta === 'tarjeta' && tjDe && !haySel ? ' · ' + tjDe.nombre : '') : nom)),
+      p ? h('span', { class: 'monto ' + (p.tipo === 'ingreso' ? 'ingreso' : esPago ? 'pago' : 'gasto') }, (p.tipo === 'ingreso' ? '+' : esPago ? '' : '−') + $(p.monto)) : null)));
+    if (it.repetido && p) cuerpo.appendChild(h('div', { class: 'nota', estilo: { marginTop: '10px' } }, ico('alerta'), h('span', null, h('strong', null, 'Parece repetido. '),
+      it.repetido.en === 'movs' ? 'Ya tienes anotado algo igual el ' + diaMes(it.repetido.fecha) + (it.repetido.desc ? ' («' + it.repetido.desc + '»)' : '') + '.' : 'Ya hay otro igual en esta lista.', ' Si es otra compra, guárdalo igual.')));
+    if (it.duda && it.duda.length && p) cuerpo.appendChild(h('div', { class: 'bloque-nota' }, 'Revisa: ' + it.duda.map((d) => ({ monto: 'el monto', tipo: 'si es gasto o ingreso', fecha: 'la fecha', categoria: 'la categoría', tarjeta: 'la tarjeta' }[d] || d)).join(', ') + '.'));
+    if (cuotas) cuerpo.appendChild(h('div', { class: 'bloque-nota' }, cuotas));
+    // ¿con qué tarjeta? Si hay más de una (o el lector dudó), se elige aquí mismo.
+    if (haySel) {
+      const sel = h('select', { class: 'entrada', 'aria-label': esPago ? '¿Qué tarjeta pagaste?' : '¿Con qué tarjeta?', estilo: { marginTop: '10px' }, onchange: (ev) => {
+        const v = ev.target.value; if (!v) return;
+        const nuevaDuda = (it.duda || []).filter((d) => d !== 'tarjeta');
+        const nuevo = esPago ? { tarjetaId: v, desc: 'Pago ' + S().buscar('tarjetas', v).nombre } : v === 'ninguna' ? { cuenta: 'efectivo', tarjetaId: null, credito: undefined } : { cuenta: 'tarjeta', tarjetaId: v };
+        S().editar('bandeja', it.id, { propuesta: Object.assign({}, p, nuevo), duda: nuevaDuda }, 'Elegí la tarjeta');
+      } },
+        !tjDe && (esPago || falta) ? h('option', { value: '', selected: true }, esPago ? 'Elige la tarjeta' : '¿Con qué tarjeta fue?') : null,
+        esPago ? null : h('option', { value: 'ninguna', selected: !tjDe && !falta }, 'Sin tarjeta de crédito (efectivo o débito)'),
+        S().d.tarjetas.map((t) => h('option', { value: t.id, selected: t.id === p.tarjetaId }, t.nombre + (t.ultimos4 ? ' ••' + t.ultimos4 : ''))));
+      cuerpo.appendChild(sel);
+    }
+    if (esPago && !S().d.tarjetas.length) cuerpo.appendChild(h('div', { class: 'bloque-nota' }, 'Para guardar este pago primero agrega esa tarjeta en la pestaña Tarjetas.'));
     if (it.texto) cuerpo.appendChild(h('details', { class: 'bloque-nota' }, h('summary', { estilo: { cursor: 'pointer' } }, 'Ver lo que leí'), h('pre', { estilo: { whiteSpace: 'pre-wrap', margin: '8px 0 0', font: 'inherit', fontSize: '13px' } }, it.texto)));
     const pp = p ? partes(it) : null;
     if (pp) {
@@ -7347,7 +8416,7 @@
           h('div', { class: 'fila-sub', estilo: { whiteSpace: 'normal' } }, pp.slice(0, 3).map((x) => (x.corto || x.desc) + ' ' + $(x.monto)).join(' · ') + (pp.length > 3 ? '…' : ''))), h('span', { class: 'pastilla' })));
     }
     cuerpo.appendChild(h('div', { estilo: { display: 'flex', gap: '8px', marginTop: '12px' } },
-      p ? h('button', { class: 'btn btn-primario btn-chico', type: 'button', estilo: { flex: 1 }, onclick: () => { const u = conDeshacer(() => guardarItem(it)); aviso(u.resultado > 1 ? u.resultado + ' movimientos guardados' : 'Guardado', u.accion); } }, 'Guardar') : null,
+      p ? h('button', { class: 'btn ' + (it.repetido ? 'btn-borde' : 'btn-primario') + ' btn-chico', type: 'button', estilo: { flex: 1 }, disabled: (esPago && !tjDe) || falta, onclick: () => { const u = conDeshacer(() => guardarItem(it)); aviso(u.resultado > 1 ? u.resultado + ' movimientos guardados' : 'Guardado', u.accion); } }, it.repetido ? 'Guardar igual' : 'Guardar') : null,
       h('button', { class: 'btn btn-borde btn-chico', type: 'button', estilo: { flex: p ? 'none' : 1 }, onclick: () => editar(it) }, p ? 'Editar' : 'Escribirlo yo'),
       h('button', { class: 'btn btn-borde btn-chico', type: 'button', 'aria-label': 'Descartar', onclick: () => { S().editar('bandeja', it.id, { hecho: true, resultado: 'descartado' }, 'Descarté un pendiente'); aviso('Descartado', { texto: 'Deshacer', onclick: () => S().deshacer() }); } }, ico('basura', 'chico'))));
     return cuerpo;
@@ -7393,18 +8462,31 @@
   function pegarTexto(mensaje) {
     const ta = h('textarea', { class: 'entrada', rows: 6, placeholder: 'Pega aquí el mensaje del banco o el texto de la factura', estilo: { height: '150px', padding: '12px 16px', resize: 'none' }, 'aria-label': 'Texto a leer' });
     const err = h('div', { class: 'ayuda', role: 'alert', estilo: { color: 'var(--gasto)', minHeight: '18px', marginTop: '8px' } });
-    hoja({ titulo: 'Pegar un texto', cuerpo: h('div', null, typeof mensaje === 'string' ? h('p', { class: 'suave', estilo: { marginTop: '6px' } }, mensaje) : null, campo('Texto', ta, 'Puede traer varios mensajes: dejo una línea en blanco entre uno y otro.'), err),
-      acciones: [{ texto: 'Leer', clase: 'btn-primario', onclick: () => { const n = leerTexto(ta.value, 'texto'); if (!n) { err.textContent = 'No encontré ningún monto en ese texto.'; return false; } mostrar(); } }] });
+    const pegar = h('button', { class: 'btn btn-borde btn-chico', type: 'button', estilo: { marginBottom: '10px' }, onclick: async () => {
+      try { const t = await g.navigator.clipboard.readText(); if (t && t.trim()) { ta.value = t; err.textContent = ''; } else err.textContent = 'No tienes nada copiado.'; }
+      catch (e) { err.textContent = 'Tu teléfono no me deja leer lo copiado. Mantén presionado el cuadro de abajo y elige «Pegar».'; }
+    } }, ico('papel', 'chico'), 'Pegar lo que copié');
+    hoja({ titulo: 'Pegar un texto', cuerpo: h('div', null, typeof mensaje === 'string' ? h('p', { class: 'suave', estilo: { marginTop: '6px' } }, mensaje) : h('p', { class: 'suave', estilo: { margin: '6px 0 10px' } }, 'Copia el aviso de tu banco (SMS o correo) y pégalo aquí.'), pegar, campo('Texto', ta, 'Puede traer varios mensajes: dejo una línea en blanco entre uno y otro.'), err),
+      acciones: [{ texto: 'Leer', clase: 'btn-primario', onclick: () => { const n = leerTexto(ta.value, 'texto'); if (!n) { err.textContent = motivoNo(ultimosMotivos) ; return false; } mostrar(); } }] });
     setTimeout(() => ta.focus(), 200);
   }
-  // Decide si es una factura o mensajes del banco. Devuelve cuántos pendientes creó.
+  // Por qué no se guardó algo que no es un movimiento (se le dice a la persona; las claves y códigos nunca se guardan)
+  const MOTIVOS = { clave: 'Eso parece un código o una clave. No lo guardo por tu seguridad.', promo: 'Eso parece una promoción, no un movimiento.',
+    recordatorio: 'Eso es un recordatorio de pago, no un movimiento. Cuando pagues, anótalo o pega el aviso del pago.', rechazada: 'Esa operación fue rechazada o anulada, así que no la anoto.',
+    saldo: 'Eso solo informa tu saldo o tu cupo, no un movimiento.', sin_monto: 'No encontré ningún monto en ese texto.' };
+  let ultimosMotivos = [];
+  const motivoNo = (ms) => MOTIVOS[(ms && ms[0]) || 'sin_monto'] || MOTIVOS.sin_monto;
+  // Decide si es una factura o mensajes del banco. Devuelve cuántos pendientes creó (y deja en ultimosMotivos por qué descartó lo demás).
   function leerTexto(texto, origen) {
+    ultimosMotivos = [];
     const t = String(texto || '').trim(); if (!t) return 0;
     const pareceFactura = /factura|ruc\b|subtotal|iva\b/i.test(U.norm(t));
     const f = pareceFactura ? L().factura(t, ctx()) : null;
     if (f && f.ok) { agregarABandeja(origen === 'captura' ? 'captura' : 'factura', t, f); return 1; }
-    const lista = L().bancarioVarios(t, ctx());
-    if (lista.length) { lista.forEach((x) => agregarABandeja(origen === 'captura' ? 'captura' : 'banco', x.texto, x)); return lista.length; }
+    const av = L().avisosVarios(t, ctx());
+    ultimosMotivos = av.descartados.map((d) => d.motivoNo);
+    if (av.lista.length) { av.lista.forEach((x) => agregarABandeja(origen === 'captura' ? 'captura' : 'banco', x.texto, x)); return av.lista.length; }
+    if (ultimosMotivos.some((m) => m === 'clave' || m === 'promo' || m === 'rechazada' || m === 'recordatorio' || m === 'saldo')) return 0;   // el lector ya sabe qué es: no se prueba como factura
     const f2 = L().factura(t, ctx());
     if (f2.ok) { agregarABandeja(origen === 'captura' ? 'captura' : 'factura', t, f2); return 1; }
     return 0;
@@ -7413,7 +8495,15 @@
   /* ------------------------------------------- lo que llega desde otra app (compartir) */
   function recibir(x) {
     let n = 0, sinLeer = 0;
-    (x.textos || []).forEach((t) => { const k = leerTexto(t, 'banco'); if (k) n += k; else { agregarABandeja('texto', t, null); sinLeer++; } });
+    let omitidos = 0;
+    (x.textos || []).forEach((t) => {
+      const k = leerTexto(t, 'banco');
+      if (k) n += k;
+      else if (ultimosMotivos.includes('clave')) omitidos++;                              // un código o una clave NO se guarda en ninguna parte
+      else if (ultimosMotivos.some((m) => m === 'promo' || m === 'rechazada' || m === 'recordatorio' || m === 'saldo')) omitidos++;
+      else { agregarABandeja('texto', t, null); sinLeer++; }
+    });
+    if (omitidos && !(n + sinLeer)) { aviso(omitidos === 1 ? motivoNo(ultimosMotivos) : 'No guardé ' + omitidos + ' mensajes: eran claves, promociones, recordatorios o avisos sin movimiento.'); return; }
     if ((x.imagenes || []).length) {
       if (!AF.acceso.tiene('compartirCaptura')) C().pedirPro('compartirCaptura');
       else x.imagenes.forEach((t) => { const k = leerTexto(t, 'captura'); if (k) n += k; else if (String(t).trim()) { agregarABandeja('captura', t, null); sinLeer++; } });
@@ -7813,6 +8903,10 @@
       f('📊', 'Resumen y reportes', 'Mes, año, comparar, PDF y Excel', ir('Resumen', (c) => V.informesUI.resumen(c))),
       f('🎯', 'Límites de gasto', D.presupuestos.length ? D.presupuestos.length + (D.presupuestos.length === 1 ? ' activo' : ' activos') : 'Para no pasarte', ir('Límites de gasto', (c) => V.finanzas.presupuestos(c))),
       f('🏁', 'Metas de ahorro', D.metas.length ? D.metas.length + (D.metas.length === 1 ? ' meta' : ' metas') : 'Ahorra para algo concreto', ir('Metas', (c) => V.finanzas.metas(c))),
+      f('💰', 'Plan de tu cobro', 'A dónde se va y cuánto queda libre', ir('Plan de tu cobro', (c) => V.ahorro.planCobro(c))),
+      f('🪙', 'Ahorro automático', 'Aparta solo un % o el redondeo', ir('Ahorro automático', (c) => V.ahorro.ahorroAutomatico(c))),
+      f('🛟', 'Fondo de emergencia', '3 a 6 meses de tus gastos necesarios', ir('Fondo de emergencia', (c) => V.ahorro.fondo(c))),
+      f('📉', 'Plan para pagar deudas', 'Qué tarjeta pagar primero', () => V.ahorro.abrirDeudas(), proChip('planDeudas')),
       f('🔁', 'Pagos fijos', 'Arriendo, internet, colegio…', ir('Pagos fijos', (c) => V.finanzas.fijos(c))),
       f('🤝', 'Préstamos entre personas', 'Quién te debe y a quién le debes', ir('Préstamos', (c) => V.finanzas.prestamos(c))),
       f('📺', 'Suscripciones', 'Lo que pagas cada mes', ir('Suscripciones', (c) => V.finanzas.suscripciones(c))),
