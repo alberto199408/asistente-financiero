@@ -597,6 +597,8 @@
     d.plan = Object.assign(vacio().plan, d.plan || {});
     COLECCIONES.forEach((c) => { if (!Array.isArray(d[c])) d[c] = []; });
     if (!d.diccionario) d.diccionario = {};
+    // «Pichincha Visa Premium Miles / Joven Miles» → «Pichincha Visa Premium Miles» (el nombre largo no cabe en pantalla; el nivel guardado no se toca)
+    d.tarjetas.forEach((t) => { if (typeof t.nombre === 'string' && typeof t.nivel === 'string' && /\s\/\s/.test(t.nivel) && t.nombre.includes(t.nivel)) t.nombre = t.nombre.replace(t.nivel, t.nivel.split(/\s+\/\s+/)[0]); });
     if (!Array.isArray(d.historial)) d.historial = [];
     adaptador = ad || null;
     bus.emit('cargado');
@@ -2909,6 +2911,11 @@
     const aPagarProximo = prox ? r2(pendientes.filter((q) => q.vence === proximoVence).reduce((s, q) => s + q.pendiente, 0)) : 0;
     const interesProximo = prox ? r2(pendientes.filter((q) => q.vence === proximoVence).reduce((s, q) => s + q.interes, 0)) : 0;
     const cuotasProximo = prox ? pendientes.filter((q) => q.vence === proximoVence) : [];
+    // Vencimientos que ya quedaron cubiertos por pagos hechos antes (los pagos se aplican a lo más antiguo): la pantalla lo explica,
+    // para que no parezca un error que «lo siguiente» venza meses después.
+    const porVence = {};
+    todas.forEach((q) => { if (q.vence >= hoy && q.vence < (proximoVence || '9999-12-31')) { const x = porVence[q.vence] || (porVence[q.vence] = { vence: q.vence, monto: 0, pendiente: 0 }); x.monto += q.monto; x.pendiente += q.pendiente; } });
+    const cubiertas = Object.values(porVence).filter((x) => x.pendiente <= 0.004).sort((a, b) => (a.vence < b.vence ? -1 : 1)).map((x) => ({ vence: x.vence, monto: r2(x.monto) }));
     const diferidasProximo = r2(cuotasProximo.filter((q) => q.de > 1).reduce((s, q) => s + q.pendiente, 0));
     const corriente = r2(aPagarProximo - diferidasProximo);
     let pagoMinimo = null;
@@ -2918,7 +2925,7 @@
     const siguienteCorte = tarjeta.diaCorte ? proximoCorte(tarjeta, hoy) : null;
     return {
       cuotas: todas, pendientes, deudaTotal, capitalPendiente, cupoUsado, cupoDisponible, proximoVence, aPagarProximo, interesProximo,
-      diferidasProximo, pagoMinimo, siguienteCorte,
+      diferidasProximo, cubiertas, pagoMinimo, siguienteCorte,
       diasParaVencer: proximoVence ? U.diasEntre(hoy, proximoVence) : null,
       diasParaCorte: siguienteCorte ? U.diasEntre(hoy, siguienteCorte) : null,
       faltanDatos, avisos, comprasSinTasa: sinTasa.length,
@@ -3657,7 +3664,35 @@
     return { ok: false, noEntendi: true, linea: 'No entendí qué quieres cambiar.', pasos: 0 };
   }
 
-  AF.correcciones = { aplicar };
+  // Gastos guardados en «Otros gastos» que HOY sé clasificar (la persona los anotó cuando la app aún no conocía la palabra).
+  // Solo PROPONE, con el mismo lector del dictado y solo con confianza alta; nada cambia hasta que la persona lo confirme.
+  function sugerirOtros(S, hoyISO) {
+    const P = AF.parser; if (!P) return [];
+    const ctx = { hoy: hoyISO, categorias: S.categorias(), dicc: S.d.diccionario, tarjetas: S.d.tarjetas, bancos: [] };
+    const out = [];
+    S.d.movs.forEach((m) => {
+      if (m.tipo !== 'gasto' || m.cat !== 'otros' || !m.desc || m.revisadoOtros) return;
+      const r = P.interpretar(m.desc + ' 1', ctx);
+      const it = r && r.tipo === 'registrar' && r.items && r.items.length === 1 ? r.items[0] : null;
+      if (it && it.tipo === 'gasto' && it.cat && it.cat !== 'otros' && it.catConfianza === 'alta') out.push({ id: m.id, desc: m.desc, monto: m.monto, fecha: m.fecha, cat: it.cat, catNombre: S.categoria(it.cat).nombre });
+    });
+    return out;
+  }
+  // Pasa a su categoría los gastos elegidos; los que la persona dejó sin marcar no se vuelven a proponer. Devuelve cuántos cambió.
+  function aplicarOtros(S, sugerencias, marcados) {
+    let n = 0;
+    sugerencias.forEach((x) => {
+      const m = S.buscar('movs', x.id); if (!m) return;
+      if (!marcados.has(x.id)) { m.revisadoOtros = true; return; }
+      const c = S.categoria(x.cat), vieja = S.categoria(m.cat);
+      const patch = { cat: c.id }; if (m.nec === vieja.nec || m.nec == null) patch.nec = c.nec || null;
+      S.editar('movs', m.id, patch, 'Pasé «' + (m.desc || '') + '» a ' + c.nombre); n++;
+    });
+    S.guardar();
+    return n;
+  }
+
+  AF.correcciones = { aplicar, sugerirOtros, aplicarOtros };
   if (typeof module === 'object' && module.exports) module.exports = AF.correcciones;
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
@@ -5198,7 +5233,7 @@
   };
   /* ------------------------------------------------------ versión web: saber si hay una versión nueva y aplicarla */
   // La compilación la escribe scripts/construir-web.js (huella de todos los archivos). En desarrollo queda sin escribir y no se busca nada.
-  const COMPILACION = 'c3ba7933a2';
+  const COMPILACION = '753221c397';
   const esCompilada = /^[0-9a-f]{10}$/.test(COMPILACION);
   let registro = null, nuevaCompilacion = null, ultimaBusqueda = 0;
   const oyentesVersion = [];
@@ -5944,6 +5979,26 @@
       ico('papel'), h('span', null, h('strong', null, n === 1 ? 'Tienes 1 cosa por revisar. ' : 'Tienes ' + n + ' cosas por revisar. '), 'Toca para confirmarlas o descartarlas.'));
   }
 
+  /* --------------------------------------------------------------- «Otros gastos» que ya sé clasificar */
+  function revisarOtros() {
+    const sug = AF.correcciones.sugerirOtros(AF.store, AF.app.hoy());
+    if (!sug.length) return null;
+    return h('button', { class: 'enlace', type: 'button', estilo: { marginTop: '14px', textAlign: 'left', display: 'block' }, onclick: () => abrirRevisarOtros(sug) },
+      sug.length === 1 ? '1 gasto en «Otros gastos» ya lo sé clasificar. Revisar' : sug.length + ' gastos en «Otros gastos» ya los sé clasificar. Revisar');
+  }
+  function abrirRevisarOtros(sug) {
+    const marcados = new Set(sug.map((x) => x.id));
+    const lista = h('div', { class: 'lista' }, sug.map((x) => h('label', { class: 'interruptor', estilo: { gap: '12px', cursor: 'pointer' } },
+      h('input', { type: 'checkbox', checked: true, 'aria-label': 'Pasar ' + x.desc + ' a ' + x.catNombre, estilo: { width: '22px', height: '22px', flex: 'none' }, onchange: (ev) => { if (ev.target.checked) marcados.add(x.id); else marcados.delete(x.id); } }),
+      h('div', { class: 'interruptor-texto' }, h('div', { class: 'fila-titulo' }, x.desc + ' · ' + $(x.monto)), h('div', { class: 'fila-sub' }, 'Otros gastos → ' + x.catNombre)))));
+    AF.ui.hoja({ titulo: 'Revisar «Otros gastos»', cuerpo: h('div', null, h('p', { class: 'suave', estilo: { marginBottom: '8px' } }, 'Los anotaste cuando yo aún no conocía esas palabras. Si estás de acuerdo, los paso a su categoría. Desmarca los que prefieras dejar como están.'), lista),
+      acciones: [{ texto: 'Pasar los marcados', clase: 'btn-primario', onclick: () => {
+        const antes = AF.store.d.historial.length, n = AF.correcciones.aplicarOtros(AF.store, sug, marcados), k = Math.max(0, AF.store.d.historial.length - antes);
+        AF.app.redibujar();
+        AF.ui.aviso(n === 1 ? 'Listo, 1 gasto cambiado' : 'Listo, ' + n + ' gastos cambiados', n ? { texto: 'Deshacer', onclick: () => { for (let i = 0; i < k; i++) AF.store.deshacer(); AF.app.redibujar(); } } : null);
+      } }, { texto: 'Ahora no', clase: 'btn-borde', onclick: () => {} }] });
+  }
+
   /* --------------------------------------------------------------- gastos del mes (anillo) */
   // El total es TODO lo que compraste en el mes: el mismo «Gastos» que ves en Movimientos.
   function gastosDelMes(D, hoy) {
@@ -5966,9 +6021,10 @@
     return h('section', { class: 'seccion' },
       h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Gastos de ' + U.nombreMes(hoy)), h('button', { class: 'enlace', type: 'button', onclick: () => AF.app.ir('movimientos', { periodo: 'mes', vista: 'categorias', tipo: 'gasto' }) }, 'Ver detalle', ico('adelante'))),
       h('div', { class: 'tarjeta' },
+        r.conTarjeta > 0 ? h('p', { class: 'texto-xs suave', estilo: { marginBottom: '12px' } }, 'Incluye ' + $(r.conTarjeta) + ' con tarjeta, que se paga después' + (r.pagosTarjeta ? ' (ya pagaste ' + $(r.pagosTarjeta) + ' a tu tarjeta). Por eso arriba «Salió» es menos.' : '. Por eso arriba «Salió» es menos.')) : null,
         h('div', { class: 'dona-caja' }, svg,
           h('ul', { class: 'dona-leyenda' }, top.map((x) => h('li', null, h('i', { estilo: { background: x.color } }), h('span', { class: 'nombre' }, x.nombre), h('span', { class: 'pct' }, Math.round((x.valor / r.gastos) * 100) + ' %'))))),
-        r.conTarjeta > 0 ? h('p', { class: 'texto-xs suave', estilo: { marginTop: '14px' } }, 'Incluye ' + $(r.conTarjeta) + ' con tarjeta, que se paga después' + (r.pagosTarjeta ? ' (ya pagaste ' + $(r.pagosTarjeta) + ').' : '.')) : null));
+        revisarOtros()));
   }
   const r2 = (n) => U.r2(n);
 
@@ -6053,7 +6109,7 @@
     }
     return h('section', { class: 'seccion' },
       h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Últimos movimientos'), h('button', { class: 'enlace', type: 'button', onclick: () => AF.app.ir('movimientos') }, 'Ver todo', ico('adelante'))),
-      h('div', { class: 'lista' }, movs.map((m) => C().filaMov(m, hoy, () => C().editarMov(m), true))));
+      h('div', { class: 'lista envolver' }, movs.map((m) => C().filaMov(m, hoy, () => C().editarMov(m), true))));
   }
 
   /* --------------------------------------------------------------- Pro */
@@ -6674,7 +6730,7 @@
     else {
       C().agruparPorDia(movs, hoy).forEach((dia) => {
         if (est.periodo !== 'dia') cuerpo.appendChild(h('div', { class: 'dia-titulo' }, h('span', null, dia.titulo), h('span', { class: 'num' }, (dia.total >= 0 ? '+' : '−') + $(Math.abs(dia.total)))));
-        cuerpo.appendChild(h('div', { class: 'lista', estilo: est.periodo === 'dia' ? { marginTop: '14px' } : null }, dia.movs.map((m) => C().filaMov(m, hoy, () => C().editarMov(m), false))));
+        cuerpo.appendChild(h('div', { class: 'lista envolver', estilo: est.periodo === 'dia' ? { marginTop: '14px' } : null }, dia.movs.map((m) => C().filaMov(m, hoy, () => C().editarMov(m), false))));
       });
       cuerpo.appendChild(h('p', { class: 'texto-xs suave', estilo: { textAlign: 'center', marginTop: '24px' } }, movs.length + (movs.length === 1 ? ' movimiento' : ' movimientos')));
     }
@@ -6841,6 +6897,16 @@
 
   const fechaLarga = (iso) => U.deISO(iso).getDate() + ' de ' + U.nombreMes(iso);
   const palabraCuotas = () => PLAN.pais(S().d.ajustes.pais).palabraCuotas;
+  // El catálogo trae niveles con dos nombres («Premium Miles / Joven Miles»): en pantalla se usa el primero para que quepa.
+  const nivelCorto = (n) => String(n || '').split(/\s+\/\s+/)[0];
+  // «el 5 de diciembre y el 5 de enero»
+  const fechasTxt = (lista) => { const f = lista.map((c) => 'el ' + fechaLarga(c.vence)); return f.length > 1 ? f.slice(0, -1).join(', ') + ' y ' + f[f.length - 1] : f[0]; };
+  // Tus pagos se aplican a lo más antiguo: si ya cubren los próximos vencimientos, se dice (si no, «vence el 5 de febrero» parece un error).
+  function notaCubierto(e, tarjeta, conNombre) {
+    if (!e.cubiertas || !e.cubiertas.length || !e.proximoVence || e.origen === 'estado') return null;
+    return h('div', { class: 'nota', estilo: { marginTop: '12px' } }, ico('info'), h('span', null, h('strong', null, (conNombre ? tarjeta.nombre + ': tus' : 'Tus') + ' pagos ya cubren lo que vence ' + fechasTxt(e.cubiertas) + '. '),
+      'Se aplican primero a lo más antiguo, por eso lo siguiente por pagar es el ' + fechaLarga(e.proximoVence) + '.'));
+  }
 
   // Lo que se muestra: el estado de cuenta si la persona lo ajustó, si no, el estimado.
   function visto(t, hoy) {
@@ -6884,7 +6950,7 @@
       h('div', { class: 'plastico-cabeza' }, banco ? AF.ui.insigniaBanco(banco, 30) : h('span', { class: 'plastico-nombre' }, t.nombre), marcaRed(t.red)),
       h('div', { class: 'plastico-medio' }, chipTarjeta(),
         h('div', { class: 'plastico-monto' }, h('div', { class: 'suave texto-xs' }, e.origen === 'estado' ? 'A pagar · según tu estado' : 'A pagar · estimado'), h('div', { class: 'plastico-cifra' }, $(e.aPagarProximo)))),
-      h('div', { class: 'plastico-numero' }, h('span', { class: 'plastico-digitos' }, t.ultimos4 ? '•••• •••• •••• ' + t.ultimos4 : t.nombre), t.nivel ? h('span', { class: 'suave plastico-nivel' }, t.nivel) : null),
+      h('div', { class: 'plastico-numero' }, h('span', { class: 'plastico-digitos' }, t.ultimos4 ? '•••• •••• •••• ' + t.ultimos4 : t.nombre), t.nivel ? h('span', { class: 'suave plastico-nivel' }, nivelCorto(t.nivel)) : null),
       h('div', null, h('div', { class: 'plastico-pie' }, h('span', null, venceTxt), t.cupo ? h('span', { class: 'suave' }, 'Cupo libre ' + $(Math.max(0, t.cupo - e.cupoUsado))) : null),
         usado != null ? h('div', { class: 'cupo', role: 'img', 'aria-label': 'Cupo usado ' + Math.round(usado * 100) + ' por ciento' }, h('i', { estilo: { width: Math.round(usado * 100) + '%' } })) : null));
   }
@@ -6905,7 +6971,8 @@
       const pagos = D.tarjetas.map((t) => ({ t, e: visto(t, hoy) })).filter((x) => x.e.proximoVence && x.e.aPagarProximo).sort((a, b) => (a.e.proximoVence < b.e.proximoVence ? -1 : 1));
       if (pagos.length) {
         cuerpo.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Próximos pagos')),
-          h('div', { class: 'lista' }, pagos.map(({ t, e }) => fila({ icono: AF.ui.ico('calendario'), titulo: t.nombre, sub: 'Vence el ' + fechaLarga(e.proximoVence) + (e.diasParaVencer <= 3 ? ' · ' + (e.diasParaVencer <= 0 ? 'hoy' : 'en ' + e.diasParaVencer + (e.diasParaVencer === 1 ? ' día' : ' días')) : ''), derecha: h('span', { class: 'monto' }, $(e.aPagarProximo)), onclick: () => AF.app.abrir(t.nombre, (c) => detalle(c, t.id)) })))));
+          h('div', { class: 'lista envolver' }, pagos.map(({ t, e }) => fila({ icono: AF.ui.ico('calendario'), titulo: t.nombre, sub: 'Vence el ' + fechaLarga(e.proximoVence) + (e.diasParaVencer <= 3 ? ' · ' + (e.diasParaVencer <= 0 ? 'hoy' : 'en ' + e.diasParaVencer + (e.diasParaVencer === 1 ? ' día' : ' días')) : ''), derecha: h('span', { class: 'monto' }, $(e.aPagarProximo)), onclick: () => AF.app.abrir(t.nombre, (c) => detalle(c, t.id)) }))),
+          pagos.map(({ t, e }) => notaCubierto(e, t, pagos.length > 1))));
       }
       if (D.tarjetas.some((t) => visto(t, hoy).deudaTotal > 0.004)) cuerpo.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'lista' }, fila({ icono: '📉', titulo: 'Plan para pagar deudas', sub: 'Qué tarjeta pagar primero y en cuántos meses terminas',
         derecha: AF.acceso.tiene('planDeudas') ? ico('derecha') : AF.ui.chipPro(), onclick: () => V.ahorro.abrirDeudas() }))));
@@ -6943,7 +7010,7 @@
     const banco = () => B().buscar(x.bancoId);
     const nombreBanco = () => (banco() ? banco().nombre : x.banco);
     const nivelFinal = () => (x.nivel === 'Otra' ? x.nivelOtro.trim() : x.nivel);
-    const nombreAuto = () => [banco() ? banco().corto : x.banco, x.red, nivelFinal()].filter(Boolean).join(' ');
+    const nombreAuto = () => [banco() ? banco().corto : x.banco, x.red, nivelCorto(nivelFinal())].filter(Boolean).join(' ');
     const objBanco = () => banco() || { id: '', nombre: x.banco || 'Tu banco', corto: x.banco ? x.banco : '+' };
     const ir = (p) => { paso = p; pintar(); api.el.scrollTop = 0; };
 
@@ -7085,9 +7152,11 @@
     if (e.faltanDatos.includes('fechas')) cont.appendChild(h('div', { class: 'nota', estilo: { marginTop: '16px' } }, ico('alerta'), h('span', null, h('strong', null, 'Faltan el corte y el día de pago. '), 'Sin eso no sé cuándo vence cada cuota. ', h('button', { class: 'enlace', type: 'button', onclick: () => formTarjeta(t) }, 'Completar'))));
     if (e.comprasSinTasa) cont.appendChild(h('div', { class: 'nota', estilo: { marginTop: '16px' } }, ico('alerta'), h('span', null, h('strong', null, 'Falta la tasa anual. '), 'Hay ' + e.comprasSinTasa + (e.comprasSinTasa === 1 ? ' compra' : ' compras') + ' con intereses sin calcular. ', h('button', { class: 'enlace', type: 'button', onclick: () => formTarjeta(t) }, 'Poner la tasa'))));
     e.avisos.slice(0, 2).forEach((a) => cont.appendChild(h('div', { class: 'nota', estilo: { marginTop: '12px' } }, ico('info'), h('span', null, a))));
+    const nc = notaCubierto(e, t, false); if (nc) cont.appendChild(nc);
 
     const datos = [];
     if (e.proximoVence) datos.push(['Próximo pago', fechaLarga(e.proximoVence) + (e.diasParaVencer != null ? ' · ' + (e.diasParaVencer <= 0 ? 'hoy' : 'en ' + e.diasParaVencer + (e.diasParaVencer === 1 ? ' día' : ' días')) : '')]);
+    if (e.cubiertas && e.cubiertas.length && e.proximoVence && e.origen !== 'estado') datos.push(['Ya cubierto con tus pagos', e.cubiertas.map((c) => fechaLarga(c.vence)).join(' y ')]);
     if (e.interesProximo > 0 && e.origen === 'estimado') datos.push(['Intereses en ese pago', $(e.interesProximo)]);
     datos.push(['Deuda total', $(e.deudaTotal)]);
     if (t.cupo) datos.push(['Cupo disponible', $(Math.max(0, t.cupo - e.cupoUsado))]);

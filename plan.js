@@ -16,7 +16,7 @@
     app: {
       nombre: 'Asistente Financiero',            // PROVISIONAL (nombre de trabajo)
       nombreCorto: 'Asistente',
-      version: '4.1.0',
+      version: '4.1.2',
       // PROVISIONAL. Ojo: el id del paquete NO se puede cambiar después de publicar en Play.
       idPaquete: 'com.asistentefinanciero.app',
       desarrollador: '',                          // LUIS: nombre de desarrollador en Play (no su nombre personal)
@@ -38,7 +38,7 @@
     /* ------------------------------------------------------- SESIÓN Y BLOQUEO */
     sesion: {
       proveedores: ['google', 'facebook'],        // botones de la primera pantalla, en este orden
-      googleClientIdWeb: '',                      // LUIS: ID de cliente "Web" creado en Google Cloud
+      googleClientIdWeb: '656961163217-cqcuipskkmqb4nes7imit1b8cl4qgl80.apps.googleusercontent.com',   // ID de cliente "Web" (proyecto asistente-financiero en Google Cloud, creado el 11 nov). No es secreto; el «secreto del cliente» NO se usa ni se pega aquí
       googleAlcanceDrive: 'https://www.googleapis.com/auth/drive.appdata',   // solo para la copia en Drive (carpeta privada de la app)
       facebookAppId: '',                          // LUIS: ID de la app creada en developers.facebook.com
       facebookClientToken: '',                    // LUIS: "token de cliente" de esa misma app (no es una contraseña)
