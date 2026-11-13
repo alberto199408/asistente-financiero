@@ -16,7 +16,7 @@
     app: {
       nombre: 'Asistente Financiero',            // PROVISIONAL (nombre de trabajo)
       nombreCorto: 'Asistente',
-      version: '4.1.2',
+      version: '4.3.0',
       // PROVISIONAL. Ojo: el id del paquete NO se puede cambiar después de publicar en Play.
       idPaquete: 'com.asistentefinanciero.app',
       desarrollador: '',                          // LUIS: nombre de desarrollador en Play (no su nombre personal)
@@ -40,6 +40,7 @@
       proveedores: ['google', 'facebook'],        // botones de la primera pantalla, en este orden
       googleClientIdWeb: '656961163217-cqcuipskkmqb4nes7imit1b8cl4qgl80.apps.googleusercontent.com',   // ID de cliente "Web" (proyecto asistente-financiero en Google Cloud, creado el 11 nov). No es secreto; el «secreto del cliente» NO se usa ni se pega aquí
       googleAlcanceDrive: 'https://www.googleapis.com/auth/drive.appdata',   // solo para la copia en Drive (carpeta privada de la app)
+      exigirPermisoDrive: true,                   // true: si la persona no marca la casilla de Drive en la pantalla de Google, NO se inicia sesión y se le pide volver a marcarla (en Google viene sin marcar)
       facebookAppId: '',                          // LUIS: ID de la app creada en developers.facebook.com
       facebookClientToken: '',                    // LUIS: "token de cliente" de esa misma app (no es una contraseña)
       permitirSinCuenta: true,                    // botón «Empezar sin cuenta» (datos solo en este teléfono). Ponlo en false si solo quieres Google y Facebook
@@ -105,25 +106,73 @@
       { codigo: 'XX', idioma: 'es-419', nombre: 'Otro país',          moneda: 'USD', palabraCuotas: 'cuotas',              sri: false },
     ],
     monedas: {
-      USD: { simbolo: '$',   nombre: 'Dólar (USD)',          decimales: 2 },
-      EUR: { simbolo: '€',   nombre: 'Euro (EUR)',           decimales: 2 },
-      MXN: { simbolo: '$',   nombre: 'Peso mexicano (MXN)',  decimales: 2 },
-      COP: { simbolo: '$',   nombre: 'Peso colombiano (COP)', decimales: 2 },
-      PEN: { simbolo: 'S/',  nombre: 'Sol peruano (PEN)',    decimales: 2 },
-      ARS: { simbolo: '$',   nombre: 'Peso argentino (ARS)', decimales: 2 },
-      CLP: { simbolo: '$',   nombre: 'Peso chileno (CLP)',   decimales: 0 },
-      VES: { simbolo: 'Bs.', nombre: 'Bolívar (VES)',        decimales: 2 },
-      BOB: { simbolo: 'Bs.', nombre: 'Boliviano (BOB)',      decimales: 2 },
-      PYG: { simbolo: '₲',   nombre: 'Guaraní (PYG)',        decimales: 0 },
-      UYU: { simbolo: '$',   nombre: 'Peso uruguayo (UYU)',  decimales: 2 },
-      GTQ: { simbolo: 'Q',   nombre: 'Quetzal (GTQ)',        decimales: 2 },
-      HNL: { simbolo: 'L',   nombre: 'Lempira (HNL)',        decimales: 2 },
-      NIO: { simbolo: 'C$',  nombre: 'Córdoba (NIO)',        decimales: 2 },
-      CRC: { simbolo: '₡',   nombre: 'Colón (CRC)',          decimales: 2 },
-      CUP: { simbolo: '$',   nombre: 'Peso cubano (CUP)',    decimales: 2 },
-      DOP: { simbolo: 'RD$', nombre: 'Peso dominicano (DOP)', decimales: 2 },
-      BRL: { simbolo: 'R$',  nombre: 'Real brasileño (BRL)', decimales: 2 },
+      USD: { simbolo: '$',   nombre: 'Dólar (USD)',          decimales: 2, porDolar: 1 },
+      EUR: { simbolo: '€',   nombre: 'Euro (EUR)',           decimales: 2, porDolar: 1 },
+      MXN: { simbolo: '$',   nombre: 'Peso mexicano (MXN)',  decimales: 2, porDolar: 18 },
+      COP: { simbolo: '$',   nombre: 'Peso colombiano (COP)', decimales: 2, porDolar: 4000 },
+      PEN: { simbolo: 'S/',  nombre: 'Sol peruano (PEN)',    decimales: 2, porDolar: 3.7 },
+      ARS: { simbolo: '$',   nombre: 'Peso argentino (ARS)', decimales: 2, porDolar: 1400 },
+      CLP: { simbolo: '$',   nombre: 'Peso chileno (CLP)',   decimales: 0, porDolar: 950 },
+      VES: { simbolo: 'Bs.', nombre: 'Bolívar (VES)',        decimales: 2, porDolar: 200 },
+      BOB: { simbolo: 'Bs.', nombre: 'Boliviano (BOB)',      decimales: 2, porDolar: 7 },
+      PYG: { simbolo: '₲',   nombre: 'Guaraní (PYG)',        decimales: 0, porDolar: 7500 },
+      UYU: { simbolo: '$',   nombre: 'Peso uruguayo (UYU)',  decimales: 2, porDolar: 40 },
+      GTQ: { simbolo: 'Q',   nombre: 'Quetzal (GTQ)',        decimales: 2, porDolar: 7.7 },
+      HNL: { simbolo: 'L',   nombre: 'Lempira (HNL)',        decimales: 2, porDolar: 26 },
+      NIO: { simbolo: 'C$',  nombre: 'Córdoba (NIO)',        decimales: 2, porDolar: 37 },
+      CRC: { simbolo: '₡',   nombre: 'Colón (CRC)',          decimales: 2, porDolar: 510 },
+      CUP: { simbolo: '$',   nombre: 'Peso cubano (CUP)',    decimales: 2, porDolar: 120 },
+      DOP: { simbolo: 'RD$', nombre: 'Peso dominicano (DOP)', decimales: 2, porDolar: 60 },
+      BRL: { simbolo: 'R$',  nombre: 'Real brasileño (BRL)', decimales: 2, porDolar: 5.5 },
     },
+    // `porDolar` es APROXIMADO y solo sirve para el sentido común de los montos («¿un pasaje de 2.950?» es normal en pesos
+    // colombianos y absurdo en dólares). No convierte nada ni se muestra. Si una moneda cambia mucho, se ajusta aquí.
+
+    /* ------------------------------------------------------ PALABRAS QUE SOLO VALEN EN UN PAÍS (U21) */
+    // «guagua» es el bus en el Caribe y un bebé en los Andes; «la colonia» es un supermercado en Honduras y Nicaragua;
+    // «la corriente» es la luz en Cuba; «el chino» es el súper de barrio en Argentina. Por eso van aquí y no en la lista general.
+    palabrasPais: {
+      EC: { antojos: ['bolo', 'bolos', 'bolito', 'bolitos'], transporte: ['expreso de los guaguas', 'expreso de los ninos', 'el expreso'], educacion: ['pension', 'la pension', 'pension de los guaguas'] },  // Ecuador (C25: el bolo es un helado de hielo)
+      MX: { transporte: ['verificacion', 'verificacion del coche', 'camion', 'el camion'], sueldo: ['raya', 'la raya'], comida_fuera: ['tortas', 'torta'], antojos: ['concha', 'conchas'], vivienda: ['renta', 'la renta'] },  // México
+      CO: { antojos: ['tinto', 'un tinto', 'tintico', 'bocadillo', 'bocadillos'], salud: ['droga', 'drogas'], sueldo: ['prima', 'la prima'], comida_hogar: ['onces', 'once_merienda', 'remesa', 'la remesa'], vivienda: ['administracion'], salidas: ['pola', 'polas'] },  // Colombia
+      PE: { transporte: ['corredor', 'el corredor', 'combi', 'la combi'], combustible: ['grifo', 'el grifo'], ropa: ['chompa', 'chompas'], educacion: ['pension', 'la pension'] },  // Perú
+      AR: { antojos: ['facturas'], comida_hogar: ['el chino', 'chino', 'el dia', 'dia'], transporte: ['patente', 'cochera', 'colectivo', 'el colectivo'], ropa: ['buzo', 'buzos'], hogar: ['corralon'] },  // Argentina
+      UY: { antojos: ['facturas'], comida_hogar: ['el disco', 'disco', 'el tata', 'tata'], servicios: ['ute', 'la ute', 'ose', 'la ose'], ropa: ['championes'], salud: ['mutualista', 'la mutualista'] },  // Uruguay
+      CL: { comida_hogar: ['once_merienda'], transporte: ['patente', 'micro', 'la micro'], salidas: ['terremoto', 'un terremoto', 'terremotos'], ropa: ['jockey', 'un jockey'], comida_fuera: ['completo', 'un completo', 'completos', 'un italiano', 'as', 'un as'], vivienda: ['pieza', 'la pieza'] },  // Chile
+      PY: { comida_hogar: ['stock', 'el stock'], salud: ['ips', 'el ips'], servicios: ['la ande', 'ande'], ropa: ['chinelas'] },  // Paraguay
+      VE: { ropa: ['franela', 'franelas'], antojos: ['frias', 'cachito', 'cachitos'], transporte: ['cauchos', 'por puesto'], combustible: ['bomba', 'la bomba'] },  // Venezuela
+      GT: { transporte: ['camioneta', 'la camioneta'], comida_hogar: ['la torre'], ropa: ['chumpa', 'chumpas'], comida_fuera: ['shuco', 'shucos'] },  // Guatemala
+      HN: { comida_hogar: ['la colonia', 'colonia'], transporte: ['rapidito', 'el rapidito'] },  // Honduras
+      NI: { comida_hogar: ['la colonia', 'colonia', 'la union'], transporte: ['ruta', 'la ruta'], salidas: ['macua', 'un macua'] },  // Nicaragua
+      CR: { comida_fuera: ['soda', 'la soda'], salud: ['la caja', 'caja'], comida_hogar: ['mas x menos', 'mas por menos'], antojos: ['copo', 'un copo', 'copos'], servicios: ['aya', 'el aya', 'el ice', 'ice', 'kolbi'], mascotas: ['cuido'], combustible: ['bomba', 'la bomba'], transporte: ['marchamo', 'riteve'] },  // Costa Rica
+      CU: { transporte: ['guagua', 'maquina', 'la maquina', 'almendron'], servicios: ['la corriente', 'pague la corriente'], cuidado_personal: ['me pele', 'pele', 'pelada'], comida_hogar: ['la placita', 'placita', 'bodega', 'la bodega', 'shopping', 'la shopping', 'mandados'], ropa: ['pitusa', 'pitusas'] },  // Cuba
+      DO: { transporte: ['guagua', 'concho', 'carro publico', 'motoconcho'], comida_fuera: ['la bandera', 'bandera'], antojos: ['una presidente', 'presidente', 'presidentes'], comida_hogar: ['la sirena', 'sirena', 'el nacional', 'nacional', 'bravo'], servicios: ['edeeste', 'edenorte', 'edesur'] },  // República Dominicana
+      PR: { transporte: ['guagua'], combustible: ['gas', 'eche gas'], comida_hogar: ['pueblo', 'amigo'], servicios: ['aaa', 'la aaa'], sueldo: ['cheque', 'el cheque'], ropa: ['mahones'], salidas: ['medalla', 'medallas'] },  // Puerto Rico
+      BO: { antojos: ['api'], ropa: ['chamarra'] },  // Bolivia
+      SV: { servicios: ['la anda', 'anda'], antojos: ['minuta', 'una minuta'] },  // El Salvador
+      PA: { transporte: ['diablo rojo', 'metrobus'], comida_hogar: ['super 99', 'el rey'], antojos: ['raspao'] },  // Panamá
+      ES: { comida_hogar: ['la compra', 'hacer la compra', 'he hecho la compra', 'el dia', 'dia'], transporte: ['guagua'], antojos: ['canas', 'unas canas', 'una cana', 'polo', 'polos'], servicios: ['movil', 'el movil'], comida_fuera: ['croquetas', 'croqueta', 'bocadillo', 'bocadillos', 'un bocadillo'], vivienda: ['la comunidad', 'cuota de la comunidad', 'comunidad de vecinos'], ropa: ['vaqueros', 'deportivas'], combustible: ['repostar'] },  // España
+      US: { combustible: ['gas'], sueldo: ['cheque', 'el cheque'], comida_hogar: ['target'], servicios: ['celular', 'el celular', 'bill'], comida_fuera: ['lunch'], vivienda: ['renta', 'la renta'] },  // EE. UU.
+    },
+
+    /* ------------------------------------------------------ CÓMO SE NOMBRA LA PLATA EN CADA PAÍS (U21) */
+    // multiplicadores: «20 mil», «20 lucas» (en Colombia, Chile y Argentina una luca son 1.000), «2 palos» (un millón)…
+    // Una palabra que vale 1 es solo el nombre de la plata («20 lucas» en Ecuador o Perú = 20; «50 varos» en México = 50).
+    dinero: {
+      todos: { mil: 1e3, millon: 1e6, millones: 1e6, k: 1e3, lucas: 1, luca: 1, varos: 1, varo: 1, pesitos: 1, dolaritos: 1, dolarcitos: 1, solcitos: 1, quetzales: 1, balboas: 1, lempiras: 1, cordobas: 1, colones: 1, guaranies: 1, bolivianos: 1, bolivares: 1, reales: 1, chavos: 1, cuartos: 1, baros: 1, bucks: 1, bs: 1, luquitas: 1, lukas: 1,
+        usd: 1, eur: 1, mxn: 1, cop: 1, pen: 1, ars: 1, clp: 1, bob: 1, pyg: 1, uyu: 1, gtq: 1, hnl: 1, nio: 1, crc: 1, dop: 1, ves: 1, cup: 1, cuc: 1, mlc: 1 },
+      CO: { luca: 1e3, lucas: 1e3, luquitas: 1e3, palo: 1e6, palos: 1e6 },
+      CR: { teja: 100, tejas: 100, rojo: 1e3, rojos: 1e3 },                 // Costa Rica: «7 tejas» = 700 colones, «5 rojos» = 5.000
+      ES: { pavos: 1 },
+      VE: { bolos: 1, bolo: 1 },                                            // C25: en Ecuador un «bolo» es un helado de hielo, no plata
+      PR: { peseta: 0.25, pesetas: 0.25 },                                  // Puerto Rico: «2 pesetas» = 50 centavos
+      CL: { luca: 1e3, lucas: 1e3, palo: 1e6, palos: 1e6, gamba: 100, gambas: 100 },
+      AR: { luca: 1e3, lucas: 1e3, palo: 1e6, palos: 1e6, gamba: 100, gambas: 100 },
+      UY: { luca: 1e3, lucas: 1e3, palo: 1e6, palos: 1e6 },
+      PY: { luca: 1e3, lucas: 1e3, palo: 1e6, palos: 1e6 },
+    },
+    // Fuera a propósito: «mangos», «melones», «barras», «pavos», «kilos» también son cosas que se compran
+    // («3 mangos», «2 barras de pan»): leerlas como plata rompería esas compras.
 
     /* ------------------------------------------------------ PRUEBA Y PRECIOS */
     prueba: { iniciaAlCrearCuenta: true, diasProGratis: 7 },   // PROVISIONAL: 7 días (3 no alcanzan para ver el valor)
@@ -175,6 +224,8 @@
     },
     // g = Gratis, p = Pro. Una sola tabla: lo que cuesta (IA, servidor) va en Pro.
     // La seguridad y los datos del usuario nunca se cobran.
+    // Montos ocultos (Más → Ajustes → Seguridad): cuánto tiempo se ven las cifras después de tocar el ojito
+    privacidad: { segundosVisibles: 60 },
     funciones: {
       dictar:                  { g: true,  p: true  },
       entenderFraseLibreIA:    { g: false, p: true  },
@@ -257,7 +308,26 @@
     categorias: [
       // ---- Gastos
       { id: 'comida_hogar', color: '#22C55E', nombre: 'Comida del hogar', icono: '🛒', tipo: 'gasto', nec: 'N', sri: 'alimentacion', montoMax: 600,
-        palabras: ['tuti', 'pronaca', 'superpako', 'maximercado', 'hipermarket', 'fruteria', 'maiz', 'choclo', 'choclos', 'mazorca', 'mazorcas', 
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'tortilleria', 'masa', 'chiles', 'jitomate', 'jitomates', 'tomate verde', 'nopales', 'calabacitas', 'bolillo', 'bolillos', 'telera', 'teleras', 'pan bimbo', 'bimbo', 'mercado sobre ruedas',
+          'central de abastos', 'miscelanea', 'la tiendita', 'garrafon', 'garrafon de agua', 'aguacates', 'frijol negro', 'queso oaxaca', 'queso fresco', 'chorizo', 'longaniza', 'surtifruver',
+          'fruver', 'el fruver', 'panela', 'queso campesino', 'cuajada', 'carne molida', 'tienda de barrio', 'mercar', 'el mercado del mes', 'arepas de maiz', 'harina de maiz', 'bienestarina',
+          'granadilla', 'lulo', 'maracuya', 'guanabana', 'mango', 'camote', 'olluco', 'aji amarillo', 'rocoto', 'quinua', 'quinoa', 'pan frances', 'pan chabata', 'pan de yema', 'chuno', 'tunta',
+          'charque', 'mercado de abastos', 'fiambreria', 'fiambre', 'fiambres', 'achuras', 'pan lactal', 'pan de molde', 'changomas', 'la anonima', 'el dorado', 'macro mercado', 'mandioca',
+          'mandiocas', 'casa rica', 'supermercado real', 'yerba para el terere', 'carniceria del barrio', 'polleria del barrio', 'marraqueta', 'marraquetas', 'hallulla', 'hallullas', 'pan amasado',
+          'porotos', 'zapallo', 'acuenta', 'la vega', 'el persa', 'jamon de pavo', 'harina p a n', 'pan canilla', 'bodegones', 'mercal', 'bolsa clap', 'caraotas', 'auyama', 'cambur', 'cambures',
+          'ocumo', 'queso blanco', 'queso de mano', 'diablitos', 'excelsior gama', 'central madeirense', 'plan suarez', 'mercado rodriguez', 'feria 16 de julio', 'pan marraqueta', 'pan sarna',
+          'quinua real', 'maxi despensa', 'guisquil', 'chipilin', 'loroco', 'mercado de la terminal', 'pan dulce de la panaderia', 'queso duro', 'mantequilla rala', 'quesillo', 'mercado oriental',
+          'mercado roberto huembes', 'feria del agricultor', 'megasuper', 'fresh market', 'perimercados', 'pan casero', 'natilla', 'tortillas palmeadas', 'super 99', 'riba smith', 'xtra',
+          'super xtra', 'el agro', 'la libreta', 'mipyme', 'mipymes', 'el mercadito', 'boniato', 'malanga', 'quimbombo', 'super colmado', 'plaza lama', 'supermercado ole',
+          'habichuelas', 'auyamas', 'salami', 'queso de freir', 'selectos', 'supermax', 'gandules', 'pan de agua', 'recaito', 'sofrito', 'sazon', 'mr special', 'pueblo xtra', 'consum', 'aldi',
+          'supercor', 'bon preu', 'bonpreu', 'caprabo', 'ahorramas', 'condis', 'gadis', 'froiz', 'masymas', 'coviran', 'pescaderia', 'charcuteria', 'barra de pan', 'una barra de pan', 'patatas',
+          'judias', 'pimientos', 'jamon serrano', 'fuet', 'lomo embuchado', 'groceries', 'grocery', 'el grocery', 'la groceria', 'groceria', 'kroger', 'publix', 'safeway', 'whole foods',
+          'trader joes', 'heb', 'h e b', 'food lion', 'winn dixie', 'albertsons', 'sprouts', 'stop and shop', 'shoprite', 'wegmans', 'meijer', 'fiesta mart', 'el super', 'cardenas', 'vallarta',
+          'northgate', 'save a lot', 'dollar general', 'family dollar',
+          'tianguis', 'verduleria', 'carniceria', 'almacen', 'yerba', 'yerba mate', 'justo y bueno', 'tambo', 'hipermaxi', 'ketal', 'fidalga', 'superseis', 'biggie', 'tienda inglesa', 'devoto', 'despensa familiar', 'mas x menos', 'masxmenos', 'automercado', 'despensa de don juan', 'econo', 'supermercado pueblo', 'alcampo', 'eroski', 'costco', 'sams', 'sams club', 'marqueta', 'agro', 'agromercado', 'bodegon', 'aurrera', 'once merienda', 'once_merienda', 'harina pan', 'hallacas', 'hallaca', 'frutas y verduras', 'la compra',
+          'tuti', 'pronaca', 'superpako', 'maximercado', 'hipermarket', 'fruteria', 'maiz', 'choclo', 'choclos', 'mazorca', 'mazorcas', 
           // dónde se compra
           'mercado', 'supermercado', 'super', 'supermaxi', 'megamaxi', 'comisariato', 'mi comisariato', 'tia', 'santa maria', 'gran aki', 'aki', 'coral',
           'tienda', 'tiendita', 'tienda de la esquina', 'abarrotes', 'abasto', 'bodega', 'colmado', 'pulperia', 'minimarket', 'minimercado', 'despensa', 'viveres', 'granos',
@@ -276,78 +346,228 @@
           'papel higienico', 'jabon', 'detergente', 'cloro', 'desinfectante', 'panales', 'toallas humedas', 'escoba', 'trapeador', 'esponja', 'lavaplatos', 'limpieza', 'aseo'],
         palabrasDebiles: ['comida', 'compras', 'compra'] },
       { id: 'servicios', color: '#F59E0B', nombre: 'Servicios básicos', icono: '💡', tipo: 'gasto', nec: 'N', sri: null, montoMax: 500,
-        palabras: ['electrica', 'emaap', 'emaapq', 'tvcable', 'eeq', 'telecom', 'saldo del celular', 'saldo celular', 'luz electrica', 'agua y luz', 'tv por cable', 'internet del hogar', 'luz', 'electricidad', 'energia', 'energia electrica', 'agua', 'agua potable', 'internet', 'telefono', 'telefono fijo', 'plan celular', 'plan del celular', 'recarga', 'recargas', 'recarga del celular', 'datos', 'megas', 'gas', 'tanque de gas', 'cilindro de gas', 'bombona', 'garrafa', 'balon de gas',
-          'cnel', 'empresa electrica', 'planilla', 'planillas', 'administracion', 'cuota de administracion', 'condominio', 'cable', 'tv cable', 'television por cable', 'wifi', 'basura', 'recoleccion de basura',
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'factura de la luz', 'planilla de luz', 'planilla del agua', 'la energia', 'digitel', 'hidrocapital', 'copaco', 'calidda', 'aguas andinas', 'chilquinta', 'essbio', 'vtr', 'sanaa',
+          'hondutel', 'empagua', 'edesal', 'aee', 'canal de isabel ii', 'vodafone', 'orange', 'yoigo', 'jazztel', 'masmovil', 'verizon', 'att', 't mobile', 'tmobile', 'comcast', 'xfinity',
+          'spectrum', 'duke energy', 'con edison', 'recarga de saldo', 'paquete de datos', 'plan de datos', 'bombona de gas', 'pipa de agua', 'agua de pipa', 'recolector de basura', 'aseo urbano',
+          'alumbrado', 'emapa', 'cuenta de luz', 'cuenta del agua', 'boleta de luz', 'el bill de la luz', 'bill',
+          'vanti', 'metrogas', 'aysa', 'cantv', 'corpoelec', 'ande', 'essap', 'ute', 'ose', 'antel', 'eegsa', 'enee', 'caess', 'anda', 'disnorte', 'dissur', 'enacal', 'cnfl', 'etecsa', 'edenorte', 'edeeste', 'caasd', 'altice', 'luma', 'fibra', 'fibra optica', 'butano', 'biles', 'bills', 'recibo de luz', 'recibo de la luz', 'cuenta de la luz', 'la cuenta de la luz', 'recibo del agua', 'plan de celular',
+          'electrica', 'emaap', 'emaapq', 'tvcable', 'eeq', 'telecom', 'saldo del celular', 'saldo celular', 'luz electrica', 'agua y luz', 'tv por cable', 'internet del hogar', 'luz', 'electricidad', 'energia', 'energia electrica', 'agua', 'agua potable', 'internet', 'telefono', 'telefono fijo', 'plan celular', 'plan del celular', 'recarga', 'recargas', 'recarga del celular', 'datos', 'megas', 'gas', 'tanque de gas', 'cilindro de gas', 'bombona', 'garrafa', 'balon de gas',
+          'cnel', 'empresa electrica', 'planilla', 'planillas', 'cable', 'tv cable', 'television por cable', 'wifi', 'basura', 'recoleccion de basura',
           'movistar', 'tigo', 'entel', 'telcel', 'at t', 'wom', 'bitel', 'cnt', 'tuenti', 'digicel', 'kolbi', 'une', 'etb', 'epm', 'cfe', 'enel', 'edesur', 'edenor', 'luz del sur', 'sedapal', 'interagua', 'epmaps', 'codensa', 'emcali', 'naturgy', 'iberdrola', 'endesa', 'netlife', 'puntonet', 'xtrim', 'directv', 'izzi', 'totalplay', 'megacable', 'telmex'],
         palabrasDebiles: ['servicios', 'servicio', 'claro', 'personal'] },
       { id: 'vivienda', color: '#3D6FB6', nombre: 'Vivienda', icono: '🏠', tipo: 'gasto', nec: 'N', sri: 'vivienda', montoMax: 3000,
-        palabras: ['alicuota', 'alicuotas', 'expensas', 'expensa', 'mantenimiento del edificio', 'cuota del departamento', 'cuota del credito hipotecario', 'gastos comunales', 'administracion del edificio', 'cuota de vivienda', 'arriendo', 'arrendamiento', 'alquiler', 'renta', 'renta de la casa', 'renta del departamento', 'hipoteca', 'cuota de la casa', 'credito hipotecario', 'predial', 'impuesto predial', 'contribuciones',
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'abl', 'cuota de la comunidad', 'la pieza', 'mensualidad del cuarto', 'renta del cuarto', 'arriendo del cuarto', 'cuota del condominio', 'el condominio', 'hoa', 'deposito del apartamento',
+          'garantia del arriendo', 'mudanza', 'flete de la mudanza',
+          'administracion', 'cuota de administracion', 'condominio', 'gastos comunes', 'ibi', 'anticretico', 'alquiler del piso', 'la comunidad', 'cuota de mantenimiento',
+          'alicuota', 'alicuotas', 'expensas', 'expensa', 'mantenimiento del edificio', 'cuota del departamento', 'cuota del credito hipotecario', 'gastos comunales', 'administracion del edificio', 'cuota de vivienda', 'arriendo', 'arrendamiento', 'alquiler', 'renta', 'renta de la casa', 'renta del departamento', 'hipoteca', 'cuota de la casa', 'credito hipotecario', 'predial', 'impuesto predial', 'contribuciones',
           'reparacion de la casa', 'arreglo de la casa', 'plomero', 'gasfitero', 'fontanero', 'electricista', 'albanil', 'pintura de la casa', 'cerrajero', 'garantia del departamento', 'deposito de garantia', 'portero', 'guardiania', 'seguridad del edificio'] },
       { id: 'transporte', color: '#06B6D4', nombre: 'Transporte', icono: '🚌', tipo: 'gasto', nec: 'N', sri: null, montoMax: 120,
-        palabras: ['indriver', 'yango', 'movilizacion', 'la movilizacion', 'ruta', 'bus interprovincial', 'pasaje a', 'pasaje', 'pasajes', 'bus', 'buseta', 'colectivo', 'micro', 'combi', 'trufi', 'guagua', 'camion', 'pesero', 'taxi', 'mototaxi', 'uber', 'cabify', 'indrive', 'in drive', 'didi', 'beat', 'bolt', 'carrera', 'carrerita', 'viaje en taxi',
+        // lo caro del transporte (comprar o mantener un vehículo): con estas palabras el tope sube a montoMaxCaro
+        montoMaxCaro: 30000, palabrasCaras: ['carro', 'auto', 'coche', 'vehiculo', 'automovil', 'moto', 'motocicleta', 'seguro del carro', 'seguro del auto', 'aseguranza del carro', 'llanta', 'llantas', 'neumaticos', 'repuestos', 'mecanico', 'taller', 'matricula vehicular', 'matricula del carro', 'soat', 'marchamo', 'tenencia', 'permiso de circulacion', 'revision tecnica', 'riteve', 'carro usado', 'auto usado', 'carro nuevo'],
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'cochera', 'garaje', 'garage', 'aparcamiento', 'playa de estacionamiento', 'zona azul', 'el tag', 'autopista', 'pase urbano', 'metrocable', 'trole', 'renfe', 'tarjeta sube', 'tarjeta bip',
+          'tuktuk', 'moto taxi', 'in driver', 'picap', 'remise', 'lyft', 'boleto', 'boleto de bus', 'bonobus', 'mi teleferico', 'diablo rojo', 'carrito por puesto', 'lancha', 'ferry', 'panga',
+          'el tren', 'microbus', 'interdepartamental', 'flota', 'taller mecanico', 'neumatico', 'cauchos', 'gomeria', 'vulcanizadora', 'montallantas', 'lavado de carro', 'lavadero', 'car wash',
+          'refacciones', 'bateria del carro', 'tecnomecanica', 'itv', 'vtv', 'refrendo', 'placas', 'multa', 'multas', 'fotomulta', 'comparendo', 'infraccion', 'grua', 'car insurance', 'uber moto',
+          'bondi', 'sube', 'la sube', 'bip', 'la bip', 'tag', 'remis', 'camionetica', 'por puesto', 'tuc tuc', 'tuk tuk', 'tuctuc', 'transmetro', 'rapidito', 'busito', 'caponera', 'minibus', 'teleferico', 'metropolitano', 'sitp', 'chiva', 'carro publico', 'concho', 'motoconcho', 'omsa', 'almendron', 'bicitaxi', 'tren urbano', 'autoexpreso', 'cercanias', 'abono transporte', 'abono de transporte', 'tarjeta de transporte', 'tarjeta del metro', 'tenencia', 'permiso de circulacion', 'marchamo', 'riteve', 'troca', 'aseguranza del carro', 'omnibus', 'telepeaje', 'iave',
+          'indriver', 'yango', 'movilizacion', 'la movilizacion', 'ruta', 'bus interprovincial', 'pasaje a', 'pasaje', 'pasajes', 'bus', 'buseta', 'colectivo', 'micro', 'combi', 'trufi', 'camion', 'pesero', 'taxi', 'mototaxi', 'uber', 'cabify', 'indrive', 'in drive', 'didi', 'beat', 'bolt', 'carrera', 'carrerita', 'viaje en taxi',
           'metro', 'subte', 'trolebus', 'ecovia', 'metrovia', 'transmilenio', 'metrobus', 'tren', 'peaje', 'peajes', 'parqueadero', 'parqueo', 'estacionamiento', 'parking', 'mecanico', 'taller', 'llanta', 'llantas', 'neumaticos', 'repuestos', 'cambio de aceite', 'revision tecnica', 'matricula vehicular', 'matricula del carro', 'soat', 'seguro del carro', 'lavada del carro', 'lavado del auto', 'autolavado',
-          'bicicleta electrica', 'patineta', 'scooter', 'moto', 'motocicleta', 'bicicleta'] },
+          'bicicleta electrica', 'patineta', 'scooter', 'moto', 'motocicleta', 'bicicleta', 'carro', 'auto', 'coche', 'vehiculo', 'automovil', 'carro usado', 'auto usado', 'carro nuevo'] },
       { id: 'combustible', color: '#EF4444', nombre: 'Combustible', icono: '⛽', tipo: 'gasto', nec: 'N', sri: null, montoMax: 150,
-        palabras: ['estacion servicio', 'mobil', 'gasolina', 'gasolina extra', 'gasolina super', 'nafta', 'bencina', 'diesel', 'eco pais', 'ecopais', 'gasolinera', 'grifo', 'bomba de gasolina', 'estacion de servicio', 'tanqueada', 'tanquee', 'tanque lleno', 'combustible', 'primax', 'terpel', 'petroecuador', 'pemex', 'ypf', 'shell', 'copec', 'puma', 'texaco', 'petrobras'],
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'gasoil', 'gas oil', 'gnc', 'gnv', 'glp', 'repostar', 'repostaje', 'servicentro', 'repsol', 'axion', 'ancap', 'gulf', 'esso', 'cepsa', 'galp', 'chevron', 'exxon', 'petroperu', 'pdv',
+          'uno gasolinera', 'puma energy', 'magna', 'full tanque',
+          'tanqueamos', 'tanquie',
+          'estacion servicio', 'mobil', 'gasolina', 'gasolina extra', 'gasolina super', 'nafta', 'bencina', 'diesel', 'eco pais', 'ecopais', 'gasolinera', 'grifo', 'bomba de gasolina', 'estacion de servicio', 'tanqueada', 'tanquee', 'tanque lleno', 'combustible', 'primax', 'terpel', 'petroecuador', 'pemex', 'ypf', 'shell', 'copec', 'puma', 'texaco', 'petrobras'],
         palabrasDebiles: ['extra', 'tanque'] },
       { id: 'salud', color: '#D6455D', nombre: 'Salud', icono: '💊', tipo: 'gasto', nec: 'N', sri: 'salud', montoMax: 800,
-        palabras: ['medivalle', 'dental', 'paracetamol', 'ibuprofeno', 'oculista', 'operacion', 'cirugia', 'curacion', 'analgesicos', 'antiinflamatorio', 'aspirina', 'tomografia', 'resonancia', 'optometra', 'ortopedista', 'nutricionista', 'pediatra', 'ginecologo', 'traumatologo', 'dermatologo', 'cardiologo', 'tratamiento medico', 'cita con el doctor', 'chequeo medico', 'farmacia', 'botica', 'drogueria', 'medicina', 'medicinas', 'medicamento', 'medicamentos', 'remedio', 'remedios', 'pastillas', 'jarabe', 'doctor', 'doctora', 'medico', 'consulta', 'consulta medica', 'cita medica', 'examen medico', 'examenes', 'analisis', 'laboratorio', 'radiografia', 'ecografia',
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'boticas', 'benavides', 'farmacia san pablo', 'salcobrand', 'ahumada', 'locatel', 'cafam', 'colsubsidio', 'farmacity', 'punto farma', 'farmashop', 'fischel', 'farmacia la bomba',
+          'farmacia carol', 'walgreens', 'cvs', 'seguro social', 'imss', 'issste', 'essalud', 'copago', 'cuota moderadora', 'anteojos', 'espejuelos', 'acetaminofen', 'dolex', 'apronax', 'panadol',
+          'amoxicilina', 'curitas', 'tiritas', 'banditas', 'venditas', 'gasas', 'rayos x', 'urgencias', 'calza dental', 'limpieza dental', 'health insurance', 'el seguro de salud',
+          'pastillas para la presion', 'insulina', 'antibioticos', 'suero', 'termometro', 'tensiometro',
+          'prepaga', 'obra social', 'fonasa', 'ccss', 'mutualista', 'farmacia del ahorro', 'farmacias similares', 'aseguranza medica',
+          'medivalle', 'dental', 'paracetamol', 'ibuprofeno', 'oculista', 'operacion', 'cirugia', 'curacion', 'analgesicos', 'antiinflamatorio', 'aspirina', 'tomografia', 'resonancia', 'optometra', 'ortopedista', 'nutricionista', 'pediatra', 'ginecologo', 'traumatologo', 'dermatologo', 'cardiologo', 'tratamiento medico', 'cita con el doctor', 'chequeo medico', 'farmacia', 'botica', 'drogueria', 'medicina', 'medicinas', 'medicamento', 'medicamentos', 'remedio', 'remedios', 'pastillas', 'jarabe', 'doctor', 'doctora', 'medico', 'consulta', 'consulta medica', 'cita medica', 'examen medico', 'examenes', 'analisis', 'laboratorio', 'radiografia', 'ecografia',
           'dentista', 'odontologo', 'ortodoncia', 'brackets', 'hospital', 'clinica', 'emergencia', 'fybeca', 'cruz azul', 'sana sana', 'pharmacys', 'medicity', 'inkafarma', 'mifarma', 'farmatodo', 'cruz verde', 'la rebaja', 'farmacias del ahorro', 'farmacias guadalajara', 'similares', 'vacuna', 'terapia', 'fisioterapia',
           'psicologo', 'psicologa', 'lentes', 'gafas', 'optica', 'receta', 'antibiotico', 'inyeccion', 'mascarilla', 'mascarillas', 'tapabocas', 'cubrebocas', 'barbijo', 'alcohol', 'gel antibacterial', 'vitaminas', 'suplementos', 'seguro medico', 'seguro de salud', 'iess', 'eps', 'isapre'] },
       { id: 'educacion', color: '#0E7490', nombre: 'Educación', icono: '🎓', tipo: 'gasto', nec: 'N', sri: 'educacion', montoMax: 2000,
-        palabras: ['udla', 'usfq', 'espol', 'puce', 'politecnica', 'semestre', 'semestres', 'pensiones', 'posgrado', 'bachillerato', 'examen de ingreso', 'colegio', 'escuela', 'kinder', 'guarderia', 'universidad', 'instituto', 'matricula', 'pension', 'pension del colegio', 'colegiatura', 'curso', 'cursos', 'diplomado', 'maestria', 'libros', 'libro', 'utiles', 'utiles escolares', 'cuaderno', 'cuadernos', 'mochila',
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'colegiaturas', 'pension escolar', 'matricula del colegio', 'mensualidad del colegio', 'cuota del colegio', 'inscripcion del colegio', 'lapiz', 'lapices', 'esferos', 'esfero', 'boligrafo',
+          'boligrafos', 'lapiceros', 'lapicero', 'borrador', 'goma de borrar', 'colores', 'crayones', 'marcadores', 'sacar copias', 'xerox', 'uniforme escolar', 'transporte escolar',
+          'expreso escolar', 'buseta del colegio', 'clases de ingles', 'la u', 'facultad', 'cuatrimestre', 'titulacion', 'tesis', 'icfes', 'preu', 'preuniversitario', 'cepre', 'jardin infantil',
+          'parvulario', 'sala cuna', 'tutor', 'tutorias', 'textos escolares',
+          'udla', 'usfq', 'espol', 'puce', 'politecnica', 'semestre', 'semestres', 'pensiones', 'posgrado', 'bachillerato', 'examen de ingreso', 'colegio', 'escuela', 'kinder', 'guarderia', 'universidad', 'instituto', 'matricula', 'pension', 'pension del colegio', 'colegiatura', 'curso', 'cursos', 'diplomado', 'maestria', 'libros', 'libro', 'utiles', 'utiles escolares', 'cuaderno', 'cuadernos', 'mochila',
           'clases', 'clases particulares', 'tutoria', 'profesor particular', 'inscripcion', 'academia', 'ingles', 'curso de ingles', 'udemy', 'platzi', 'coursera', 'examen de admision', 'fotocopias', 'copias', 'impresiones'] },
       { id: 'comida_fuera', color: '#FF7A00', nombre: 'Comida fuera', icono: '🍔', tipo: 'gasto', nec: 'G', sri: 'alimentacion', hormiga: true, montoMax: 80,
-        palabras: ['pollo gus', 'presto', 'tropiburger', 'texas chicken', 'papajohns', 'propina', 'propinas', 'propina al mesero', 'propina para el mesero', "mcdonald's", "mcdonalds", 'pollo frito', 'hot dog', 'hot dogs', 'hotdog', 'mcdonald s', 'mcdonald', 'burger', 'kebab', 'nachos', 'wrap', 'restaurante', 'restaurant', 'almuerzo', 'desayuno', 'cena', 'merienda', 'lonche', 'comida rapida', 'rapida', 'delivery', 'domicilio', 'a domicilio', 'pedidos ya', 'pedidosya', 'rappi', 'uber eats', 'didi food', 'glovo',
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'al pastor', 'tacos de canasta', 'tostadas', 'tostada', 'mole', 'cochinita', 'cochinita pibil', 'panuchos', 'salbutes', 'molletes', 'enfrijoladas', 'entomatadas', 'guajolota', 'guajolotas',
+          'sincronizada', 'sincronizadas', 'memelas', 'comida corrida', 'loncheria', 'cenaduria', 'taco de suadero', 'tacos de suadero', 'suadero', 'tacos de birria', 'tamal oaxaqueno', 'mondongo',
+          'lechona', 'tamal tolimense', 'arepa de huevo', 'patacon', 'patacones', 'changua', 'calentado', 'fritanga', 'chicharron', 'cazuela de mariscos', 'mojarra frita', 'arroz con pollo',
+          'perro caliente', 'perros calientes', 'perrito caliente', 'perritos calientes', 'sopa de mondongo', 'arroz chino', 'frijolada', 'arroz atollado', 'posta negra', 'sudado', 'sudado de pollo',
+          'trucha', 'carne asada', 'aji de gallina', 'causa limena', 'causa rellena', 'anticucho', 'tacu tacu', 'arroz chaufa', 'papa a la huancaina', 'rocoto relleno', 'juane', 'pachamanca',
+          'tallarines verdes', 'tallarin saltado', 'seco de cabrito', 'carapulcra', 'sanguchito', 'pan con chicharron', 'butifarra', 'polleria', 'cebicheria', 'chicharron de cerdo', 'leche de tigre',
+          'tiradito', 'arroz con mariscos', 'caldo de gallina', 'sopa seca', 'milanga', 'chori', 'chivito al pan', 'panchos', 'sandwich de miga', 'sandwiches de miga', 'provoleta', 'bondiola',
+          'matambre', 'noquis', 'tallarines', 'ravioles', 'rotiseria', 'tortilla de papas', 'empanadas de carne', 'lomito arabe', 'chipa guazu', 'vori vori', 'asadito', 'pizza a la parrilla',
+          'cantina', 'barros luco', 'barros jarpa', 'chacarero', 'pastel de choclo', 'pastel choclo', 'cazuela', 'porotos granados', 'charquican', 'curanto', 'chorrillana', 'lomo a lo pobre',
+          'fuente de soda', 'chemilico', 'pernil', 'pabellon criollo', 'pepito', 'pepitos', 'mandoca', 'mandocas', 'patacon zuliano', 'parrilla mixta', 'asado negro', 'empanada de cazon', 'sajta',
+          'fricase', 'majadito', 'charquekan', 'chairo', 'plato paceno', 'falso conejo', 'sopa de mani', 'kak ik', 'garnachas', 'panes con pollo', 'pan con chumpe', 'pupuseria', 'pupusas revueltas',
+          'catrachitas', 'sopa de caracol', 'pollo chuco', 'anafre', 'plato tipico', 'indio viejo', 'olla de carne', 'arroz cantones', 'carimanola', 'carimanolas', 'hojaldras', 'hojaldre',
+          'ropa vieja de res', 'soda tica', 'tamal asado', 'moros y cristianos', 'congri', 'tostones', 'yuca con mojo', 'lechon', 'frita cubana', 'pan con jamon', 'pan con tortilla',
+          'cajita de comida', 'paladar', 'chimichurri', 'locrio', 'pica pollo', 'sancocho dominicano', 'la bandera dominicana', 'chicharron de pollo', 'pastelon', 'bacalaitos', 'bacalaito', 'pincho',
+          'unas tapas', 'arroz con gandules', 'jibarito', 'empanadillas', 'empanadilla', 'friquitin', 'kiosko de comida', 'bocadillo de calamares', 'bocatas', 'raciones', 'racion', 'pintxo',
+          'montaditos', 'montadito', 'paella', 'tortilla de patatas', 'patatas bravas', 'bravas', 'calamares', 'durum', 'gazpacho', 'cocido', 'fabada', 'pulpo a la gallega', 'huevos rotos',
+          'telepizza', 'menu degustacion', 'cena con amigos', 'comida de empresa', 'lunch', 'el lunch', 'dinner', 'breakfast', 'brunch', 'fast food', 'take out', 'takeout', 'doordash', 'grubhub',
+          'chipotle', 'taco bell', 'wendys', 'chick fil a', 'panda express', 'ihop', 'dennys', 'applebees', 'five guys', 'in n out', 'popeyes', 'food truck', 'comida para llevar', 'para llevar',
+          'pedido a domicilio', 'ramen', 'pollo a la plancha', 'plato del dia',
+          'birria', 'gorditas', 'gordita', 'sopes', 'tlayudas', 'tlayuda', 'tlacoyos', 'huaraches', 'pambazo', 'pambazos', 'chalupas', 'flautas', 'enchiladas', 'burrito', 'burritos', 'carnitas', 'barbacoa', 'menudo', 'chilaquiles', 'pozole', 'quesadillas', 'quesadilla', 'corrientazo', 'almuerzo ejecutivo', 'bandeja paisa', 'ajiaco', 'sancocho', 'menu del dia', 'menu ejecutivo', 'menu', 'chifa', 'pollo a la brasa', 'anticuchos', 'lomo saltado', 'milanesa', 'milanesas', 'choripan', 'muzzarella', 'muzza', 'fugazzeta', 'faina', 'chivito', 'completo', 'completos', 'churrasco', 'picada', 'lomito', 'lomitos', 'pabellon', 'cachapa', 'cachapas', 'arepera', 'saltena', 'saltenas', 'silpancho', 'pique macho', 'sandwich de chola', 'sopa paraguaya', 'shuco', 'shucos', 'chuchitos', 'pepian', 'baleada', 'baleadas', 'pupusa', 'pupusas', 'pan con pollo', 'vigoron', 'nacatamal', 'nacatamales', 'casado', 'chifrijo', 'gallo pinto', 'cajita', 'mangu', 'chimi', 'yaroa', 'yaroas', 'mofongo', 'tripleta', 'tapas', 'pinchos', 'pintxos', 'bocadillo', 'bocata', 'glovo', 'pedidos ya', 'pedidosya', 'uber eats', 'didi food', 'domicilio', 'lonche', 'yuca frita', 'tajadas', 'empanada de pino', 'tortas ahogadas', 'torta ahogada', 'tacos al pastor', 'almuerzo corriente', 'seco', 'sanduche', 'sanguche', 'sandwich',
+          'pollo gus', 'presto', 'tropiburger', 'texas chicken', 'papajohns', 'propina', 'propinas', 'propina al mesero', 'propina para el mesero', "mcdonald's", "mcdonalds", 'pollo frito', 'hot dog', 'hot dogs', 'hotdog', 'mcdonald s', 'mcdonald', 'burger', 'kebab', 'nachos', 'wrap', 'restaurante', 'restaurant', 'almuerzo', 'desayuno', 'cena', 'merienda', 'lonche', 'comida rapida', 'rapida', 'delivery', 'domicilio', 'a domicilio', 'pedidos ya', 'pedidosya', 'rappi', 'uber eats', 'didi food', 'glovo',
           'salchipapa', 'salchipapas', 'chuzo', 'chuzos', 'hornado', 'fritada', 'encebollado', 'ceviche', 'empanada', 'empanadas', 'hamburguesa', 'hamburguesas', 'pizza', 'pizzas', 'kfc', 'mcdonalds', 'mc donalds', 'burger king', 'subway', 'dominos', 'papa johns', 'menu', 'almuerzo ejecutivo', 'menu ejecutivo', 'corrientazo',
           'caldo', 'sopa', 'bolon', 'tigrillo', 'sanduche', 'sandwich', 'sushi', 'parrillada', 'parrilla', 'asado', 'churrasco', 'lomito', 'shawarma', 'tacos', 'taco', 'burrito', 'quesadilla', 'torta', 'tamal', 'pupusa', 'pupusas', 'baleada', 'gallo pinto', 'arepa rellena', 'bandeja paisa', 'ajiaco', 'pollo a la brasa', 'chaufa', 'lomo saltado', 'anticuchos', 'choripan', 'milanesa', 'locro', 'feijoada', 'picanha',
           'comi', 'cene', 'almorce', 'desayune', 'merende', 'colada', 'colada morada', 'guaguas de pan', 'fanesca', 'guatita', 'llapingachos', 'yaguarlocro', 'morocho', 'humitas', 'tamales', 'quimbolitos', 'cuy', 'menestra', 'bolones', 'espumilla', 'cholado',
           'seco de pollo', 'pollo asado', 'broaster', 'pollo broaster', 'alitas', 'jugo natural', 'batido', 'ensalada', 'wok', 'chifa', 'comida china', 'buffet', 'cafeteria', 'comedor', 'fonda', 'picanteria', 'huarique', 'bar restaurante', 'cevicheria', 'marisqueria', 'pizzeria', 'hamburgueseria', 'taqueria'],
         palabrasDebiles: ['comida', 'comer'] },
       { id: 'antojos', color: '#F59E8B', nombre: 'Antojos', icono: '🍦', tipo: 'gasto', nec: 'G', sri: 'alimentacion', hormiga: true, montoMax: 25,
-        palabras: ['topsy', 'dunkin', 'churros', 'churro', 'oreo', 'oreos', 'gomitas', 'brownie', 'brownies', 'postre', 'postres', 'cupcake', 'waffle', 'waffles', 'crepes', 'algodon de azucar', 'paletas', 'helado', 'helados', 'cola', 'coca', 'coca cola', 'cocacola', 'pepsi', 'sprite', 'fanta', 'inca kola', 'gaseosa', 'gaseosas', 'refresco', 'soda', 'jugo', 'jugos', 'cafe', 'cafecito', 'capuchino', 'cappuccino', 'latte', 'frapuccino', 'starbucks', 'juan valdez', 'sweet and coffee', 'galletas', 'galleta',
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'nieve', 'pan dulce', 'marranitos', 'mangonada', 'chamoyada', 'tejuino', 'tepache', 'agua de jamaica', 'agua de horchata', 'horchata', 'agua fresca', 'aguas frescas', 'champurrado',
+          'cafe de olla', 'sabritas', 'takis', 'gansito', 'chocorroles', 'pinguinos', 'mazapan', 'obleas', 'oblea', 'cocada', 'alegrias', 'tamarindo', 'chicharrones', 'tostilocos', 'dorilocos',
+          'paleta de hielo', 'la michoacana', 'pandebono', 'pandebonos', 'almojabana', 'almojabanas', 'arepa de choclo', 'aguapanela', 'agua de panela', 'masato', 'salpicon', 'chocoramo',
+          'chocoramos', 'postobon', 'pony malta', 'el mecato', 'paquete de papas', 'papas de paquete', 'chicle', 'bon bon bum', 'chocolatina', 'chocolatinas', 'empanaditas', 'avena fria', 'kumis',
+          'pastel de yuca', 'pan de yuca', 'roscon', 'mantecada', 'milo', 'cafe con leche', 'tinto campesino', 'chicha morada', 'chicha', 'emoliente', 'picarones', 'picaron', 'mazamorra morada',
+          'mazamorra', 'arroz con leche', 'turron', 'suspiro a la limena', 'cancha serrana', 'raspadilla', 'marcianos', 'cremolada', 'cremoladas', 'champus', 'quinua con manzana', 'dulce de leche',
+          'bizcochos', 'bizcocho', 'bizcochitos', 'cortado', 'submarino', 'mate cocido', 'pastafrola', 'bola de fraile', 'garrapinadas', 'churros rellenos', 'mbeju', 'terere', 'cocido quemado',
+          'kosereva', 'galletitas', 'alfajor jorgito', 'chocotorta', 'helado de dulce de leche', 'facturitas', 'calzones rotos', 'kuchen', 'mote con huesillo', 'mote huesillo', 'huesillo',
+          'cuchufli', 'berlines', 'chilenitos', 'brazo de reina', 'super ocho', 'superocho', 'mani confitado', 'calugas', 'cola de mono', 'leche asada', 'papelon con limon', 'papelon', 'cocosette',
+          'pirulin', 'raspao', 'marquesa', 'golfeado', 'golfeados', 'catalinas', 'tizana', 'merengada', 'cachito de jamon', 'pastelitos andinos', 'chicha venezolana', 'cepillado', 'api morado',
+          'cunape', 'cunapes', 'mocochinchi', 'tojori', 'llauchas', 'pasankalla', 'pasankallas', 'empanada de queso', 'helado de canela', 'tucumana', 'tucumanas', 'licuado', 'licuados',
+          'atol de elote', 'rellenitos', 'tortrix', 'charamusca', 'charamuscas', 'semita', 'semitas', 'nuegados', 'riguas', 'quesadilla salvadorena', 'rosquillas', 'rosquilla', 'tustacas',
+          'pan de coco', 'cajeta', 'cajetas', 'pio quinto', 'pinolillo', 'tiste', 'chicha de maiz', 'churchill', 'agua dulce', 'tosteles', 'chicheme', 'saril', 'raspadura', 'gallitos',
+          'tamal pisque', 'tamales pisques', 'guarapo', 'batido de mamey', 'tukola', 'cucurucho', 'turron de mani', 'coquito', 'morir sonando', 'habichuelas con dulce', 'chinola', 'jugo de chinola',
+          'yaniqueque', 'yaniqueques', 'catibias', 'quipes', 'quipe', 'majarete', 'piragua', 'piraguas', 'tembleque', 'flan', 'quesito', 'quesitos', 'mallorca', 'mallorcas', 'limber', 'limbers',
+          'malta india', 'pan sobao', 'bizcocho de guayaba', 'porras', 'napolitana', 'napolitanas', 'cruasan', 'croissant', 'magdalenas', 'ensaimada', 'cafe solo', 'carajillo', 'colacao', 'cola cao',
+          'chuches', 'gominolas', 'pipas', 'patatas fritas', 'pincho de tortilla', 'zumo', 'zumos', 'zumo de naranja', 'helado de turron', 'candy', 'coffee', 'smoothie', 'milkshake', 'boba',
+          'frappe', 'malteada', 'batido de fresa', 'cupcakes', 'galletas oreo', 'caramelo', 'confites', 'mani', 'palomitas de maiz',
+          'esquites', 'esquite', 'elote', 'elotes', 'chescos', 'chesco', 'refrescos', 'mecato', 'guaro', 'fernet', 'copete', 'piscola', 'malta', 'maltas', 'alfajor', 'alfajores', 'medialuna', 'medialunas', 'sopaipilla', 'sopaipillas', 'tequenos', 'tequeno', 'bunuelo', 'bunuelos', 'tortas fritas', 'torta frita', 'tortafrita', 'chipa', 'chipas', 'api con pastel', 'pan con croqueta', 'pan con croquetas', 'pan con lechon', 'pan con bistec', 'alcapurria', 'alcapurrias', 'pastelillo', 'pastelillos', 'unas frias', 'frias', 'tona', 'tonas', 'medalla', 'medallas', 'pacena', 'pacenas', 'cuba libre', 'atol', 'atole', 'chilate', 'michelada', 'micheladas',
+          'topsy', 'dunkin', 'churros', 'churro', 'oreo', 'oreos', 'gomitas', 'brownie', 'brownies', 'postre', 'postres', 'cupcake', 'waffle', 'waffles', 'crepes', 'algodon de azucar', 'paletas', 'helado', 'helados', 'cola', 'coca', 'coca cola', 'cocacola', 'pepsi', 'sprite', 'fanta', 'inca kola', 'gaseosa', 'gaseosas', 'refresco', 'soda', 'jugo', 'jugos', 'cafe', 'cafecito', 'capuchino', 'cappuccino', 'latte', 'frapuccino', 'starbucks', 'juan valdez', 'sweet and coffee', 'galletas', 'galleta',
           'chocolate', 'chocolates', 'dulce', 'dulces', 'caramelos', 'chicles', 'snack', 'snacks', 'papitas', 'papas fritas', 'chifles', 'doritos', 'cheetos', 'gatorade', 'powerade', 'agua mineral', 'agua embotellada', 'botella de agua',
           'energizante', 'red bull', 'monster', 'pastel', 'pasteles', 'pastelito', 'pastelitos', 'torta', 'tortas', 'dona', 'donas', 'donut', 'canguil', 'cotufas', 'palomitas', 'cabritas', 'pochoclo', 'golosina', 'golosinas', 'colita', 'oxxo', 'tambo', 'kiosco', 'quiosco', 'tiendita de la esquina', 'maquina expendedora', 'bubble tea', 'frozen', 'raspado', 'granizado', 'paleta', 'bombon'],
         // Una cola o unas galletas pueden ser un antojo o la compra de la casa: se pregunta una vez.
         ambiguas: ['cola', 'coca', 'coca cola', 'cocacola', 'pepsi', 'gaseosa', 'gaseosas', 'refresco', 'jugo', 'jugos', 'galletas', 'galleta', 'agua mineral', 'agua embotellada', 'botella de agua', 'chocolate', 'chocolates', 'papitas', 'chifles', 'cafe'],
         pregunta: { texto: '¿Fue un antojo o compra para la casa?', opciones: [{ texto: 'Un antojo', cat: 'antojos' }, { texto: 'Para la casa', cat: 'comida_hogar' }] } },
       { id: 'salidas', color: '#D4537E', nombre: 'Salidas', icono: '🎉', tipo: 'gasto', nec: 'G', sri: null, montoMax: 200,
-        palabras: ['cinemark', 'supercines', 'multicines', 'ticketshow', 'punto ticket', 'licoreria', 'pub', 'licor', 'licores', 'la pena', 'pena folklorica', 'bar con amigos', 'cine', 'bar', 'cerveza', 'cervezas', 'birra', 'birras', 'chela', 'chelas', 'caguama', 'pilsener', 'trago', 'tragos', 'discoteca', 'disco', 'antro', 'boliche', 'fiesta', 'farra', 'rumba', 'joda', 'jarana', 'parranda', 'tomata', 'previa',
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'caguamas', 'cubetazo', 'litrona', 'six pack', 'sixpack', 'jarra de cerveza', 'balde de cerveza', 'fernet con coca', 'piscolas', 'pisco sour', 'terremoto chileno', 'vermut', 'vermu',
+          'tinto de verano', 'cubata', 'cubatas', 'pintas', 'pinta', 'macua', 'grappamiel', 'medio y medio', 'mamajuana', 'pomo de ron', 'mojito', 'mojitos', 'cocteles', 'coctel', 'shots', 'beers',
+          'entradas al cine', 'bolera', 'gallera', 'pelea de gallos', 'alquiler de cancha', 'futbolito', 'paintball', 'fiestas', 'after', 'salida al bar', 'happy hour',
+          'carrete', 'chinchorro', 'juerga',
+          'cinemark', 'supercines', 'multicines', 'ticketshow', 'punto ticket', 'licoreria', 'pub', 'licor', 'licores', 'la pena', 'pena folklorica', 'bar con amigos', 'cine', 'bar', 'cerveza', 'cervezas', 'cervecita', 'cervecitas', 'biela', 'bielas', 'pola', 'polas', 'birra', 'birras', 'chela', 'chelas', 'caguama', 'pilsener', 'trago', 'tragos', 'discoteca', 'disco', 'antro', 'boliche', 'fiesta', 'farra', 'rumba', 'joda', 'jarana', 'parranda', 'tomata', 'previa',
           'salida', 'salidas', 'salida con amigos', 'amigos', 'cumpleanos', 'cumple', 'karaoke', 'juntada', 'evento', 'concierto', 'entradas', 'boletos', 'copas', 'vino', 'pola', 'polas', 'ron', 'whisky', 'tequila', 'aguardiente', 'pisco', 'cachaca', 'bolos', 'billar', 'bowling', 'parque de diversiones', 'feria de juegos', 'estadio', 'partido', 'entrada al estadio'] },
       { id: 'ropa', color: '#3B82F6', nombre: 'Ropa', icono: '👕', tipo: 'gasto', nec: 'G', sri: 'vestimenta', montoMax: 400,
-        palabras: ['prati', 'deprati', 'etafashion', 'marathon', 'lefties', 'bossi', 'pat primo', 'logging', 'pijama', 'pijamas', 'sandalia', 'bata', 'ropa de bebe', 'ropa para el bebe', 'ropa', 'zapatos', 'tenis', 'zapatillas', 'zapatos deportivos', 'sandalias', 'botas', 'camisa', 'camiseta', 'polo', 'playera', 'remera', 'franela', 'blusa', 'pantalon', 'pantalones', 'jean', 'jeans', 'short', 'shorts', 'bermuda', 'falda', 'vestido', 'chompa', 'buzo', 'sueter', 'saco', 'hoodie', 'casaca', 'campera',
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'jacket', 'jackets', 'camperas', 'casacas', 'chumpa', 'chumpas', 'buzos', 'polera', 'poleras', 'pullover', 'jersey', 'jerseis', 'sueteres', 'hoodies', 'vaqueros', 'tejanos', 'blue jean',
+          'bluyin', 'bluyines', 'mahones', 'mahon', 'pitusa', 'pitusas', 'bermudas', 'pantaloneta', 'pantalonetas', 'calzoneta', 'calzonetas', 'licra', 'leggins', 'calza', 'calzas', 'gorras',
+          'gorro', 'cachucha', 'cachuchas', 'sneakers', 'deportivas', 'botines', 'chanclas', 'chancletas', 'chalas', 'ojotas', 'pantuflas', 'chinelas', 'soquetes', 'boxer', 'brasieres', 'sujetador',
+          'corpino', 'bombacha', 'bombachas', 'piyama', 'vestidos', 'faldas', 'pollera', 'polleras', 'blusas', 'camisetas', 'abrigos', 'chaleco', 'gabardina', 'impermeable', 'traje', 'terno',
+          'corbata', 'poloche', 'polo shirt', 'franelilla', 'guayabera', 'ropita', 'ropa usada', 'paca', 'la paca', 'ropa americana', 'ropa de segunda', 'h&m', 'falabella',
+          'ripley', 'liverpool', 'suburbia', 'c&a', 'el corte ingles', 'primark',
+          'chamarra', 'chamarras', 'poleron', 'polerones', 'championes', 'sudadera', 'sudaderas', 'remeras', 'playeras', 'calzones',
+          'prati', 'deprati', 'etafashion', 'marathon', 'lefties', 'bossi', 'pat primo', 'logging', 'pijama', 'pijamas', 'sandalia', 'bata', 'ropa de bebe', 'ropa para el bebe', 'ropa', 'zapatos', 'tenis', 'zapatillas', 'zapatos deportivos', 'sandalias', 'botas', 'camisa', 'camiseta', 'polo', 'playera', 'remera', 'franela', 'blusa', 'pantalon', 'pantalones', 'jean', 'jeans', 'short', 'shorts', 'bermuda', 'falda', 'vestido', 'chompa', 'buzo', 'sueter', 'saco', 'hoodie', 'casaca', 'campera',
           'medias', 'calcetines', 'ropa interior', 'calzoncillos', 'boxers', 'brasier', 'sosten', 'chaqueta', 'abrigo', 'uniforme', 'uniformes', 'gorra', 'sombrero', 'bufanda', 'guantes', 'cinturon', 'correa', 'cartera', 'bolso', 'mochila de moda', 'reloj', 'aretes', 'collar', 'anillo', 'bisuteria', 'de prati', 'eta fashion', 'zara', 'h m', 'bershka', 'pull and bear', 'forever 21', 'shein', 'nike', 'adidas', 'puma'] },
       { id: 'tecnologia', color: '#6366F1', nombre: 'Tecnología', icono: '🎧', tipo: 'gasto', nec: 'G', sri: null, montoMax: 2500,
-        palabras: ['computron', 'megahertz', 'tventas', 'apple store', 'electronicos', 'electronica', 'electronico', 'celulares', 'gadgets', 'dispositivos', 'cable hdmi', 'hdmi', 'cable de carga', 'cable lightning', 'adaptador', 'hub usb', 'auriculares', 'audifonos', 'audifono', 'earbuds', 'airpods', 'cargador', 'cable usb', 'cable del celular', 'celular', 'telefono nuevo', 'smartphone', 'iphone', 'samsung', 'xiaomi', 'motorola', 'huawei', 'laptop', 'portatil', 'notebook', 'computadora', 'computador', 'pc', 'mouse', 'raton', 'teclado', 'monitor', 'pantalla', 'impresora', 'tinta', 'toner',
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'cascos inalambricos', 'forro del celular', 'vidrio templado', 'ordenador', 'redmi', 'tinta de impresora', 'cartucho', 'memoria usb', 'pen drive', 'la play', 'nintendo switch',
+          'celular nuevo', 'arreglo del celular', 'pantalla del celular',
+          'computron', 'megahertz', 'tventas', 'apple store', 'electronicos', 'electronica', 'electronico', 'celulares', 'gadgets', 'dispositivos', 'cable hdmi', 'hdmi', 'cable de carga', 'cable lightning', 'adaptador', 'hub usb', 'auriculares', 'audifonos', 'audifono', 'earbuds', 'airpods', 'cargador', 'cable usb', 'cable del celular', 'celular', 'telefono nuevo', 'smartphone', 'iphone', 'samsung', 'xiaomi', 'motorola', 'huawei', 'laptop', 'portatil', 'notebook', 'computadora', 'computador', 'pc', 'mouse', 'raton', 'teclado', 'monitor', 'pantalla', 'impresora', 'tinta', 'toner',
           'parlante', 'bocina', 'altavoz', 'bafle', 'consola', 'play station', 'playstation', 'ps5', 'ps4', 'xbox', 'nintendo', 'switch', 'videojuego', 'videojuegos', 'juego de video', 'tablet', 'ipad', 'smartwatch', 'reloj inteligente', 'camara', 'gopro', 'drone', 'dron', 'televisor', 'tv', 'television', 'smart tv', 'pendrive', 'usb', 'disco duro', 'router', 'modem', 'alexa', 'kindle', 'funda del celular', 'protector de pantalla', 'mica', 'power bank', 'bateria externa', 'steam', 'play store', 'app store', 'skin', 'compra en el juego', 'pavos', 'robux', 'diamantes'],
         pregunta: { texto: '¿Lo necesitas para tu trabajo o estudio?', opciones: [{ texto: 'Sí, para trabajar o estudiar', cat: 'tecnologia', nec: 'N' }, { texto: 'No, fue un gusto', cat: 'tecnologia', nec: 'G' }] } },
       { id: 'hogar', color: '#14B8A6', nombre: 'Casa y muebles', icono: '🛋️', tipo: 'gasto', nec: 'N', sri: null, montoMax: 3000,
-        palabras: ['ferrisariato', 'pycca', 'senora de la limpieza', 'señora de la limpieza', 'senora que limpia', 'empleada domestica', 'empleada', 'servicio domestico', 'trabajadora del hogar', 'nana', 'jardinero', 'limpieza de la casa', 'cosas de la casa', 'cosas para la casa', 'enseres', 'menaje', 'escritorio', 'clavos', 'tornillos', 'bisagras', 'cerradura', 'candado', 'extension electrica', 'tomacorriente', 'focos led', 'mueble', 'muebles', 'sofa', 'sillon', 'mesa', 'sillas', 'silla', 'cama', 'colchon', 'velador', 'closet', 'ropero', 'armario', 'estanteria', 'repisa', 'refrigeradora', 'refrigerador', 'nevera', 'heladera', 'lavadora', 'secadora', 'cocina', 'estufa', 'horno', 'microondas', 'licuadora', 'batidora', 'olla', 'ollas', 'olla arrocera', 'arrocera', 'sarten', 'vajilla', 'platos', 'vasos', 'cubiertos', 'cafetera', 'tostadora', 'plancha', 'aspiradora', 'ventilador', 'calefactor', 'aire acondicionado', 'electrodomestico', 'electrodomesticos',
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'tlapaleria', 'corralon', 'bazar', 'todo a cien', 'promart', 'lowes', 'leroy merlin', 'bricomart', 'el lagar', 'novex', 'cemaco', 'frazada', 'frazadas', 'manta', 'bombilla', 'bombita',
+          'pilas', 'enchufe', 'regleta', 'refri', 'abanico', 'placard', 'mesita', 'la senora que limpia', 'pintura para la casa', 'cemento', 'arreglos de la casa', 'tuberia',
+          'llave de agua', 'grifo de la cocina', 'foco led', 'termo', 'utensilios', 'tupper', 'tuppers', 'tapers', 'adornos', 'matas',
+          'ferrisariato', 'pycca', 'senora de la limpieza', 'señora de la limpieza', 'senora que limpia', 'empleada domestica', 'empleada', 'servicio domestico', 'trabajadora del hogar', 'nana', 'jardinero', 'limpieza de la casa', 'cosas de la casa', 'cosas para la casa', 'enseres', 'menaje', 'escritorio', 'clavos', 'tornillos', 'bisagras', 'cerradura', 'candado', 'extension electrica', 'tomacorriente', 'focos led', 'mueble', 'muebles', 'sofa', 'sillon', 'mesa', 'sillas', 'silla', 'cama', 'colchon', 'velador', 'closet', 'ropero', 'armario', 'estanteria', 'repisa', 'refrigeradora', 'refrigerador', 'nevera', 'heladera', 'lavadora', 'secadora', 'cocina', 'estufa', 'horno', 'microondas', 'licuadora', 'batidora', 'olla', 'ollas', 'olla arrocera', 'arrocera', 'sarten', 'vajilla', 'platos', 'vasos', 'cubiertos', 'cafetera', 'tostadora', 'plancha', 'aspiradora', 'ventilador', 'calefactor', 'aire acondicionado', 'electrodomestico', 'electrodomesticos',
           'sabanas', 'cobija', 'cobijas', 'edredon', 'almohada', 'almohadas', 'toallas', 'cortinas', 'alfombra', 'decoracion', 'cuadro', 'florero', 'foco', 'focos', 'bombillo', 'bombillos', 'ampolleta', 'herramientas', 'taladro', 'martillo', 'pintura', 'ferreteria', 'kywi', 'sodimac', 'homecenter', 'easy', 'home depot', 'ikea', 'sukasa', 'almacenes de prati hogar', 'comandato', 'artefacta', 'la ganga', 'marcimex', 'jardin', 'plantas', 'macetas'] },
       { id: 'suscripciones', color: '#E11D48', nombre: 'Suscripciones', icono: '📺', tipo: 'gasto', nec: 'G', sri: null, hormiga: false, montoMax: 60,
-        palabras: ['streaming', 'plataformas', 'plataforma de streaming', 'claude pro', 'chatgpt plus', 'mensualidad de spotify', 'mensualidad de netflix', 'membresia del gimnasio', 'netflix', 'spotify', 'disney', 'disney plus', 'hbo', 'hbo max', 'amazon prime', 'prime video', 'prime', 'youtube premium', 'youtube music', 'youtube', 'chatgpt', 'chat gpt', 'openai', 'claude', 'gemini', 'copilot', 'icloud', 'google one', 'google drive', 'dropbox', 'suscripcion', 'suscripciones', 'membresia', 'mensualidad de la app', 'apple music', 'apple tv', 'apple one', 'paramount', 'paramount plus', 'crunchyroll', 'deezer', 'tidal', 'twitch', 'patreon', 'onlyfans', 'canva', 'adobe', 'office 365', 'microsoft 365', 'xbox game pass', 'game pass', 'playstation plus', 'ps plus', 'nintendo online', 'vpn', 'nordvpn', 'duolingo', 'tinder', 'bumble', 'linkedin premium', 'star plus', 'vix', 'movistar play', 'directv go', 'win sports'] },
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'mubi', 'claro video', 'flow',
+          'streaming', 'plataformas', 'plataforma de streaming', 'claude pro', 'chatgpt plus', 'mensualidad de spotify', 'mensualidad de netflix', 'membresia del gimnasio', 'netflix', 'spotify', 'disney', 'disney plus', 'hbo', 'hbo max', 'amazon prime', 'prime video', 'prime', 'youtube premium', 'youtube music', 'youtube', 'chatgpt', 'chat gpt', 'openai', 'claude', 'gemini', 'copilot', 'icloud', 'google one', 'google drive', 'dropbox', 'suscripcion', 'suscripciones', 'membresia', 'mensualidad de la app', 'apple music', 'apple tv', 'apple one', 'paramount', 'paramount plus', 'crunchyroll', 'deezer', 'tidal', 'twitch', 'patreon', 'onlyfans', 'canva', 'adobe', 'office 365', 'microsoft 365', 'xbox game pass', 'game pass', 'playstation plus', 'ps plus', 'nintendo online', 'vpn', 'nordvpn', 'duolingo', 'tinder', 'bumble', 'linkedin premium', 'star plus', 'vix', 'movistar play', 'directv go', 'win sports'] },
       { id: 'cuidado_personal', color: '#D97706', nombre: 'Cuidado personal', icono: '💈', tipo: 'gasto', nec: 'G', sri: null, montoMax: 150,
-        palabras: ['estetica', 'cuidado personal', 'perfumes', 'belleza', 'pasta dental', 'pasta de dientes', 'cepillo de dientes', 'shampoo', 'champu', 'acondicionador', 'protector solar', 'bloqueador solar', 'esmalte', 'facial', 'cera depilatoria', 'tintura', 'hilo dental', 'enjuague bucal', 'crema facial', 'crema corporal', 'peluqueria', 'barberia', 'barbero', 'corte de pelo', 'corte de cabello', 'motilado', 'tinte', 'mechas', 'alisado', 'keratina', 'manicure', 'pedicure', 'arreglo de unas', 'unas postizas', 'cejas', 'pestanas', 'depilacion', 'spa', 'masaje', 'maquillaje', 'cosmeticos', 'crema', 'cremas', 'perfume', 'colonia', 'desodorante', 'afeitadora', 'rasuradora', 'gimnasio', 'gym', 'smart fit', 'crossfit', 'yoga', 'pilates', 'natacion', 'cancha', 'cancha sintetica', 'futbol', 'pelota', 'balon', 'ropa deportiva'] },
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'motilar', 'peluqueada', 'peluquear', 'manicura', 'unas acrilicas', 'labial', 'rimel', 'crema dental', 'dentifrico', 'toallas sanitarias', 'toallitas', 'tampones', 'protectores diarios',
+          'maquina de afeitar', 'gillette', 'rastrillo', 'prestobarba', 'espuma de afeitar', 'masajes', 'bodytech', 'crema para la cara', 'bloqueador', 'salon de belleza', 'tintoreria', 'lavanderia',
+          'lavado de ropa', 'planchado', 'lavado en seco',
+          'me corte el pelo', 'corte el pelo', 'cortarme el pelo', 'me corte el cabello', 'corte el cabello', 'me motile', 'motile', 'motilada', 'motilarme', 'el pelo', 'el cabello',
+          'estetica', 'cuidado personal', 'perfumes', 'belleza', 'pasta dental', 'pasta de dientes', 'cepillo de dientes', 'shampoo', 'champu', 'acondicionador', 'protector solar', 'bloqueador solar', 'esmalte', 'facial', 'cera depilatoria', 'tintura', 'hilo dental', 'enjuague bucal', 'crema facial', 'crema corporal', 'peluqueria', 'barberia', 'barbero', 'corte de pelo', 'corte de cabello', 'motilado', 'tinte', 'mechas', 'alisado', 'keratina', 'manicure', 'pedicure', 'arreglo de unas', 'unas postizas', 'cejas', 'pestanas', 'depilacion', 'spa', 'masaje', 'maquillaje', 'cosmeticos', 'crema', 'cremas', 'perfume', 'colonia', 'desodorante', 'afeitadora', 'rasuradora', 'gimnasio', 'gym', 'smart fit', 'crossfit', 'yoga', 'pilates', 'natacion', 'cancha', 'cancha sintetica', 'futbol', 'pelota', 'balon', 'ropa deportiva'] },
       { id: 'mascotas', color: '#84CC16', nombre: 'Mascotas', icono: '🐶', tipo: 'gasto', nec: 'N', sri: 'mascotas', montoMax: 300,
-        palabras: ['pet house', 'pethouse', 'pecera', 'pipetas', 'pipeta', 'pipetas para pulgas', 'cama del perro', 'cama para perro', 'cama del gato', 'correa para el perro', 'consulta del veterinario', 'consulta veterinaria', 'juguete del perro', 'hueso para el perro', 'collar del gato', 'acuario', 'alimento para peces', 'comida de peces', 'pulgas', 'garrapatas', 'arnes para perro', 'perro', 'perrito', 'gato', 'gatito', 'mascota', 'mascotas', 'veterinario', 'veterinaria', 'vacuna del perro', 'vacuna del gato', 'comida de perro', 'comida de gato', 'comida del perro', 'comida del gato', 'croquetas', 'balanceado', 'pro plan', 'dog chow', 'cat chow', 'pedigree', 'whiskas', 'arena para gato', 'arena del gato', 'collar del perro', 'correa del perro', 'peluqueria canina', 'bano del perro', 'desparasitante', 'antipulgas', 'pet shop', 'petshop'] },
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'vet', 'croquetas para el perro', 'croquetas para el gato', 'concentrado', 'concentrado para el perro', 'cuido', 'cuido para el perro', 'alimento balanceado', 'vacunas del perro',
+          'vacunas del gato', 'piedras para gato', 'comida para el perro', 'comida para el gato',
+          'pet house', 'pethouse', 'pecera', 'pipetas', 'pipeta', 'pipetas para pulgas', 'cama del perro', 'cama para perro', 'cama del gato', 'correa para el perro', 'consulta del veterinario', 'consulta veterinaria', 'juguete del perro', 'hueso para el perro', 'collar del gato', 'acuario', 'alimento para peces', 'comida de peces', 'pulgas', 'garrapatas', 'arnes para perro', 'perro', 'perrito', 'gato', 'gatito', 'mascota', 'mascotas', 'veterinario', 'veterinaria', 'vacuna del perro', 'vacuna del gato', 'comida de perro', 'comida de gato', 'comida del perro', 'comida del gato', 'croquetas', 'balanceado', 'pro plan', 'dog chow', 'cat chow', 'pedigree', 'whiskas', 'arena para gato', 'arena del gato', 'collar del perro', 'correa del perro', 'peluqueria canina', 'bano del perro', 'desparasitante', 'antipulgas', 'pet shop', 'petshop'] },
       { id: 'turismo', color: '#0EA5E9', nombre: 'Turismo y viajes', icono: '✈️', tipo: 'gasto', nec: 'G', sri: 'turismo', montoMax: 5000,
-        palabras: ['expedia', 'paquete turistico', 'boleto de avion', 'boletos de avion', 'reserva de hotel', 'alojamiento', 'crucero', 'hotel en la playa', 'hotel', 'hostal', 'hospedaje', 'airbnb', 'booking', 'vuelo', 'vuelos', 'pasaje de avion', 'pasajes de avion', 'avion', 'aerolinea', 'latam', 'avianca', 'aeromexico', 'volaris', 'viva aerobus', 'sky', 'jetsmart', 'vacaciones', 'viaje', 'paseo', 'tour', 'excursion', 'playa', 'turismo', 'cabanas', 'cabana', 'camping', 'bus interprovincial', 'terminal terrestre', 'despegar', 'agencia de viajes', 'maleta', 'maletas', 'souvenir', 'recuerdos'] },
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'motel', 'pasaje aereo', 'equipaje', 'resort', 'todo incluido',
+          'expedia', 'paquete turistico', 'boleto de avion', 'boletos de avion', 'reserva de hotel', 'alojamiento', 'crucero', 'hotel en la playa', 'hotel', 'hostal', 'hospedaje', 'airbnb', 'booking', 'vuelo', 'vuelos', 'pasaje de avion', 'pasajes de avion', 'avion', 'aerolinea', 'latam', 'avianca', 'aeromexico', 'volaris', 'viva aerobus', 'sky', 'jetsmart', 'vacaciones', 'viaje', 'paseo', 'tour', 'excursion', 'playa', 'turismo', 'cabanas', 'cabana', 'camping', 'bus interprovincial', 'terminal terrestre', 'despegar', 'agencia de viajes', 'maleta', 'maletas', 'souvenir', 'recuerdos'] },
       { id: 'arte_cultura', color: '#9A6B3F', nombre: 'Arte y cultura', icono: '🎭', tipo: 'gasto', nec: 'G', sri: 'arte', montoMax: 300,
-        palabras: ['entrada al museo', 'entradas al museo', 'entrada al teatro', 'entradas al teatro', 'boletos del teatro', 'boleto del teatro', 'festival de musica', 'festival de jazz', 'festival', 'opera', 'taller de ceramica', 'taller de pintura', 'taller de arte', 'taller de escritura', 'libro de poemas', 'funcion de teatro', 'funcion de danza', 'ballet', 'orquesta', 'sinfonica', 'museo', 'teatro', 'galeria', 'obra de teatro', 'clase de musica', 'clases de musica', 'clase de guitarra', 'clase de piano', 'clase de baile', 'clases de baile', 'curso de arte', 'curso de pintura', 'exposicion', 'feria del libro', 'libreria', 'instrumento', 'guitarra', 'piano', 'violin'] },
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'novela', 'revista', 'periodico', 'oleos', 'danza',
+          'entrada al museo', 'entradas al museo', 'entrada al teatro', 'entradas al teatro', 'boletos del teatro', 'boleto del teatro', 'festival de musica', 'festival de jazz', 'festival', 'opera', 'taller de ceramica', 'taller de pintura', 'taller de arte', 'taller de escritura', 'libro de poemas', 'funcion de teatro', 'funcion de danza', 'ballet', 'orquesta', 'sinfonica', 'museo', 'teatro', 'galeria', 'obra de teatro', 'clase de musica', 'clases de musica', 'clase de guitarra', 'clase de piano', 'clase de baile', 'clases de baile', 'curso de arte', 'curso de pintura', 'exposicion', 'feria del libro', 'libreria', 'instrumento', 'guitarra', 'piano', 'violin'] },
       { id: 'regalos', color: '#EC4899', nombre: 'Regalos y ayudas', icono: '🎁', tipo: 'gasto', nec: 'G', sri: null, montoMax: 500,
-        palabras: ['floristeria', 'ayuda para mi', 'ayuda a mi', 'ayuda para mis', 'ayuda a mis', 'una ayuda', 'ayuda para', 'ayuda a', 'le di a mi', 'le mande a mi', 'le envie a mi', 'aporte para', 'regalo', 'regalos', 'obsequio', 'detalle', 'flores', 'ramo', 'torta de cumpleanos', 'pastel de cumpleanos', 'rifa', 'colecta', 'vaca', 'vaquita', 'donacion', 'donativo', 'limosna', 'diezmo', 'ofrenda', 'caridad', 'ayuda a mi mama', 'ayuda a mi papa', 'le di a mi mama', 'le di a mi papa', 'le mande a mi mama', 'le envie a mi mama', 'mesada', 'propina para', 'le preste', 'le presté'] },
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'diezmos', 'colaboracion', 'baby shower', 'quinceanera', 'quince anos', 'boda', 'bautizo', 'primera comunion', 'pinata', 'ramo de flores', 'peluche', 'tarjeta de regalo', 'gift card',
+          'regalo de cumpleanos', 'regalo de navidad', 'detalle para',
+          'floristeria', 'ayuda para mi', 'ayuda a mi', 'ayuda para mis', 'ayuda a mis', 'una ayuda', 'ayuda para', 'ayuda a', 'le di a mi', 'le mande a mi', 'le envie a mi', 'aporte para', 'regalo', 'regalos', 'obsequio', 'detalle', 'flores', 'ramo', 'torta de cumpleanos', 'pastel de cumpleanos', 'rifa', 'colecta', 'vaca', 'vaquita', 'donacion', 'donativo', 'limosna', 'diezmo', 'ofrenda', 'caridad', 'ayuda a mi mama', 'ayuda a mi papa', 'le di a mi mama', 'le di a mi papa', 'le mande a mi mama', 'le envie a mi mama', 'mesada', 'propina para', 'le preste', 'le presté'] },
       { id: 'deudas', color: '#64748B', nombre: 'Deudas y cuotas', icono: '🏦', tipo: 'gasto', nec: 'N', sri: null, montoMax: 5000,
-        palabras: ['cuota del auto', 'cuota del vehiculo', 'la letra', 'letra del carro', 'letra del auto', 'prestamo', 'cuota del prestamo', 'cuota del banco', 'cuota del credito', 'deuda', 'credito', 'pago del credito', 'dividendo', 'letra', 'letras', 'cuota del carro', 'cuota de la moto', 'cuota del celular', 'credito de consumo', 'microcredito', 'chulquero', 'chulco', 'prestamista', 'gota a gota', 'fiado', 'pague lo fiado', 'abono al prestamo', 'abono a la deuda', 'intereses del prestamo', 'cooperativa', 'pago a la cooperativa', 'casa de empeno', 'empeno', 'desempeno'] },
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'letra del coche', 'coppel', 'elektra', 'famsa', 'el gota a gota', 'paga diario', 'usurero', 'el chulco', 'prestamo del banco', 'pago del prestamo', 'cuota de la cooperativa', 'lo fiado',
+          'la libreta de la tienda',
+          'cuota del auto', 'cuota del vehiculo', 'la letra', 'letra del carro', 'letra del auto', 'prestamo', 'cuota del prestamo', 'cuota del banco', 'cuota del credito', 'deuda', 'credito', 'pago del credito', 'dividendo', 'letra', 'letras', 'cuota del carro', 'cuota de la moto', 'cuota del celular', 'credito de consumo', 'microcredito', 'chulquero', 'chulco', 'prestamista', 'gota a gota', 'fiado', 'pague lo fiado', 'abono al prestamo', 'abono a la deuda', 'intereses del prestamo', 'cooperativa', 'pago a la cooperativa', 'casa de empeno', 'empeno', 'desempeno'] },
       { id: 'otros', color: '#94A3B8', nombre: 'Otros gastos', icono: '📦', tipo: 'gasto', nec: null, sri: null, palabras: [] },
       // ---- Ingresos
       { id: 'sueldo', color: '#10B981', nombre: 'Sueldo', icono: '💼', tipo: 'ingreso', nec: null, sri: null,
-        palabras: ['sueldo', 'rol', 'rol de pagos', 'quincena', 'salario', 'pago del mes', 'nomina', 'mi sueldo', 'me pagaron el sueldo', 'cobre el sueldo', 'decimo', 'decimo tercero', 'decimo cuarto', 'aguinaldo', 'prima', 'gratificacion', 'utilidades', 'vacaciones pagadas', 'liquidacion', 'jubilacion', 'pension jubilar', 'sueldo quincenal', 'jornal'] },
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'catorcena', 'la catorcena', 'el treceavo', 'la paga', 'la nomina', 'paycheck', 'el paycheck', 'payroll', 'sueldito', 'jornales', 'bono catorce', 'bono de navidad',
+          'catorceavo', 'treceavo', 'doble sueldo', 'paga extra', 'cesta ticket',
+          'sueldo', 'rol', 'rol de pagos', 'quincena', 'salario', 'pago del mes', 'nomina', 'mi sueldo', 'me pagaron el sueldo', 'cobre el sueldo', 'decimo', 'decimo tercero', 'decimo cuarto', 'aguinaldo', 'prima', 'gratificacion', 'utilidades', 'vacaciones pagadas', 'liquidacion', 'jubilacion', 'pension jubilar', 'sueldo quincenal', 'jornal'] },
       { id: 'extra', color: '#06B6D4', nombre: 'Ingreso extra', icono: '💵', tipo: 'ingreso', nec: null, sri: null,
-        palabras: ['extra', 'ingreso extra', 'propina', 'propinas', 'trabajo extra', 'trabajito', 'cachuelo', 'chamba extra', 'chambita', 'camello', 'freelance', 'bono', 'comision', 'comisiones', 'horas extras', 'hora extra', 'turno extra', 'me pagaron un trabajo', 'un trabajo', 'arreglo que hice', 'servicio que di', 'rifa que gane', 'premio', 'loteria', 'apuesta'] },
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'changas', 'camellito', 'pituto', 'bisnes', 'horas extra', 'el rebusque', 'bretecito', 'chiripita', 'matador', 'camaron', 'chambon', 'side job', 'un side', 'pega', 'peguita',
+          'propinas del trabajo',
+          'overtime', 'bono14', 'chamba', 'changa', 'changuita', 'pololo', 'pololito', 'brete', 'chiripa', 'chiripeo', 'rebusque', 'bisne', 'cachuelito', 'curro', 'currito', 'jornal',
+          'extra', 'ingreso extra', 'propina', 'propinas', 'trabajo extra', 'trabajito', 'cachuelo', 'chamba extra', 'chambita', 'camello', 'freelance', 'bono', 'comision', 'comisiones', 'horas extras', 'hora extra', 'turno extra', 'me pagaron un trabajo', 'un trabajo', 'arreglo que hice', 'servicio que di', 'rifa que gane', 'premio', 'loteria', 'apuesta'] },
       { id: 'ventas', color: '#F59E0B', nombre: 'Ventas', icono: '🏷️', tipo: 'ingreso', nec: null, sri: null,
-        palabras: ['venta', 'ventas', 'vendi', 'vendimos', 'me compraron', 'marketplace', 'mercado libre', 'olx'] },
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'mercadolibre', 'wallapop', 'vinted', 'venta de garaje', 'garage sale', 'emprendimiento', 'mi negocio', 'la tienda', 'el negocio', 'pedidos', 'catalogo',
+          'venta', 'ventas', 'vendi', 'vendimos', 'me compraron', 'marketplace', 'mercado libre', 'olx'] },
       { id: 'otros_ingresos', color: '#7A8CA3', nombre: 'Otros ingresos', icono: '🎁', tipo: 'ingreso', nec: null, sri: null,
-        palabras: ['intereses', 'los intereses', 'de intereses', 'interes ganado', 'devolvieron', 'regalaron', 'prestaron', 'mandaron plata', 'me mandaron', 'reembolsaron', 'devolucion de impuestos', 'cashback', 'dividendos', 'regalo', 'me regalaron', 'devolucion', 'reembolso', 'me devolvieron', 'me pagaron lo que me debian', 'me pagaron la deuda', 'me prestaron', 'prestamo que recibi', 'giro', 'remesa', 'me mandaron plata', 'me enviaron dinero', 'western union', 'interes', 'intereses de la cuenta', 'intereses del ahorro', 'arriendo que me pagan', 'renta que cobro', 'alquiler que cobro'] },
+        palabras: [
+          // U21, ronda 2 (12 nov): cómo se dice en cada país (comidas, ropa, transporte, servicios, tiendas…)
+          'moneygram', 'bono del gobierno', 'bono de desarrollo humano', 'ingreso solidario', 'auh', 'asignacion', 'herencia', 'intereses del banco', 'me mandaron de afuera',
+          'plata de afuera', 'de afuera', 'del exterior',
+          'paro', 'el paro', 'subsidio', 'subsidio de desempleo', 'finiquito', 'liquidacion', 'cesantias', 'cts', 'remesas', 'taxes', 'los taxes',
+          'intereses', 'los intereses', 'de intereses', 'interes ganado', 'devolvieron', 'regalaron', 'prestaron', 'mandaron plata', 'me mandaron', 'reembolsaron', 'devolucion de impuestos', 'cashback', 'dividendos', 'regalo', 'me regalaron', 'devolucion', 'reembolso', 'me devolvieron', 'me pagaron lo que me debian', 'me pagaron la deuda', 'me prestaron', 'prestamo que recibi', 'giro', 'remesa', 'me mandaron plata', 'me enviaron dinero', 'western union', 'interes', 'intereses de la cuenta', 'intereses del ahorro', 'arriendo que me pagan', 'renta que cobro', 'alquiler que cobro'] },
     ],
 
     // Palabras que piden «lo mismo que el mes pasado» o describen medidas: ayudan a saber que es compra para la casa (ingredientes).
@@ -376,6 +596,9 @@
       resumenSemanalDia: 0,                       // 0 = domingo
       anticipoDiasPredictivo: 7,
       diasMinimosPrediccion: 7,                   // la alerta «te faltarán…» espera a tener esta cantidad de días de datos
+      // C23: el «ritmo» de esa alerta se mide solo con el gasto del día a día. No se multiplican por los días que faltan:
+      deUnaVezAlMes: ['vivienda', 'servicios', 'suscripciones', 'deudas', 'educacion'],   // categorías que se pagan una vez al mes (y los pagos fijos)
+      compraGrandeDeUnaVez: 0.2,                  // un solo gasto mayor a esta parte de lo que entró en el periodo (0.2 = 20 %) es de una vez, no un ritmo
     },
     suscripciones: { minimoMeses: 2, toleranciaMonto: 0.1, toleranciaDias: 5 },   // para detectarlas solas (Pro)
     conciliar: { toleranciaDias: 4, toleranciaMonto: 0.01 },

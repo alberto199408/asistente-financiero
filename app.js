@@ -91,8 +91,13 @@
 
   /* ------------------------------------------------------------------ Dinero */
   // 1060 => "1.060" ; 20.5 => "20,50" ; opciones: { simbolo, fijo (siempre 2 decimales), signo }
+  // Montos ocultos (U18): con el modo privado activo, todo el dinero de la pantalla sale como «$••••»; el ojito los muestra.
+  let privado = false;
+  const ponerPrivado = (v) => { privado = !!v; };
+  const esPrivado = () => privado;
   function dinero(n, o = {}) {
     const PLAN = AF.PLAN;
+    if (privado && !o.siempre) { const m = (PLAN && PLAN.monedas[o.moneda || (AF.estado && AF.estado.moneda) || 'USD']) || { simbolo: '$' }; return (o.simbolo != null ? o.simbolo : m.simbolo) + '••••'; }
     const mon = (PLAN && PLAN.monedas[o.moneda || (AF.estado && AF.estado.moneda) || 'USD']) || { simbolo: '$' };
     const simbolo = o.simbolo != null ? o.simbolo : mon.simbolo;
     let v = r2(n || 0);
@@ -111,6 +116,8 @@
   const iso = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
   const deISO = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
   const hoyISO = (now) => iso(now || new Date());
+  // Un monto para escribir en un campo: «12» o «12,50» (nunca «12,5»)
+  const montoEditable = (n) => { if (n == null || n === '' || isNaN(Number(n))) return n == null ? '' : String(n); const v = Number(n); return Number.isInteger(v) ? String(v) : v.toFixed(2).replace('.', ','); };
   const sumarDias = (s, n) => { const d = deISO(s); d.setDate(d.getDate() + n); return iso(d); };
   const sumarMeses = (s, n) => {
     const d = deISO(s); const dia = d.getDate();
@@ -150,7 +157,7 @@
     return iso(new Date(y, m, dd));
   }
 
-  AF.util = { norm, escapeRe, uid, r2, cap, leerRacha, palabrasANumeros, parseNumero, dinero, pct, pad, iso, deISO, hoyISO, sumarDias,
+  AF.util = { montoEditable, norm, escapeRe, uid, r2, cap, leerRacha, palabrasANumeros, parseNumero, dinero, ponerPrivado, esPrivado, pct, pad, iso, deISO, hoyISO, sumarDias,
     sumarMeses, inicioMes, finMes, inicioAnio, inicioSemana, diasEntre, MESES, DIAS, DIAS_BONITOS, MESES_CORTOS, nombreMes,
     diaSemana, fechaCorta, fechaLarga, proximoDia };
   if (typeof module === 'object' && module.exports) module.exports = AF.util;
@@ -498,13 +505,75 @@
           class: 'btn ' + (a.clase || 'btn-primario'), type: 'button',
           onclick: () => { if (a.onclick) { if (a.onclick(api) === false) return; } if (a.cierra !== false) api.cerrar(); },
         }, a.texto))) : null);
+    let cerrada = false;
     const api = {
-      cerrar() { telon.remove(); caja.remove(); if (o.alCerrar) o.alCerrar(); },
+      cerrar() { if (cerrada) return; cerrada = true; telon.remove(); caja.remove(); d.removeEventListener('keydown', alTeclado); if (o.alCerrar) o.alCerrar(); },
       el: caja,
     };
+    const alTeclado = (e) => { if (e.key === 'Escape' && caja.parentNode && caja === Array.from(d.querySelectorAll('.hoja')).pop()) api.cerrar(); };
+    d.addEventListener('keydown', alTeclado);
     telon.addEventListener('click', api.cerrar);
+    deslizarParaCerrar(caja, api.cerrar);
     cont.appendChild(telon); cont.appendChild(caja);
     return api;
+  }
+
+  /* -------------------------------------------------- Deslizar hacia abajo para cerrar (U6, Luis 12 nov) */
+  // Se arrastra hacia abajo desde la rayita o el título, o desde cualquier parte si el contenido ya está arriba del todo
+  // (si está desplazado, primero sube el contenido, como en cualquier app). Más de 90 px (o un gesto rápido) cierra; si no, vuelve.
+  // Con el dedo se usan eventos táctiles (si no, el navegador se queda el gesto para desplazar); con ratón o lápiz, eventos de puntero.
+  // El arrastre usa la propiedad `translate`, que se SUMA al `transform: translateX(-50%)` que centra la ventana (C6).
+  function deslizarParaCerrar(caja, cerrar) {
+    let y0 = null, x0 = 0, dy = 0, t0 = 0, activo = false, id = null, arrastro = false, cerrando = false;
+    const mover = (px) => { caja.style.transition = 'none'; caja.style.translate = '0 ' + Math.max(0, px) + 'px'; };
+    const reiniciar = () => { caja.style.transition = 'translate .2s ease'; caja.style.translate = ''; setTimeout(() => { if (!cerrando) caja.style.transition = ''; }, 220); };
+    const empezar = (x, y, target) => {
+      if (cerrando || target.closest('textarea, input[type="range"], select')) return false;
+      const arriba = y - caja.getBoundingClientRect().top < 64 || !!target.closest('.hoja-asa, .hoja-titulo, .voz-cabeza');
+      if (!arriba && caja.scrollTop > 0) return false;
+      y0 = y; x0 = x; dy = 0; t0 = Date.now(); activo = false; arrastro = false; return true;
+    };
+    // devuelve true si este movimiento es del arrastre (y no un desplazamiento normal)
+    const seguir = (x, y, puede) => {
+      if (y0 == null) return false;
+      dy = y - y0; const dx = x - x0;
+      if (!activo) {
+        if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) { y0 = null; return false; }   // gesto de lado: no es nuestro
+        if (dy < -6) { y0 = null; return false; }                                         // hacia arriba: desplaza el contenido
+        if (!(dy > 8 && caja.scrollTop <= 0)) return false;
+        if (!puede) { y0 = null; return false; }      // el navegador ya está desplazando: ese gesto es suyo
+        activo = true; arrastro = true;
+      }
+      mover(dy - 8); return true;              // sigue al dedo (sin el salto de los primeros 8 px); el recorrido cuenta completo para cerrar
+    };
+    const terminar = () => {
+      if (y0 == null) return;
+      const vel = dy / Math.max(1, Date.now() - t0);
+      if (activo && (dy > 90 || (dy > 40 && vel > 0.5))) {
+        cerrando = true; caja.style.transition = 'translate .18s ease'; caja.style.translate = '0 100%'; setTimeout(cerrar, 170);
+      } else if (activo) reiniciar();
+      y0 = null; activo = false;
+    };
+    const cancelar = () => { if (activo) reiniciar(); y0 = null; activo = false; };
+    // dedo
+    caja.addEventListener('touchstart', (e) => { if (e.touches.length !== 1) { cancelar(); return; } const t = e.touches[0]; empezar(t.clientX, t.clientY, e.target); }, { passive: true });
+    caja.addEventListener('touchmove', (e) => { const t = e.touches[0]; if (t && seguir(t.clientX, t.clientY, e.cancelable) && e.cancelable) e.preventDefault(); }, { passive: false });
+    caja.addEventListener('touchend', terminar);
+    caja.addEventListener('touchcancel', cancelar);
+    // ratón o lápiz
+    caja.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch' || (e.pointerType === 'mouse' && e.button !== 0)) return;
+      if (empezar(e.clientX, e.clientY, e.target)) id = e.pointerId;
+    });
+    caja.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'touch' || e.pointerId !== id) return;
+      const antes = activo;
+      if (seguir(e.clientX, e.clientY, true)) { if (!antes) { try { caja.setPointerCapture(id); } catch (er) { /* nada */ } } e.preventDefault(); }
+    });
+    caja.addEventListener('pointerup', (e) => { if (e.pointerType !== 'touch' && e.pointerId === id) { terminar(); id = null; } });
+    caja.addEventListener('pointercancel', (e) => { if (e.pointerType !== 'touch') { cancelar(); id = null; } });
+    // si se arrastró, el «toque» que sigue no debe activar el botón que estaba debajo del dedo
+    caja.addEventListener('click', (e) => { if (arrastro) { arrastro = false; e.stopPropagation(); e.preventDefault(); } }, true);
   }
 
   /* ------------------------------------------------------------------ Aviso */
@@ -546,7 +615,7 @@
     setTimeout(() => capa.remove(), 2600);
   }
 
-  AF.ui = { h, vaciar, glifo, tinteDe, confeti, ico, logoGoogle, logoFacebook, logoApp, insigniaBanco, chipPro, hoja, aviso, fila, campo, iconos: Object.keys(P) };
+  AF.ui = { deslizarParaCerrar, h, vaciar, glifo, tinteDe, confeti, ico, logoGoogle, logoFacebook, logoApp, insigniaBanco, chipPro, hoja, aviso, fila, campo, iconos: Object.keys(P) };
   if (typeof module === 'object' && module.exports) module.exports = AF.ui;
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
@@ -689,7 +758,48 @@
   function borrarTodo() { cargar(null, adaptador); return guardarYa(); }
 
   AF.bus = bus;
-  AF.store = { bus, vacio, cargar, datos: () => d, get d() { return d; }, guardar, guardarYa, agregar, editar, borrar, buscar, deshacer, puedeDeshacer,
+  /* ------------------------------------------- Juntar dos cuentas (U3: lo de «sin cuenta» + lo de la cuenta) */
+  // Función pura: no toca `d`. Lo de `base` (la cuenta) manda; de `extra` (sin cuenta) entra todo lo que no esté ya.
+  // La misma tarjeta (mismo nombre y últimos 4), la misma meta (mismo nombre, o las dos son el fondo de emergencia) y la misma
+  // categoría propia (mismo nombre) se cuentan UNA vez: los movimientos y aportes de `extra` se pasan a la de `base`.
+  function juntarDatos(base, extra) {
+    const B = copia(base), X = copia(extra), cuenta = {};
+    COLECCIONES.forEach((c) => { if (!Array.isArray(B[c])) B[c] = []; if (!Array.isArray(X[c])) X[c] = []; });
+    const norm = (t) => String(t || '').trim().toLowerCase();
+    const mapa = {};                                   // id de extra → id de base (para lo que ya existía)
+    const igual = { tarjetas: (a, b) => norm(a.nombre) === norm(b.nombre) && String(a.ultimos4 || '') === String(b.ultimos4 || ''),
+      metas: (a, b) => (a.esFondo && b.esFondo) || (!a.esFondo && !b.esFondo && norm(a.nombre) === norm(b.nombre)),
+      categorias: (a, b) => norm(a.nombre) === norm(b.nombre) && a.tipo === b.tipo };
+    const ids = new Set(); COLECCIONES.forEach((c) => B[c].forEach((x) => { if (x && x.id) ids.add(x.id); }));
+    COLECCIONES.forEach((c) => {
+      let n = 0;
+      X[c].forEach((x) => {
+        if (!x) return;
+        const ya = igual[c] && B[c].find((y) => igual[c](y, x));
+        if (ya) {
+          mapa[x.id] = ya.id;
+          if (c === 'metas') { const vistos = new Set((ya.aportes || []).map((z) => z.id)); ya.aportes = (ya.aportes || []).concat((x.aportes || []).filter((z) => !vistos.has(z.id))); n += (x.aportes || []).length ? 1 : 0; }
+          return;
+        }
+        if (x.id && ids.has(x.id)) return;             // el mismo registro ya está (por ejemplo, ya se juntaron antes)
+        B[c].push(x); if (x.id) ids.add(x.id); n++;
+      });
+      if (n) cuenta[c] = n;
+    });
+    // los movimientos (y lo demás) que venían de extra apuntan ahora a la tarjeta / meta / categoría de base
+    const CAMPOS = ['tarjetaId', 'metaId', 'cat'];
+    COLECCIONES.forEach((c) => B[c].forEach((x) => { if (x && typeof x === 'object') CAMPOS.forEach((k) => { if (x[k] && mapa[x[k]]) x[k] = mapa[x[k]]; }); }));
+    B.diccionario = Object.assign({}, X.diccionario || {}, B.diccionario || {});
+    B.ajustes = Object.assign({}, X.ajustes || {}, B.ajustes || {});
+    ['sueldo', 'cobro', 'nombre'].forEach((k) => { if ((B.ajustes[k] == null || B.ajustes[k] === '') && X.ajustes && X.ajustes[k] != null) B.ajustes[k] = X.ajustes[k]; });
+    B.plan = Object.assign({}, X.plan || {}, B.plan || {});
+    if (X.plan && X.plan.proHasta && (!B.plan.proHasta || X.plan.proHasta > B.plan.proHasta)) B.plan.proHasta = X.plan.proHasta;
+    if (X.plan && X.plan.inicioPrueba && (!B.plan.inicioPrueba || X.plan.inicioPrueba < B.plan.inicioPrueba)) B.plan.inicioPrueba = X.plan.inicioPrueba;
+    B.historial = Array.isArray(B.historial) ? B.historial : [];     // el historial de «deshacer» de extra no se mezcla
+    return { datos: B, cuenta };
+  }
+
+  AF.store = { juntarDatos, bus, vacio, cargar, datos: () => d, get d() { return d; }, guardar, guardarYa, agregar, editar, borrar, buscar, deshacer, puedeDeshacer,
     ajustar, aprender, aprendidoCat, olvidarAprendido, categorias, categoria, movs, movsEntre, ultimoMov, exportar, reemplazarTodo, borrarTodo, COLECCIONES };
   if (typeof module === 'object' && module.exports) module.exports = AF.store;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -764,7 +874,7 @@
     'me devolvieron', 'me devolvio', 'me mandaron', 'me mando', 'me enviaron', 'me envio', 'me prestaron', 'me presto', 'me reembolsaron', 'me reembolso', 'me compraron', 'me giraron', 'me giro', 'me ingresaron', 'me cayo', 'me cayeron', 'me pago'];
   const FRASES_GASTO = ['me cobraron', 'me costo', 'me salio', 'un gasto', 'gasto de', 'me cobro', 'le di', 'les di', 'le deje', 'les deje', 'deje de propina', 'di de propina', 'le mande', 'le envie', 'le transferi', 'le preste', 'le regale', 'les regale', 'transferi', 'mande', 'envie', 'preste', 'regale'];
   const PARADA = set('el la los las un una unos unas de del en por para con al a y e o mi mis tu tus su sus me se lo que es fue era fueron hoy ayer anoche dolares dolar usd pesos euros soles centavos centavo mas casi como pues entonces porque cuando donde yo cargue cargamos tanquee fui fuimos llene eche echamos pase pasamos sali salimos');
-  const MONEDAS = set('dolar dolares usd $ pesos peso euros euro soles sol dolarcitos');
+  const MONEDAS = set('dolar dolares usd $ pesos peso euros euro soles sol dolarcitos balboa balboas quetzal quetzales lempira lempiras colon colones boliviano bolivianos bolivar bolivares guarani guaranies cordobas');   // C27
   const OPENER_PREGUNTA = set('cuanto cuantos cuanta cuantas cual cuales dime muestrame desglosame desglosa resumeme resumen cuando donde hay tengo puedo podria alcanza conviene que');
   const V_CORREGIR = set('cambia cambialo cambiale cambiar corrige corrigelo corregir modifica modificalo edita editalo ponlo pon pone marca marcalo borra borralo borrar elimina eliminalo eliminar quita quitalo anula anulalo anular deshaz deshacer olvidalo mejor');
   const V_BORRAR = set('borra borralo borrar elimina eliminalo eliminar quita quitalo anula anulalo anular olvidalo');
@@ -782,10 +892,13 @@
   const DESC_EXCLUIR = set('gaste gastamos gasto gastado gastaron pague pagamos pagado compre compramos comprado pedi consumi done abone inverti gane ganamos gano cobre cobramos recibi recibimos ingrese vendi '
     + 'comi cene almorce desayune merende tome bebi '
     + 'hice hicimos hizo fui fuimos logre logrando logrado consegui pude tuve tenia quise fue era es son esta estan hay hubo use '
+    + 'subi subimos baje bajamos cogi cogimos cogido agarre agarramos pedido hecho he ha hemos han cambie '
     + 'tambien ademas luego despues hoy ayer anoche ahora ahorita recien ya '
     + 'credito creditos plazo plazos meses mes cuotas cuota diferido diferida diferidos tarjeta tarjetas banco intereses interes sin con efectivo debito corriente contado '
-    + 'dolares dolar usd pesos peso soles sol euros euro centavos centavo bolivares '
-    + 'me mi mis te tu tus su sus nos nuestro nuestra un una unos unas el la los las lo de del en por para al a y e o que como mas casi solo otra otro otros otras cosa cosas algo nuevo nueva');
+    + 'dolares dolar usd pesos peso soles sol euros euro centavos centavo centavitos centavito ctvs ctv cts centimos centimo bolivares bolivar balboa balboas quetzal quetzales lempira lempiras colon colones boliviano bolivianos guarani guaranies cordobas '
+    + 'me mi mis te tu tus su sus nos nuestro nuestra le les un una unos unas el la los las lo de del en por para al a y e o que como mas casi solo otra otro otros otras cosa cosas algo nuevo nueva '
+    + 'anota anotame anotalo apunta apuntame registra registrame agrega agregame guarda guardame pon ponme ponle mete metele tenia tenian tengo debia debian luego despues '
+    + 'ingreso ingresos egreso egresos entrada entradas salida salidas saldo menos resta restale suma sumale quita quitale aumenta aumentale');
   const MESES_N = U.MESES;
   const DIAS_N = U.DIAS;
 
@@ -809,16 +922,33 @@
   }
 
   /* ------------------------------------------------------------------------ Tokens */
-  const limpiar = (raw) => U.norm(raw).replace(/^[¿¡"'(\[]+/, '').replace(/[?!"')\].,;:]+$/, '');
-  const esNumToken = (n) => /^\$?\d[\d.,]*\$?$/.test(n) || /^\d[\d.,]*(usd|dolares|dolar)$/.test(n);
+  const limpiar = (raw) => U.norm(raw).replace(/^[¿¡"'(\[]+/, '').replace(/[?!"')\].,;:]+$/, '').replace(/^(co|e|i|u|si)n([pb])/, '$1m$2');   // «conpré» → «compré» (solo al empezar: «airbnb» se queda)
+  const PRE_MONEDA = '(?:\\$|€|₡|₲|us\\$|rd\\$|c\\$|s\\/|q|l|bs\\.?)?';
+  const RE_NUM_TOKEN = new RegExp('^' + PRE_MONEDA + '\\d[\\d.,]*(?:\\$|€|usd|dolares|dolar|eur|euros)?$');
+  const esNumToken = (n) => RE_NUM_TOKEN.test(n);
   function numDeToken(n) {
-    const m = n.match(/^\$?(\d[\d.,]*)/);
-    return m ? U.parseNumero(m[1]) : null;
+    const m = n.match(new RegExp('^' + PRE_MONEDA + '(\\d[\\d.,]*)'));
+    return m ? U.parseNumero(m[1].replace(/[.,]$/, '')) : null;
   }
 
-  function tokenizar(texto) {
+  // Multiplicadores de la plata para el país (C9, U21): «20 mil», «2 millones», «20k», «20 lucas»… (todo en plan.js → dinero)
+  function multiplicadores(pais) {
+    const D = (AF.PLAN && AF.PLAN.dinero) || {};
+    return Object.assign({ mil: 1e3, millon: 1e6, millones: 1e6, k: 1e3 }, D.todos || {}, (pais && D[pais]) || {});
+  }
+  function tokenizar(texto, opc) {
+    const MULT = (opc && opc.mult) || multiplicadores(null);
     const crudos = String(texto || '').trim().split(/\s+/).filter(Boolean);
     let toks = crudos.map((raw) => ({ raw, n: limpiar(raw), coma: /[,;]$/.test(raw) }));
+    // abreviaturas al escribir rápido: «q» = que, «xq»/«pq» = porque, «tb»/«tmb» = también, «pa» = para
+    const ABREV = { q: 'que', xq: 'porque', pq: 'porque', porq: 'porque', tb: 'tambien', tmb: 'tambien', tbn: 'tambien', pa: 'para' };
+    toks.forEach((t) => { if (ABREV[t.n]) t.n = ABREV[t.n]; });
+    toks.forEach((t, i) => {
+      const ant = toks[i - 1] ? toks[i - 1].n : '';
+      if (/^onces?$/.test(t.n) && /^(la|las)$/.test(ant)) t.n = 'once_merienda';                // «pan para la once» (Chile), «las onces» (Colombia)
+      if (/^(14|catorce)$/.test(t.n) && /^bono$/.test(ant)) { toks[i - 1].n = 'bono14'; t.n = '_'; t.quitar = true; }   // «bono 14» (Guatemala)
+    });
+    toks = toks.filter((t) => !t.quitar);
     // 1) palabras-número => un solo token numérico ("veinte y cinco" => 25)
     const ns = toks.map((t) => t.n);
     const out = [];
@@ -826,13 +956,54 @@
       const r = U.leerRacha(ns, i);
       if (r) {
         const partes = toks.slice(i, r.fin);
-        out.push({ raw: partes.map((p) => p.raw).join(' '), n: String(r.valor), num: r.valor, coma: partes[partes.length - 1].coma, palabras: true });
+        out.push({ raw: partes.map((p) => p.raw).join(' '), n: String(r.valor), num: r.valor, coma: partes[partes.length - 1].coma, palabras: true, miles: r.valor >= 1000 && /^(mil|millon|millones)$/.test(partes[partes.length - 1].n) });
         i = r.fin;
       } else { out.push(toks[i]); i++; }
     }
-    toks = out;
-    // 2) números con dígitos
-    toks.forEach((t) => { if (t.num == null && esNumToken(t.n)) { const v = numDeToken(t.n); if (v != null) t.num = v; } });
+    toks = out.filter((t, i) => !(i > 0 && t.num == null && t.n.length > 2 && t.n === out[i - 1].n && !out[i - 1].coma && !/^(tuc|tuk|toc|tic|chiqui|bla)$/.test(t.n)));   // «tuc tuc» sí se repite
+    // «x» por «por» al escribir rápido («pagué 300 x el puesto»), salvo entre números («2 x 1»)
+    toks.forEach((t, i) => { if (t.n === 'x' && toks[i - 1] && toks[i + 1] && toks[i - 1].num == null && toks[i + 1].num == null && !/^\d/.test(toks[i + 1].n) && !(toks[i - 1].n === 'mas' && toks[i + 1].n === 'menos')) t.n = 'por'; });
+    // «una salchipapa en uno», «pagué uno en pan», «uno con diez»: aquí «uno» es un dólar
+    toks.forEach((t, i) => {
+      if (t.num != null || t.n !== 'uno') return;
+      let ant = toks[i - 1] ? toks[i - 1].n : ''; const sig = toks[i + 1] ? toks[i + 1].n : '';
+      if (ant && !FORMAS.has(ant) && !/\d/.test(ant)) { const f = formaCorrecta(ant); if (f) ant = f; }     // «pagè uno de spotify»
+      const sigLibre = !sig || t.coma || /^(y|e|tambien|ademas|luego|despues|dolar|dolares|usd|con|nada|gracias|eso|aparte|pero|entonces|cada)$/.test(sig) || (FORMAS.has(sig) && !NOMBRE_TAMBIEN.has(sig)) || /^(me|le|se)$/.test(sig);
+      if ((/^(en|por|a|de|costo|salio|vale)$/.test(ant) && sigLibre)
+        || (ant && ant.length > 2 && !PARADA.has(ant) && (!FORMAS.has(ant) || NOMBRE_TAMBIEN.has(ant)) && toks[i - 1].num == null && sigLibre && !/^(numero|dia|el|uno)$/.test(ant))   // «un almuerzo uno»
+        || (sig === 'con' && toks[i + 2] && (toks[i + 2].num != null || /^(diez|veinte|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa|quince|veinticinco|setenta)$/.test(toks[i + 2].n)))
+        || (/^(pague|gaste|compre|cancele|di|pagamos|gastamos|compramos|fueron|fue|costo|salio)$/.test(ant) && /^(en|de|por)$/.test(sig))) { t.num = 1; t.palabras = true; }
+    });
+    // 2) números con dígitos (y «20k»)
+    toks.forEach((t) => {
+      if (t.num == null && esNumToken(t.n)) { const v = numDeToken(t.n); if (v != null) t.num = v; }
+      else if (t.num == null && /^\$?\d+(?:[.,]\d+)?k$/.test(t.n)) { const v = numDeToken(t.n.replace(/k$/, '')); if (v != null) { t.num = v * 1000; t.miles = true; } }
+    });
+    // 2b) «20 mil», «1,5 millones», «2 palos», «20 lucas» (C9): número + palabra que multiplica = UN solo monto.
+    //     Con letras («veinte mil») ya lo junta leerRacha; aquí va el caso con cifras, que el teléfono escribe así.
+    const esMult = (t) => { if (!t) return null; const w = U.norm(t.raw).replace(/[.,;:!?]+$/, ''); return MULT[w] != null ? { w, m: MULT[w] } : null; };
+    for (let i = 0; i < toks.length - 1; i++) {
+      const a = toks[i], b = toks[i + 1];
+      if (a.num == null || a.miles) continue;
+      const mb = esMult(b);
+      if (!mb || (b.num != null && !b.palabras)) continue;
+      if (mb.m === 1 && a.palabras && a.num === 1) continue;                                // «un pavo», «una luca» de Ecuador: no es un monto
+      if (mb.m >= 1e6 && /^(palo|palos)$/.test(mb.w) && toks[i + 2] && /^(de|del)$/.test(toks[i + 2].n) && toks[i + 3] && !/^(sueldo|salario|plata|pesos|deuda|prestamo)$/.test(toks[i + 3].n)) continue;   // «2 palos de escoba»
+      let mult = mb.m, fin = i + 2;
+      if (mb.w === 'mil' && esMult(toks[i + 2]) && /^millon(es)?$/.test(esMult(toks[i + 2]).w)) { mult = 1e9; fin = i + 3; }
+      const v = Math.round(a.num * mult * 100) / 100;
+      toks.splice(i, fin - i, { raw: toks.slice(i, fin).map((p) => p.raw).join(' '), n: String(v), num: v, coma: toks[fin - 1].coma, palabras: a.palabras && mult === 1, miles: mult >= 1000, dicho: mult !== 1 });
+    }
+    // «20 mil 500», «1 millón 200 mil», «un millón y medio»: se suman
+    for (let i = 0; i < toks.length - 1; i++) {
+      const a = toks[i], b = toks[i + 1];
+      if (!a.miles || a.coma) continue;
+      const escalon = a.num >= 1e6 ? 1e6 : 1e3;
+      if (b.n === 'y' && toks[i + 2] && /^medio$/.test(toks[i + 2].n)) { const v = a.num + escalon / 2; toks.splice(i, 3, Object.assign({}, a, { raw: a.raw + ' y medio', n: String(v), num: v, coma: toks[i + 2].coma })); continue; }
+      if (b.num != null && Number.isInteger(b.num) && b.num > 0 && b.num < escalon && !/^(meses|mes|cuotas|pagos|personas|dias|anos|ano|semanas|veces|%)$/.test(toks[i + 2] ? toks[i + 2].n : '')) {
+        const v = a.num + b.num; toks.splice(i, 2, Object.assign({}, a, { raw: a.raw + ' ' + b.raw, n: String(v), num: v, coma: b.coma })); i--;
+      }
+    }
     // 3) "veinte con cincuenta (centavos)" => 20,50
     for (let i = 0; i < toks.length - 2; i++) {
       const a = toks[i];
@@ -854,12 +1025,88 @@
         }
       }
     }
+    // 3a) C29: «dos y medio», «un dólar y medio», «dólar y medio», «medio dólar», «un cuarto de dólar», «1 y 50 de pasaje»
+    const DOL = /^(dolar|dolares|dolarito|dolaritos|dolarcito|dolarcitos|usd|euro|euros|sol|soles|peso|pesos|balboa|balboas)$/;
+    for (let i = 0; i < toks.length; i++) {
+      const t = toks[i], n1 = toks[i + 1] ? toks[i + 1].n : '', n2 = toks[i + 2] ? toks[i + 2].n : '', n3 = toks[i + 3] ? toks[i + 3].n : '';
+      const nuevo = (desde, hasta, v) => { const fin = Math.min(hasta, toks.length); toks.splice(desde, fin - desde, { raw: toks.slice(desde, fin).map((p) => p.raw).join(' '), n: String(v), num: v, coma: toks[fin - 1].coma, palabras: true }); };
+      if (t.num != null && Number.isInteger(t.num) && !t.miles && t.num < 100) {
+        // «2 y medio», «un dólar y medio», «3 dólares y media»
+        if (n1 === 'y' && /^(medio|media)$/.test(n2) && !toks[i].coma) { nuevo(i, i + 3, t.num + 0.5); continue; }
+        if (DOL.test(n1) && n2 === 'y' && /^(medio|media)$/.test(n3)) { nuevo(i, i + 4, t.num + 0.5); continue; }
+        // «1 y 50 de pasaje», «tres y cincuenta»: centavos típicos, número chico, y no sigue otra cosa con su propio monto
+        const b = toks[i + 2];
+        if (n1 === 'y' && b && b.num != null && Number.isInteger(b.num) && t.num <= 9 && !t.coma && !toks[i + 1].coma && ((b.num % 5 === 0 && b.num >= 10 && b.num <= 95) || b.num === 99)) {
+          const sig = toks[i + 3] ? toks[i + 3].n : '';
+          if (!sig || b.coma || /^(de|del|en|por|para|centavos|centavo|ctvs|cts)$/.test(sig) || DOL.test(sig)) { nuevo(i, /^(centavos|centavo|ctvs|cts)$/.test(sig) || DOL.test(sig) ? i + 4 : i + 3, t.num + b.num / 100); continue; }
+        }
+      }
+      if (t.num == null && /^(medio|media)$/.test(t.n) && DOL.test(n1) && !(toks[i - 1] && toks[i - 1].num != null)) { nuevo(i, i + 2, 0.5); continue; }       // «medio dólar»
+      if (t.num == null && DOL.test(t.n) && !/s$/.test(t.n) && n1 === 'y' && /^(medio|media)$/.test(n2) && !(toks[i - 1] && toks[i - 1].num != null)) { nuevo(i, i + 3, 1.5); continue; }   // «dólar y medio»
+      if (t.num == null && /^(cuarto|cuartito)$/.test(t.n) && n1 === 'de' && DOL.test(n2) && !(toks[i - 1] && toks[i - 1].num != null && toks[i - 1].num > 1)) { const ini = toks[i - 1] && /^(un|1)$/.test(toks[i - 1].n) ? i - 1 : i; nuevo(ini, i + 3, 0.25); i = ini; continue; }   // «un cuarto de dólar»
+    }
+    // 3b) C24: «50 centavos», «30 ctvs», «45 centavitos», «20 céntimos» => 0,50 / 0,30… (antes se leía 50 dólares).
+    //     Y «1 dólar 50 centavos», «1 dólar y 50 centavos» => 1,50 (un solo monto).
+    const CENT = /^(centavo|centavos|centavito|centavitos|ctvs|ctv|cts|ctvos|centimo|centimos|centimito|centimitos|cents?)$/;
+    for (let i = 0; i < toks.length - 1; i++) {
+      const a = toks[i], b = toks[i + 1];
+      if (a.num == null || !Number.isInteger(a.num) || a.num < 1 || a.num >= 100 || a.miles || !CENT.test(b.n)) continue;
+      let v = a.num / 100, ini = i;
+      const pegado = (k) => toks[k] && toks[k].num != null && Number.isInteger(toks[k].num) && !toks[k].miles && toks[k].num < 1e6;
+      if (toks[i - 1] && MONEDAS.has(toks[i - 1].n) && pegado(i - 2)) { v += toks[i - 2].num; ini = i - 2; }                                   // «1 dólar 50 centavos»
+      else if (toks[i - 1] && /^(y|e)$/.test(toks[i - 1].n) && toks[i - 2] && MONEDAS.has(toks[i - 2].n) && pegado(i - 3)) { v += toks[i - 3].num; ini = i - 3; }   // «1 dólar y 50 centavos»
+      v = Math.round(v * 100) / 100;
+      toks.splice(ini, i + 2 - ini, { raw: toks.slice(ini, i + 2).map((p) => p.raw).join(' '), n: String(v), num: v, coma: b.coma, palabras: true, centavos: true });
+      i = ini;
+    }
     // "nueve cincuenta" (dos números dichos seguidos) => 9,50
     for (let i = 0; i < toks.length - 1; i++) {
       const a = toks[i], b = toks[i + 1];
       if (a.palabras && b.palabras && Number.isInteger(a.num) && a.num >= 1 && a.num <= 999 && Number.isInteger(b.num) && ((b.num % 5 === 0 && b.num >= 10 && b.num <= 95) || b.num === 99)) {
         toks.splice(i, 2, { raw: a.raw + ' ' + b.raw, n: String(a.num + b.num / 100), num: a.num + b.num / 100, coma: b.coma, palabras: true });
       }
+    }
+    // faltas de ortografía y del dictado en los verbos de plata: «pagè» → «pague», «resivi» → «recibi», «yegaron» → «llegaron»
+    // (solo formas de «yo/nosotros» o detrás de «me/le/se»: así una palabra nueva como «zenan» no se vuelve «cenan»)
+    toks.forEach((t, i) => {
+      if (t.num != null || FORMAS.has(t.n)) return;
+      const f = formaCorrecta(t.n); if (!f || f === t.n) return;
+      const ps = FORMAS.get(f)[0].personas;
+      if (ps.has('yo') || ps.has('nos') || /^(me|le|les|se|nos)$/.test(toks[i - 1] ? toks[i - 1].n : '')) t.n = f;
+    });
+    // «12 50»: el teléfono escribió «doce cincuenta» como dos números seguidos → 12,50
+    for (let i = 0; i < toks.length - 1; i++) {
+      const a = toks[i], b = toks[i + 1];
+      if (a.num == null || b.num == null || a.palabras || b.palabras || a.coma || !/^\$?\d{1,3}$/.test(a.n) || !/^\d{2}$/.test(b.n) || !((b.num % 5 === 0 && b.num >= 10) || b.num === 99)) continue;
+      if (/^(meses|mes|cuotas|pagos|personas|dias|anos|ano|semanas|%)$/.test(toks[i + 2] ? toks[i + 2].n : '')) continue;
+      toks.splice(i, 2, { raw: a.raw + ' ' + b.raw, n: String(a.num + b.num / 100), num: a.num + b.num / 100, coma: b.coma, palabras: false });
+    }
+    // C26: «tres cervezas a 2 cada una», «2 hamburguesas de 3 dólares c/u» → UN gasto de cantidad × precio.
+    //      Sin cantidad dicha («pagamos 5 cada uno del almuerzo») queda el precio. «cada uno» nunca entra al nombre ni crea otro gasto.
+    for (let j = 0; j < toks.length; j++) {
+      const cu = toks[j].n === 'c/u' || toks[j].n === 'cu' && toks[j - 1] && toks[j - 1].num != null ? 1
+        : toks[j].n === 'cada' && toks[j + 1] && /^(uno|una|unidad|1|c\/u)$/.test(U.norm(toks[j + 1].raw).replace(/[.,;:!?]+$/, '')) ? 2 : 0;
+      if (!cu) continue;
+      let p = j - 1; if (toks[p] && MONEDAS.has(toks[p].n)) p--;
+      const rawCada = toks.slice(j, j + cu).map((x) => x.raw).join(' ');   // lo dicho se sigue mostrando entero en «Esto entendí»
+      if (!toks[p] || toks[p].num == null || toks[p].cada) {                // «cada uno pagó 10»
+        if (cu === 2) { const v = toks[j + 2] ? j + 2 : j - 1; if (toks[v]) toks[v] = Object.assign({}, toks[v], { raw: v > j ? rawCada + ' ' + toks[v].raw : toks[v].raw + ' ' + rawCada }); toks.splice(j, 2); j--; }
+        continue;
+      }
+      let q = -1;
+      for (let k = p - 1; k >= 0 && k >= p - 7; k--) {
+        if (toks[k].coma || /^(y|e|tambien|ademas|luego|despues)$/.test(toks[k].n)) break;
+        if (toks[k].num != null) { if (Number.isInteger(toks[k].num) && toks[k].num >= 2 && toks[k].num <= 100 && toks[k + 1] && toks[k + 1].num == null && !MONEDAS.has(toks[k + 1].n)) q = k; break; }
+      }
+      const fin = j + cu;
+      if (q >= 0) {
+        const v = Math.round(toks[q].num * toks[p].num * 100) / 100;
+        toks[p] = Object.assign({}, toks[p], { n: String(v), num: v, cada: { cantidad: toks[q].num, precio: toks[p].num } });
+        toks[q] = Object.assign({}, toks[q], { cantidadFija: true });
+      }
+      if (toks[fin - 1].coma && toks[p]) toks[p].coma = true;
+      toks[p] = Object.assign({}, toks[p], { raw: toks[p].raw + (p === j - 1 ? '' : ' ' + toks.slice(p + 1, j).map((x) => x.raw).join(' ')) + ' ' + rawCada });
+      toks.splice(p + 1, fin - p - 1); j = p;
     }
     return toks;
   }
@@ -879,6 +1126,7 @@
     cats.forEach((c) => {
       (c.palabras || []).forEach((p) => poner(p, c, 2));
       (c.palabrasDebiles || []).forEach((p) => poner(p, c, 0.8));
+      (c.palabrasPais || []).forEach((p) => poner(p, c, 2.3));          // la palabra del país de la persona gana a la general («gas» en EE. UU. es gasolina)
       poner(c.nombre, c, 2.5);
     });
     indiceCache.set(cats, m);
@@ -1288,28 +1536,569 @@
     return { tarjetaId, tarjetaDuda, sinTarjetas, idxs };
   }
 
-  /* ------------------------------------------------------------------- Registrar */
-  function interpretarRegistro(toks, n, txt, ctx) {
-    const hoy = ctx.hoy;
+  /* ======================================================================== ENTENDER POR SENTIDO
+     Cada verbo se escribe UNA vez (en infinitivo) y la app genera sus formas (pagué, pagó, pagaron, pagado, pagando, pago…):
+     así entiende cualquier conjugación, sin listas de palabras sueltas.
+       yo: qué pasa con TU plata cuando tú lo haces («pagué», «cobré», «me compré»)
+       me: cuando te lo hacen a ti («me pagaron», «me cobraron», «me dieron»)
+       el: cuando se dice de una cosa («costó 20», «llegó el sueldo», «entraron 100»)
+     'in' = te entra · 'out' = te sale · null = por sí solo no dice si entra o sale.
+     refl: se usa con «me» para uno mismo («me compré», «me comí»): ahí «me» no cambia el sentido.
+     debil: solo cuenta si hay un monto cerca («me salió en 20»), porque también se dice sin plata («me salió un trabajo»).
+     consumo: comer, tomar…: es un gasto aunque no se diga el precio (entonces la app lo pregunta).
+     ahorro: apartar plata: va a una meta si se nombra una meta o un fondo. */
+  // Trabajos sueltos según el país (U21): chamba (México, Perú, Centroamérica), changa (Argentina, Uruguay, Paraguay), pololo (Chile),
+  // brete (Costa Rica), chiripa (República Dominicana), rebusque (Colombia), bisne (Cuba), cachuelo (Perú, Ecuador), curro (España)…
+  const TRABAJITOS = 'pega|peguita|chamba|chambita|changa|changuita|pololo|pololito|brete|bretecito|chiripa|chiripita|chiripeo|rebusque|bisne|cachuelo|cachuelito|camello|camellito|trabajito|trabajo extra|curro|currito|overtime|horas extras?|jornal|turno extra';
+  const RE_TRABAJITO_SALIO = new RegExp('\\bme (?:salio|cayo|resulto) (?:un|una) (?:' + TRABAJITOS + ')\\b');
+  const RE_EXTRA = new RegExp('\\b(?:extra|extras|' + TRABAJITOS + '|chaucha|comision|comisiones|bono|propina|propinas)\\b');
+  const VERBOS = {
+    pagar: { yo: 'out', me: 'in' }, gastar: { yo: 'out', me: 'out', refl: true }, comprar: { yo: 'out', me: 'in', refl: true },
+    cancelar: { yo: 'out', me: 'in' }, abonar: { yo: 'out', me: 'in' }, consumir: { yo: 'out', refl: true }, invertir: { yo: 'out' },
+    donar: { yo: 'out', me: 'in' }, regalar: { yo: 'out', me: 'in' }, prestar: { yo: 'out', me: 'in' }, dar: { yo: 'out', me: 'in' },
+    dejar: { yo: 'out', debil: true }, transferir: { yo: 'out', me: 'in' }, enviar: { yo: 'out', me: 'in' }, mandar: { yo: 'out', me: 'in' },
+    girar: { yo: 'out', me: 'in' }, depositar: { yo: null, me: 'in', el: 'in', ahorro: true }, devolver: { yo: 'out', me: 'in', el: 'in' },
+    reembolsar: { yo: 'out', me: 'in', el: 'in' }, reversar: { me: 'in', el: 'in' }, anular: { me: 'in', el: 'in', debil: true }, acreditar: { me: 'in', el: 'in' }, ingresar: { yo: 'in', me: 'in', el: 'in' },
+    cobrar: { yo: 'in', me: 'out', el: 'out' }, ganar: { yo: 'in', me: 'in', el: 'in', refl: true }, recibir: { yo: 'in', el: 'in' },
+    percibir: { yo: 'in' }, vender: { yo: 'in', me: 'out' }, facturar: { yo: 'in' }, heredar: { yo: 'in' }, embolsar: { yo: 'in', refl: true },
+    entrar: { me: 'in', el: 'in' }, llegar: { me: 'in', el: 'in' }, caer: { me: 'in', el: 'in' }, aumentar: { me: 'in', el: 'in' },
+    costar: { me: 'out', el: 'out', debil: true }, salir: { me: 'out', el: 'out', debil: true },
+    descontar: { me: 'out', el: 'out' }, debitar: { me: 'out', el: 'out' }, cargar: { yo: 'out', me: 'out', el: 'out' }, multar: { me: 'out', el: 'out' },
+    robar: { me: 'out', el: 'out' }, perder: { yo: 'out', me: 'out', refl: true }, quitar: { me: 'out', el: 'out' }, retener: { me: 'out', el: 'out' },
+    disminuir: { el: 'out' }, restar: { yo: 'out' },
+    comer: { yo: 'out', refl: true, consumo: true }, almorzar: { yo: 'out', consumo: true }, desayunar: { yo: 'out', consumo: true },
+    cenar: { yo: 'out', consumo: true }, merendar: { yo: 'out', consumo: true }, tomar: { yo: 'out', refl: true, consumo: true, debil: true },
+    beber: { yo: 'out', refl: true, consumo: true }, tanquear: { yo: 'out' }, echar: { yo: 'out', debil: true }, llenar: { yo: 'out', debil: true },
+    pedir: { yo: 'out', debil: true }, coger: { yo: 'out', debil: true }, agarrar: { yo: 'out', debil: true }, contratar: { yo: 'out' }, suscribir: { yo: 'out', refl: true }, renovar: { yo: 'out' }, recargar: { yo: 'out' },
+    alquilar: { yo: 'out', me: 'in' }, arrendar: { yo: 'out', me: 'in' }, reparar: { yo: 'out', me: 'out' }, arreglar: { yo: 'out', me: 'out', debil: true },
+    sacar: { yo: 'out', debil: true }, retirar: { yo: 'out', debil: true }, usar: { yo: null, debil: true },
+    ahorrar: { yo: null, ahorro: true }, guardar: { yo: null, ahorro: true }, apartar: { yo: null, ahorro: true }, separar: { yo: null, ahorro: true },
+    aportar: { yo: null, ahorro: true }, juntar: { yo: null, ahorro: true }, meter: { yo: 'out', ahorro: true, debil: true }, poner: { yo: 'out', ahorro: true, debil: true },
+    sumar: { yo: null, ahorro: true, debil: true }, agregar: { yo: null, ahorro: true, debil: true }, anadir: { yo: null, ahorro: true, debil: true },
+    // U21, ronda 2: verbos de plata de cada país
+    consignar: { yo: 'out', me: 'in', el: 'in' },            // Colombia: «me consignaron 500 mil» (te depositaron)
+    garpar: { yo: 'out', me: 'in' },                          // Argentina: «garpé la luz»
+    repostar: { yo: 'out' },                                  // España: «he repostado por 50» (gasolina)
+    motilar: { yo: 'out', refl: true }, peluquear: { yo: 'out', refl: true },   // «me motilé», «me peluqueé» (corte de pelo)
+  };
+  // Formas que no salen de la regla («di», «puse», «cuesta», «almuerzo»…). Las de la regla se generan igual.
+  const IRREG = {
+    dar: 'doy:yo da:el dan:ellos damos:nos di:yo dio:el dimos:nos dieron:ellos daba:yo dado:part dando:ger dar:inf dare:fut dara:fut daran:fut',
+    poner: 'pongo:yo puse:yo puso:el pusimos:nos pusieron:ellos puesto:part pondre:fut pondra:fut',
+    devolver: 'devuelvo:yo devuelve:el devuelven:ellos devuelto:part devolveran:fut',
+    costar: 'cuesta:el cuestan:ellos',
+    invertir: 'invierto:yo invierte:el invierten:ellos invirtio:el invirtieron:ellos invirtiendo:ger',
+    transferir: 'transfiero:yo transfiere:el transfieren:ellos transfirio:el transfirieron:ellos transfiriendo:ger',
+    pedir: 'pido:yo pide:el piden:ellos pidio:el pidieron:ellos pidiendo:ger',
+    caer: 'caigo:yo cayo:el cayeron:ellos caido:part cayendo:ger',
+    salir: 'salgo:yo saldra:fut',
+    almorzar: 'almuerzo:yo almuerza:el almuerzan:ellos',
+    merendar: 'meriendo:yo merienda:el meriendan:ellos',
+    perder: 'pierdo:yo pierde:el pierden:ellos',
+    descontar: 'descuenta:el descuentan:ellos',
+    renovar: 'renuevo:yo renueva:el renuevan:ellos',
+    retener: 'retiene:el retienen:ellos retuvo:el retuvieron:ellos',
+    arrendar: 'arriendo:yo arrienda:el arriendan:ellos',
+    disminuir: 'disminuye:el disminuyo:el disminuyeron:ellos',
+    suscribir: 'suscrito:part',
+    tener: '',
+  };
+  const SOLO_IRREG = set('dar');
+  // Formas que casi siempre son OTRA palabra: «como» (como 20…), «un saco», «Quito», «entre», «junto con», «el recibo», «vale» (ok).
+  const NO_VERBO = set('como saco quito entre junto recibo vale aparte');
+  // Formas que también son cosas: detrás de «el, la, un, de, en…» son la COSA, no la acción («el pago», «un regalo», «fondo de reserva»).
+  const NOMBRE_TAMBIEN = set('factura facturas comida comidas bebida bebidas pedidos cobrado pagado pago gasto compra compras cobro abono ahorro deposito retiro cargo giro envio regalo aporte arriendo almuerzo cena merienda recarga multa consumo pedido salida entrada ingreso costo contrato robo arreglo prestamos suma resta aumento toma dejo desayuno carga presto cambio cuesta pone');
+  const DETERMINANTE = set('el la los las un una unos unas mi mis tu tus su sus este esta ese esa estos estas esos esas del de al a en por para con otro otra nuestro nuestra lo mucho poco cada');
+  const FORMAS = new Map();
+  (function generarFormas() {
+    const pon = (w, lema, p) => {
+      w = U.norm(w); if (!w || NO_VERBO.has(w)) return;
+      let e = FORMAS.get(w); if (!e) FORMAS.set(w, (e = []));
+      let x = e.find((y) => y.lema === lema); if (!x) e.push((x = { lema, personas: new Set() }));
+      x.personas.add(p);
+    };
+    Object.keys(VERBOS).forEach((inf) => {
+      if (IRREG[inf]) IRREG[inf].split(/\s+/).filter(Boolean).forEach((par) => { const k = par.indexOf(':'); pon(par.slice(0, k), inf, par.slice(k + 1)); });
+      if (SOLO_IRREG.has(inf)) return;
+      const t = inf.slice(-2), r = inf.slice(0, -2);
+      let lista;
+      if (t === 'ar') {
+        const e = /c$/.test(r) ? r.slice(0, -1) + 'qu' : /g$/.test(r) ? r + 'u' : /z$/.test(r) ? r.slice(0, -1) + 'c' : r;
+        lista = [[r + 'o', 'yo'], [r + 'o', 'el'], [e + 'e', 'yo'], [r + 'a', 'el'], [r + 'amos', 'nos'], [r + 'an', 'ellos'], [r + 'aron', 'ellos'],
+          [r + 'aba', 'yo'], [r + 'aba', 'el'], [r + 'abamos', 'nos'], [r + 'aban', 'ellos'], [r + 'ado', 'part'], [r + 'ada', 'part'], [r + 'ados', 'part'],
+          [r + 'adas', 'part'], [r + 'ando', 'ger'], [inf, 'inf'], [r + 'are', 'fut'], [r + 'ara', 'fut'], [r + 'aremos', 'fut'], [r + 'aran', 'fut'], [r + 'aria', 'fut']];
+      } else {
+        lista = [[r + 'o', 'yo'], [r + 'i', 'yo'], [r + 'e', 'el'], [r + 'io', 'el'], [r + (t === 'er' ? 'emos' : 'imos'), 'nos'], [r + 'imos', 'nos'], [r + 'en', 'ellos'],
+          [r + 'ieron', 'ellos'], [r + 'ia', 'yo'], [r + 'ia', 'el'], [r + 'iamos', 'nos'], [r + 'ian', 'ellos'], [r + 'ido', 'part'], [r + 'ida', 'part'], [r + 'idos', 'part'],
+          [r + 'iendo', 'ger'], [inf, 'inf'], [inf + 'e', 'fut'], [inf + 'a', 'fut'], [inf + 'emos', 'fut'], [inf + 'an', 'fut'], [inf + 'ia', 'fut']];
+      }
+      lista.forEach(([w, p]) => pon(w, inf, p));
+    });
+  })();
+  // Auxiliares: «he pagado», «me han depositado», «estoy pagando», «acabo de pagar», «tuve que pagar», «fui a pagar», «voy a pagar» (todavía no pasa)
+  const AUX = { he: 'yo', hemos: 'nos', ha: 'el', han: 'ellos', habia: 'yo', habiamos: 'nos', habian: 'ellos', hube: 'yo', hubo: 'el',
+    estoy: 'yo', estamos: 'nos', esta: 'el', estan: 'ellos', estaba: 'yo', estaban: 'ellos', acabo: 'yo', acabamos: 'nos', acaba: 'el', acaban: 'ellos',
+    tuve: 'yo', tuvimos: 'nos', tuvo: 'el', tuvieron: 'ellos', fui: 'yo', fuimos: 'nos', pude: 'yo', pudimos: 'nos', logre: 'yo', alcance: 'yo',
+    voy: 'fut', vamos: 'fut', va: 'fut', van: 'fut', iba: 'fut', ibamos: 'fut', quiero: 'fut', quisiera: 'fut', queremos: 'fut', pienso: 'fut', planeo: 'fut',
+    debo: 'fut', debemos: 'fut', deberia: 'fut', necesito: 'fut', tengo: 'fut', tenemos: 'fut', toca: 'fut', puedo: 'fut', podria: 'fut', espero: 'fut' };
+  const AUX_PART = set('he hemos ha han habia habiamos habian hube hubo');
+  const AUX_GER = set('estoy estamos esta estan estaba estaban');
+  const AUX_PREP = set('acabo acabamos acaba acaban tuve tuvimos tuvo tuvieron fui fuimos voy vamos va van iba ibamos tengo tenemos debo debemos');
+  const AUX_DIRECTO = set('quiero quisiera queremos pienso planeo debo debemos deberia necesito puedo podria pude pudimos logre alcance toca espero');
+
+  // Qué hace la palabra i si es un verbo de plata: { lema, persona, clit, dir, peso, ini, debil, consumo, ahorro, futuro }
+  const HACER = { hice: 'yo', hicimos: 'nos', hizo: 'el', hicieron: 'ellos', realice: 'yo', realizamos: 'nos', realizaron: 'ellos', realizo: 'el', dieron: 'ellos', dio: 'el', tuve: 'yo', tuvimos: 'nos', hubo: 'el' };
+  const SUST_VERBO = { ingreso: 'ingresar', pago: 'pagar', compra: 'comprar', deposito: 'depositar', abono: 'abonar', transferencia: 'transferir', reembolso: 'reembolsar', devolucion: 'devolver', aporte: 'aportar', retiro: 'retirar', gasto: 'gastar', envio: 'enviar', giro: 'girar', prestamo: 'prestar', cobro: 'cobrar' };
+  // Clave «fonética» para entender faltas de ortografía y del dictado: «depocité», «debolvieron», «cayó/calló», «pagè»
+  const clave = (w) => w.replace(/h/g, '').replace(/v/g, 'b').replace(/z/g, 's').replace(/c([ei])/g, 's$1').replace(/ll/g, 'y').replace(/qu/g, 'k').replace(/c([aou])/g, 'k$1').replace(/gu([ei])/g, 'g$1').replace(/x/g, 'ks').replace(/(.)\1/g, '$1');
+  let CLAVES = null;
+  // La forma bien escrita de una palabra mal escrita o mal oída («pagè» → «pague», «debolvieron» → «devolvieron»); null si no es un verbo de plata
+  function formaCorrecta(w) {
+    if (FORMAS.has(w)) return w;
+    if (w.length < 4 || PARADA.has(w) || /^[\d$]/.test(w)) return null;
+    if (!CLAVES) { CLAVES = new Map(); FORMAS.forEach((v, k) => { const c = clave(k); if (!CLAVES.has(c)) CLAVES.set(c, k); }); }
+    return CLAVES.get(clave(w)) || null;
+  }
+  function formaDe(w) { const f = formaCorrecta(w); return f ? FORMAS.get(f) : null; }
+  function analizarVerbo(n, i) {
+    const w = n[i];
+    // «se me fueron 40 en el pollo», «se me fue la plata en…»: es un gasto
+    if (/^(fue|fueron|va|van|iba|iban)$/.test(w) && n[i - 1] === 'me' && n[i - 2] === 'se') return { i, lema: 'gastar', persona: 'el', clit: 'seme', aux: null, dir: 'out', peso: 3, ini: i - 2, debil: false, consumo: false, ahorro: false, futuro: false, nombre: false, finito: true };
+    // «hice un pago de 69», «me hicieron un reembolso», «me dieron un reembolso»: la acción está en el sustantivo
+    if (SUST_VERBO[w] && /^(un|una)$/.test(n[i - 1] || '') && HACER[n[i - 2]] && !(/^(dieron|dio)$/.test(n[i - 2]) && !/^(reembolso|devolucion|deposito|abono|transferencia|prestamo)$/.test(w))) {
+      const lema = SUST_VERBO[w], v = VERBOS[lema]; const k = i - 3;
+      const persona = HACER[n[i - 2]];
+      const clit = /^(me|nos)$/.test(n[k] || '') ? 'me' : /^(le|les)$/.test(n[k] || '') ? 'le' : null;
+      let dir = clit === 'me' && /^(el|ellos)$/.test(persona) ? (v.me !== undefined ? v.me : v.el) : clit === 'le' ? (v.yo === 'in' ? 'in' : 'out') : /^(el|ellos)$/.test(persona) ? (v.el !== undefined ? v.el : null) : v.yo;
+      if (dir === undefined) dir = null;
+      return { i, lema, persona, clit, aux: null, dir, peso: 3, ini: clit ? k : i - 2, debil: false, consumo: false, ahorro: !!v.ahorro, futuro: false, nombre: false, finito: true };
+    }
+    const e = FORMAS.get(w); if (!e) return null;          // (las faltas ya se corrigieron al leer las palabras)
+    const x = e[0]; const v = VERBOS[x.lema]; const p = x.personas;
+    const prev = n[i - 1] || '';
+    // detrás de un artículo es una COSA, no una acción: «el bebé», «la comida», «un regalo», «del arriendo», «las entradas»
+    if (!p.has('ger') && /^(el|la|los|las|un|una|unos|unas|mi|mis|tu|tus|su|sus|este|ese|esa|estos|estas|esos|esas|nuestro|nuestra|otro|otra|del|al|cada|mucho|mucha|poco|poca)$/.test(prev)) return null;
+    if (/^(de|en|para|por|con|a|sin)$/.test(prev) && !p.has('inf') && !p.has('ger')) return null;   // «fondo de reserva», «de factura» (pero «para pagar» sí es verbo)
+    let k = i - 1, aux = null, j = k;
+    if (/^(a|de|que)$/.test(n[j] || '')) j--;
+    if (j >= 0 && AUX[n[j]] !== undefined) {
+      const a = n[j], conPrep = j !== k;
+      const ok = (AUX_PART.has(a) && !conPrep && p.has('part')) || (AUX_GER.has(a) && !conPrep && p.has('ger'))
+        || (AUX_PREP.has(a) && conPrep && p.has('inf')) || (AUX_DIRECTO.has(a) && !conPrep && p.has('inf'));
+      if (ok) { aux = AUX[a]; k = j - 1; }
+    }
+    while (k >= 0 && /^(lo|la|los|las)$/.test(n[k])) k--;
+    let clit = null;
+    if (k >= 0 && /^(me|nos)$/.test(n[k])) clit = n[k - 1] === 'se' ? 'seme' : 'me';
+    else if (k >= 0 && /^(le|les|te)$/.test(n[k])) clit = 'le';
+    else if (k >= 0 && n[k] === 'se') clit = 'se';
+    // «pago», «regalo», «recarga», «factura»: es acción solo si lo hace alguien («me pagó», «yo pago») o va seguido del monto o de lo pagado («pago 20», «pago la luz»)
+    let verbal = false;
+    if (NOMBRE_TAMBIEN.has(w) && !clit && !aux && !/^(yo|nosotros|ya)$/.test(prev)) {
+      if (!p.has('yo') && !p.has('nos')) return null;
+      if (!/^(pago|gasto|compro|deposito|abono|ahorro|presto|cobro|ingreso|aporte|giro|envio|retiro)$/.test(w)) return null;    // «almuerzo 5», «arriendo 226», «regalo para mi mamá»: es la cosa
+      const sig = n[i + 1] || '';
+      const antVerbo = prev && FORMAS.has(prev) && !NOMBRE_TAMBIEN.has(prev) && !/(ado|ido|ada|ida)$/.test(prev);   // «que había prestado | aporté 54…»: un participio cierra lo anterior
+      if (antVerbo || !(/^\$?\d/.test(sig) || /^(el|la|los|las|un|una|mi|mis|su|sus|lo|al|del|todo|toda)$/.test(sig))) return null;
+      verbal = true;
+    }
+    const ini = clit ? (clit === 'seme' ? k - 1 : k) : (aux ? j : i);
+    let persona;
+    if (aux) persona = aux;
+    else if (p.size === 1) persona = [...p][0];
+    else if (p.has('yo') && p.has('el')) persona = (clit === 'me' && !v.refl) || clit === 'se' ? 'el' : 'yo';
+    else persona = ['yo', 'nos', 'el', 'ellos', 'part', 'ger', 'inf', 'fut'].find((q) => p.has(q));
+    const futuro = persona === 'fut';
+    let dir;
+    if (clit === 'seme') dir = 'out';                                                       // «se me cayeron 20», «se me perdió»
+    else if (clit === 'me' && (persona === 'el' || persona === 'ellos')) dir = v.me !== undefined ? v.me : v.el;
+    else if (clit === 'le') dir = v.yo === 'in' ? 'in' : 'out';                             // «le pagué» sale; «le cobré», «le vendí» entra
+    else if (persona === 'el' || persona === 'ellos') dir = v.el !== undefined ? v.el : null;
+    else dir = v.yo;
+    if (dir === undefined) dir = null;
+    let peso = persona === 'ger' ? 1.5 : persona === 'inf' ? (aux ? 2.5 : 1) : persona === 'fut' ? 2 : persona === 'part' ? 2.5 : 3;
+    if (v.debil) peso *= 0.5;
+    const nombre = NOMBRE_TAMBIEN.has(w) && !clit && !aux && !verbal;
+    if (nombre) peso *= 0.6;
+    // un participio suelto casi siempre es una cosa o un adjetivo («comida», «bebida», «pedido», «tanque lleno»): pesa poco y no separa
+    if (persona === 'part' && !aux) peso = Math.min(peso, 1);
+    return { i, lema: x.lema, persona, clit, aux, dir, peso, ini: Math.max(0, ini), debil: !!v.debil, consumo: !!v.consumo, ahorro: !!v.ahorro, futuro, nombre,
+      finito: (!/^(inf|ger|part)$/.test(persona) || !!aux) };
+  }
+
+  // Sustantivos que por sí solos dicen si el dinero entra o sale (pesan menos que un verbo)
+  const NOMBRE_IN = set('deposito depositos sueldo sueldos salario salarios quincena quincenas ingreso ingresos ganancia ganancias utilidad utilidades venta ventas comision comisiones bono bonos aguinaldo decimo decimos propina propinas reembolso reembolsos devolucion devoluciones honorarios liquidacion jubilacion herencia premio premios remesa remesas aumento');
+  const NOMBRE_OUT = set('gasto gastos egreso egresos salida salidas compra compras pago pagos factura facturas multa multas consumo consumos debito debitos retiro retiros cargo cargos');
+  const MAS_SALDO = /\b(?:mas|suma\w*|aumenta\w*|agrega\w*|anade\w*|pon\w*|mete\w*)\b.*\b(?:a|en|al) (?:mi |el |la )?(?:saldo|cuenta|caja|billetera|efectivo|bolsillo)\b/;
+  const MENOS_SALDO = /\b(?:resta\w*|quita\w*|disminu\w*)\b|^menos \$?\d/;
+  const FECHA_PAL = set('hoy ayer anoche anteayer antier antiayer');
+  const CONECTORES = ['y tambien', 'y ademas', 'y luego', 'y despues', 'y aparte', 'y encima', 'y entonces', 'y otra cosa', 'y por otro lado', 'otra cosa', 'mas tarde', 'por otro lado', 'aparte de eso',
+    'y', 'e', 'tambien', 'ademas', 'luego', 'despues', 'entonces', 'aparte', 'encima', 'pero', 'asimismo', 'igualmente', 'tambien'];
+  const CONECTOR_PAL = set('y e tambien ademas luego despues entonces aparte encima pero asimismo igualmente');
+  function conectorEn(n, i) {
+    for (const c of CONECTORES) {
+      const p = c.split(' ');
+      if (p.every((w, k) => n[i + k] === w)) {
+        if (/^(despues|luego)$/.test(p[p.length - 1]) && /^(de|que)$/.test(n[i + p.length] || '')) return 0;    // «después de comer» no separa
+        return p.length;
+      }
+    }
+    return 0;
+  }
+  const CANTIDAD = /^(amigos|amigas|personas|persona|gente|ninos|ninas|companeros|invitados|veces|vez|horas|hora|dias|kilos|kilo|libras|libra|litros|litro|galones|galon|unidades|metros|cajas|fundas|paquetes)$/;
+  const hayMarcaEn = (toks, n, i) => toks[i].n.startsWith('$') || toks[i].n.endsWith('$') || /(usd|dolares|dolar)$/.test(toks[i].n) || MONEDAS.has(n[i + 1] || '') || n[i - 1] === '$';
+  // Qué es cada número: 'monto' (lo que costó), 'cantidad' («2 pizzas»), 'cuota' («cuotas de 49»), 'nombre' («iPhone 15»), 'otro' (fecha, meses, %)
+  function marcarNumeros(toks, n) {
+    const out = toks.map(() => '');
+    toks.forEach((t, i) => {
+      if (t.num == null) return;
+      if (/%$/.test(t.n) || n[i + 1] === '%' || (n[i + 1] === 'por' && /^cient/.test(n[i + 2] || ''))) { out[i] = 'otro'; return; }
+      if (numeroDePeriodo(toks, n, i) || n[i - 1] === 'hace') { out[i] = 'otro'; return; }
+      if (/^(meses|mes|cuotas|pagos|anos|ano|dias|semanas|quincenas)$/.test(n[i + 1] || '') && Number.isInteger(t.num) && t.num <= 72 && !hayMarcaEn(toks, n, i)) { out[i] = 'otro'; return; }
+      if (/^cuotas?$/.test(n[i - 1] || '') || (/^(de|mensual|mensuales|fijas?)$/.test(n[i - 1] || '') && /^cuotas?$/.test(n[i - 2] || '')) || (n[i - 1] === 'de' && /^(mensual|mensuales)$/.test(n[i - 2] || '') && /^cuotas?$/.test(n[i - 3] || ''))) { out[i] = 'cuota'; return; }
+      if (!(t.num > 0) || t.num > 10000000) { out[i] = 'otro'; return; }
+      if (t.cantidadFija) { out[i] = 'cantidad'; return; }                       // C26: «tres cervezas a 2 cada una»
+      if (CANTIDAD.test(n[i + 1] || '') && !hayMarcaEn(toks, n, i)) { out[i] = 'cantidad'; return; }
+      const sig = n[i + 1];
+      if (!hayMarcaEn(toks, n, i) && sig && esContenidoN(n, toks, i + 1) && Number.isInteger(t.num) && t.num <= 12) { out[i] = 'cantidad'; return; }   // «2 pizzas», «3 cebollas»
+      out[i] = 'monto';
+    });
+    // «iPhone 15 en 900», «Samsung A54 por 300»: el número pegado al nombre es parte del nombre si después viene el precio
+    toks.forEach((t, i) => {
+      if (out[i] !== 'monto' || hayMarcaEn(toks, n, i) || !Number.isInteger(t.num) || t.num > 99 || t.palabras) return;
+      const ant = n[i - 1] || '';
+      if (!ant || PARADA.has(ant) || FORMAS.has(ant) || toks[i - 1].num != null || MONEDAS.has(ant) || DESC_EXCLUIR.has(ant)) return;
+      for (let k = i + 1; k <= i + 3 && k < toks.length; k++) if (out[k] === 'monto' && /^(en|por|a|de)$/.test(n[k - 1])) { out[i] = 'nombre'; return; }
+    });
+    return out;
+  }
+  // ¿La palabra i dice QUÉ fue (contenido) y no es verbo, número, enlace, fecha ni muletilla?
+  const esContenidoN = (n, toks, i) => toks[i] && toks[i].num == null && n[i].length >= 2 && /[a-z]/.test(n[i]) && !PARADA.has(n[i]) && !(FORMAS.has(n[i]) && analizarVerbo(n, i)) && !MONEDAS.has(n[i]) && !DESC_EXCLUIR.has(n[i])
+    && !FECHA_PAL.has(n[i]) && !CONECTOR_PAL.has(n[i]) && !AUX[n[i]] && !MESES_N.includes(n[i]) && !DIAS_N.includes(n[i])
+    && !/^(que|cual|no|si|ya|nada|todo|algo|eso|esto|ok|bueno|pues|ahi|aqui|nomas|antes|pasado|pasada|semana|mes|exactos|exacto|porfa|favor|gracias|listo|ojala|nada|casi|unos|unas|como|aproximadamente|hace|dias|dia|le|les|me|te|se|nos|lo)$/.test(n[i]);   // «un café por 2 le aboné…»: «le» no es una cosa
+  const CONTEXTO_VERBO = /^(fui|fuimos|estuve|estuvimos|sali|salimos|pase|pasamos|llegue|llegamos|entre|entramos|vine|vinimos|anduve|me fui|nos fuimos|estaba|estabamos)$/;
+
+  /* Parte lo dictado en CLÁUSULAS: una por cada cosa que pasó. Sirve aunque el teléfono no ponga comas:
+     «hoy pagué 20 el agua 20 de la luz 130 del arriendo también cobré una deuda de 150 y después me comí una hamburguesa»
+     → [pagué 20 el agua] [20 de la luz] [130 del arriendo] [cobré una deuda de 150] [me comí una hamburguesa] */
+  function partirClausulas(toks, n, ctx) {
+    const N = toks.length; if (!N) return [];
+    const numR = marcarNumeros(toks, n);
+    const verb = n.map((_, i) => analizarVerbo(n, i));
+    const esMonto = (i) => numR[i] === 'monto';
+    // ¿hay un monto justo después (sin cruzar una coma ni un «y»)? Para verbos débiles: «me salió en 20», «dejé 2 de propina»
+    const montoCerca = (i) => { for (let k = i + 1; k <= i + 4 && k < N; k++) { if (esMonto(k)) return true; if (toks[k].coma || CONECTOR_PAL.has(n[k])) return false; } return false; };
+    const fuerte = (i) => { const a = verb[i]; if (!a || !a.finito || a.nombre) return false; return !a.debil || montoCerca(i); };
+    const contenido = (a, b) => { const out = []; for (let i = a; i <= b; i++) if (esContenidoN(n, toks, i)) out.push(i); return out; };
+    const montos = (a, b) => { const out = []; for (let i = a; i <= b; i++) if (esMonto(i)) out.push(i); return out; };
+    const verbos = (a, b) => { const out = []; for (let i = a; i <= b; i++) if (fuerte(i)) out.push(i); return out; };
+    // categoría de lo nombrado en un trozo (con las palabras de enlace, para que «corte de pelo» o «pensión del colegio» se reconozcan)
+    const catDe = (a, b) => { if (!contenido(a, b).length) return null; const idx = []; for (let i = a; i <= b; i++) if (toks[i].num == null && !verb[i]) idx.push(i); const r = clasificar(idx.map((i) => n[i]), idx, null, ctx); return r.cat ? r.cat.id : null; };
+    const bancoPal = palabrasBanco(ctx);
+    const palPago = (w) => /^(tarjeta|tarjetas|visa|mastercard|master|diners|amex|efectivo|debito)$/.test(w) || bancoPal.has(w);
+    // ¿justo antes de c hay «con la tarjeta (del pichincha)», «con mi visa», «con la diners», «en efectivo»? Devuelve dónde empieza
+    const MODO = /^(corriente|contado|diferido|diferida|meses|cuotas|cuota|intereses|plazos|rotativo)$/;
+    const ambiguos = new Set();          // posiciones de corte donde no se sabe si «con la tarjeta» va con lo de antes o con lo que sigue
+    const pagoAntes = (c, desde, hastaSig, finTramo) => {
+      for (let k = c - 1; k >= Math.max(desde + 1, c - 8); k--) {
+        if (n[k] !== 'con') continue;
+        const resto = n.slice(k + 1, c);
+        if (!(resto.length && resto.every((w) => /^(la|mi|el|una|de|del|credito|banco|cooperativa)$/.test(w) || palPago(w)) && resto.some(palPago))) continue;
+        const sigTiene = n.slice(c, hastaSig + 1);
+        const antes = n.slice(desde, k);
+        // un aporte o retiro de una meta no se paga con tarjeta: la tarjeta es de lo que sigue (aunque lo que sigue nombre otra al final)
+        if (antes.some((w) => /^(meta|metas|fondo|fondos|ahorro|ahorros|alcancia|emergencia|emergencias)$/.test(w)) || verbos(desde, k - 1).some((i) => verb[i].ahorro)) return k;
+        if (sigTiene.some(palPago)) {
+          // Lo que sigue ya dice con qué pagó: esta es de lo anterior… salvo en cadena: «X de 8 con la visa | compré Y de 230 con la visa |
+          // compré Z»: si la de lo que sigue va al final (después de su monto) y detrás viene otra cosa, cada tarjeta puede ser de la
+          // cosa de antes o de la de después. Eso no se adivina: se pregunta.
+          if (antes.some(palPago)) return k;                                    // «hice un pago de 63 a la visa | con la pichincha compré…»
+          const mSig = montos(c, hastaSig)[0], pSig = c + sigTiene.findIndex(palPago);
+          if (finTramo != null && hastaSig < finTramo && mSig != null && pSig > mSig && montos(desde, k - 1).length) { ambiguos.add(c); return c; }
+          return c;
+        }
+        if (sigTiene.some((w) => MODO.test(w))) return k;                       // «con la visa compré X a 6 meses»
+        if (antes.some(palPago)) return k;                                      // lo anterior ya tenía la suya
+        const dirAntes = verbos(desde, k - 1).map((i) => verb[i].dir).filter(Boolean)[0];
+        if (dirAntes === 'in') return k;                                        // «me compraron unos zapatos en 31 | con la tarjeta compré…»
+        if (antes.some((w) => /^(meta|metas|fondo|fondos|ahorro|ahorros|alcancia|emergencia|emergencias)$/.test(w)) || verbos(desde, k - 1).some((i) => verb[i].ahorro)) return k;   // un aporte a una meta no se paga con tarjeta
+        if (montos(desde, k - 1).length) { ambiguos.add(c); return c; }         // «pagué 41 del curso con la tarjeta | me compré…» (o al revés: se pregunta)
+        return k;
+      }
+      return c;
+    };
+    const PERSONAS = /^(mama|papa|mami|papi|primo|prima|hermano|hermana|tio|tia|abuelo|abuela|abuelita|abuelito|jefe|jefa|amigo|amiga|novia|novio|esposa|esposo|mujer|marido|hijo|hija|vecino|vecina|cliente|cunado|cunada|suegra|suegro|pana|patron|patrona|empresa|banco)$/;
+
+    // 1) conectores y signos de puntuación
+    let pz = []; let ini = 0;
+    for (let i = 0; i < N; i++) {
+      if (i > ini && toks[i - 1].coma) { pz.push([ini, i - 1]); ini = i; }
+      const L = i > ini ? conectorEn(n, i) : 0;
+      if (L) { pz.push([ini, i - 1]); ini = i; i += L - 1; }
+    }
+    pz.push([ini, N - 1]);
+    // 2) dentro de cada trozo, un verbo de plata nuevo empieza otra cosa («pagué 20 de luz compré pan en 2»)
+    const pz2 = [];
+    const ctxVerbo = (i) => { const a = verb[i]; return (a && a.finito && !a.nombre && a.debil && !montoCerca(i)) || (CONTEXTO_VERBO.test(n[i]) && !verb[i]); };
+    pz.forEach(([a, b]) => {
+      const completo = (x, y) => montos(x, y).length || verbos(x, y).some((v) => (verb[v].consumo || verb[v].dir) && contenido(x, y).length);
+      const vs = verbos(a, b).concat(Array.from({ length: b - a + 1 }, (_, k) => a + k).filter((i) => i > a && ctxVerbo(i) && completo(a, i - 1))).sort((x, y) => x - y);
+      const ini0 = (i) => (verb[i] ? verb[i].ini : (n[i - 1] === 'me' ? i - 1 : i));
+      let desde = a, ambPrev = false;
+      vs.slice(1).forEach((vi, kv) => {
+        let c = ini0(vi); while (c - 1 > desde && FECHA_PAL.has(n[c - 1])) c--;
+        const hastaSig = kv + 2 < vs.length ? ini0(vs[kv + 2]) - 1 : b;
+        c = pagoAntes(c, desde, hastaSig, b); while (c - 1 > desde && FECHA_PAL.has(n[c - 1])) c--;
+        if (c - 2 > desde && PERSONAS.test(n[c - 1]) && /^(mi|mis|el|la|tu|su|un|una)$/.test(n[c - 2])) c -= 2;     // «mi mamá me mandó 20»
+        if (c <= desde) return;
+        if (/^(que|quien|donde|cuando|lo|si)$/.test(n[c - 1] || '')) return;                          // «un servicio que di», «lo que pagué»
+        const hasta = kv + 2 < vs.length ? ini0(vs[kv + 2]) - 1 : b;
+        if (!montos(c, hasta).length && !contenido(c, hasta).length && !(verb[vi] && verb[vi].consumo)) return;     // «…y pagué» suelto: es lo mismo
+        const prevV = verbos(desde, c - 1);
+        if (!prevV.length && !montos(desde, c - 1).length) return;
+        if (!montos(desde, c - 1).length && !contenido(desde, c - 1).length) return;         // «pagué y compré…»: es lo mismo
+        const amb = ambiguos.has(c);
+        pz2.push([desde, c - 1, amb || ambPrev]); desde = c; ambPrev = amb;
+      });
+      pz2.push([desde, b, ambPrev]);
+    });
+    // 3) varios montos seguidos sin «y» ni comas: «pagué 20 el agua 20 de la luz 130 del arriendo»
+    let grupo = 0;
+    const pz3 = [];
+    pz2.forEach(([a, b, amb]) => {
+      grupo++;
+      const ms = montos(a, b);
+      if (ms.length < 2) { pz3.push({ desde: a, hasta: b, grupo, pagoAmbiguo: !!amb }); return; }
+      const antes = contenido(a, ms[0] - 1).length, despues = contenido(ms[ms.length - 1] + 1, b).length;
+      let montoPrimero;
+      if (antes === 0 && despues > 0) montoPrimero = true;
+      else if (antes > 0 && despues === 0) montoPrimero = false;
+      else {
+        let vm = 0, vc = 0;
+        ms.forEach((i) => { let j = i + 1; if (MONEDAS.has(n[j] || '')) j++; if (/^(de|del|en|para|por|el|la|los|las)$/.test(n[j] || '')) vm++; if (/^(en|por|a)$/.test(n[i - 1] || '')) vc++; });
+        montoPrimero = vm >= vc;
+      }
+      let desde = a;
+      for (let k = 0; k < ms.length - 1; k++) {
+        const m1 = ms[k], m2 = ms[k + 1];
+        let c;
+        if (montoPrimero) { c = m2; while (c - 1 > m1 && (n[c - 1] === '$' || /^(con|unos|unas)$/.test(n[c - 1]))) c--; }
+        else { c = m1 + 1; if (MONEDAS.has(n[c] || '')) c++; }
+        if (c <= desde || c > b) continue;
+        pz3.push({ desde, hasta: c - 1, grupo, pagoAmbiguo: !!amb && desde === a }); desde = c;
+      }
+      pz3.push({ desde, hasta: b, grupo, pagoAmbiguo: !!amb });
+    });
+    // 4) qué tiene cada trozo
+    const info = (p) => {
+      p.montos = montos(p.desde, p.hasta); p.verbos = verbos(p.desde, p.hasta); p.cont = contenido(p.desde, p.hasta);
+      p.contexto = p.verbos.length === 0 && p.montos.length === 0 && n.slice(p.desde, p.hasta + 1).some((w, k) => CONTEXTO_VERBO.test(w) || (w === 'me' && CONTEXTO_VERBO.test(n[p.desde + k + 1] || '')));
+      p.consumo = p.verbos.some((i) => verb[i].consumo);
+      p.tieneVerbo = n.slice(p.desde, p.hasta + 1).some((w, k) => verb[p.desde + k] || CONTEXTO_VERBO.test(w));
+      const tp = n.slice(p.desde, p.hasta + 1).join(' ');
+      p.pregunta = !p.montos.length && (/^(?:y |e |pero )?(?:cuanto|cuanta|cuantos|cuantas|cual|cuales|como voy|como estoy|dime|dame|muestrame|en que|que tanto|me alcanza|me queda|cuando|que gastos|que tarjeta|tengo que pagar)\b/.test(tp)
+        || /\b(?:cuanto|cuanta|cuantos|cuantas|cuando|cada que tiempo|cada cuanto|que dia|en que fecha)\b/.test(tp));
+      // ¿trae algo que anotar? (un monto, o algo que ya pasó con su cosa: «me comí una hamburguesa»)
+      p.ancla = !p.pregunta && (p.montos.length > 0 || p.verbos.some((i) => !verb[i].futuro && !/^(que|quien)$/.test(n[verb[i].ini - 1] || '') && (p.cont.length > 0 || verb[i].consumo)));
+      return p;
+    };
+    let ps = pz3.map(info);
+    const unir = (a, b) => info({ desde: Math.min(a.desde, b.desde), hasta: Math.max(a.hasta, b.hasta), grupo: a.grupo, ctxIdx: (a.ctxIdx || []).concat(b.ctxIdx || []), pagoAmbiguo: !!(a.pagoAmbiguo || b.pagoAmbiguo) });
+    // 5) juntar lo que quedó suelto
+    let cambio = true, vueltas = 0;
+    while (cambio && vueltas++ < 30) {
+      cambio = false;
+      for (let k = 0; k < ps.length; k++) {
+        const p = ps[k], ant = ps[k - 1], sig = ps[k + 1];
+        if (p.pregunta) continue;
+        const ancla = p.montos.length || p.verbos.length;
+        // sin monto y sin verbo: contexto («fui al mercado») va con lo que sigue; una cosa suelta («y agua») va con lo anterior
+        if (!ancla) {
+          if (!p.cont.length && !sig && ant && !ant.pregunta) { ps.splice(k - 1, 2, unir(ant, p)); cambio = true; break; }
+          if ((p.contexto || p.tieneVerbo || !ant || ant.pregunta) && sig && !sig.pregunta) { const u = unir(p, sig); u.ctxIdx = (u.ctxIdx || []).concat(p.cont); u.grupo = sig.grupo; ps.splice(k, 2, u); cambio = true; break; }
+          if (ant && !ant.pregunta) { ps.splice(k - 1, 2, unir(ant, p)); cambio = true; break; }
+          continue;
+        }
+        // una cosa sin precio seguida de solo el precio («compré pan, leche y huevos en 5», «tomé un taxi y pagué 5»)
+        if (sig && !sig.pregunta && !p.montos.length && sig.montos.length && !sig.consumo) {
+          const dirP = p.verbos.map((i) => verb[i].dir).filter(Boolean)[0] || null;
+          const genericoSig = !sig.verbos.length || sig.verbos.every((i) => verb[i].debil || ((verb[i].dir == null || !dirP || verb[i].dir === dirP) && (/^(pagar|gastar|costar|salir|cancelar|dar|sacar|hacer)$/.test(verb[i].lema) || (dirP && verb[i].dir === dirP))));
+          const catP = catDe(p.desde, p.hasta), catS = sig.cont.length ? catDe(sig.desde, sig.hasta) : null;
+          // solo si lo que sigue NO nombra otra cosa con su propio verbo («me comí una pizza y compré un encebollado en 25» son dos)
+          const mismaCosa = !sig.cont.length || (!sig.verbos.length && (!catP || !catS || catP === catS)) || (genericoSig && !catS && catP);
+          const pagoATarjeta = /\b(?:a|al|de) (?:la |mi |el )?(?:tarjeta|visa|mastercard|diners|amex)\b|\bpague (?:la |mi )(?:tarjeta|visa|diners)\b/.test(n.slice(sig.desde, sig.hasta + 1).join(' ')) && !/\b(?:con|en) (?:la |mi )?(?:tarjeta|visa|mastercard|diners)/.test(n.slice(sig.desde, sig.hasta + 1).join(' '));
+          if (genericoSig && mismaCosa && !pagoATarjeta && (p.cont.length || p.verbos.length)) { ps.splice(k, 2, unir(p, sig)); cambio = true; break; }
+        }
+        // un verbo sin nada (ni cosa ni monto) seguido de algo con monto: es lo mismo («compré y pagué 20 en pan»)
+        if (sig && !sig.pregunta && p.verbos.length && !p.montos.length && !p.cont.length && !p.consumo && sig.montos.length) { ps.splice(k, 2, unir(p, sig)); cambio = true; break; }
+        // «pero era 25», «o sea 25»: corrige el monto de lo anterior
+        if (ant && !ant.pregunta && /^(pero|o sea|mejor dicho) (era|eran|fue|fueron|son|es|salio|costo)\b/.test(n.slice(p.desde, p.hasta + 1).join(' '))) { const u = unir(ant, p); u.corrigeMonto = true; ps.splice(k - 1, 2, u); cambio = true; break; }
+      }
+    }
+    // cláusulas de un mismo «grupo» comparten el verbo (y la tarjeta) del principio
+    return ps.map((p, k) => Object.assign(p, { verboPropio: p.verbos.length > 0, n: k }));
+  }
+
+  /* ------------------------------------------------------------------------ Metas y reembolsos */
+  const META_PAL = set('meta metas fondo fondos alcancia chanchito colchon reserva reservas emergencia emergencias imprevistos ahorro ahorros');
+  const FONDO_PAL = set('fondo fondos colchon reserva reservas emergencia emergencias imprevistos');
+  // ¿Nombra una meta? Devuelve { meta, ref, fondo } o { cuentaBanco } («mi cuenta de ahorros» es el banco, no una meta)
+  function metaDeTexto(n, ctx) {
+    const txt = n.join(' ');
+    if (/\bcuenta (?:de )?ahorros?\b/.test(txt)) return { cuentaBanco: true };
+    const fondoFuerte = (w, i) => /^(fondo|fondos|emergencia|emergencias|imprevistos)$/.test(w) || (/^(reserva|reservas|colchon)$/.test(w) && /^(mi|mis|de|nuestro|nuestra|fondo)$/.test(n[i - 1] || '') && !/^(hotel|vuelo|mesa|cita)$/.test(n[i + 2] || ''));
+    const hayFondo = n.some(fondoFuerte);
+    const hayRef = hayFondo || n.some((w) => /^(meta|metas|alcancia|chanchito|ahorro|ahorros)$/.test(w));
+    let mejor = null, mejorS = 0;
+    (ctx.metas || []).forEach((m) => {
+      const pal = U.norm(m.nombre || '').split(/\s+/).filter((w) => w.length > 2 && !PARADA.has(w) && !/^(meta|mi|para|del|las|los|una)$/.test(w));
+      let s = pal.filter((w) => n.includes(w) || n.includes(w + 's') || n.includes(w.replace(/s$/, ''))).length;
+      if (m.esFondo && hayFondo) s += 2;
+      if (s > mejorS) { mejorS = s; mejor = m; }
+    });
+    if (mejor) return { meta: mejor, ref: true, fondo: !!mejor.esFondo };
+    if (hayFondo) return { ref: true, fondo: true };
+    if (hayRef) return { ref: true };
+    return null;
+  }
+  function detectarAporte(n, txt, verb, ctx) {
+    if (n.some((w) => PAL_TARJETA.has(w))) return null;                    // con tarjeta es una compra, no un aporte
+    if (/\bfarmacias? (?:del|de) ahorro\b/.test(txt)) return null;       // «Farmacias del Ahorro» (México) es una farmacia, no una meta
+    const m = metaDeTexto(n, ctx);
+    if (m && m.cuentaBanco) return null;
+    const ahorrarPuro = verb.some((a) => a && /^(ahorrar|apartar|separar|juntar|aportar|guardar)$/.test(a.lema) && !a.futuro);
+    if (!m || !m.ref) return ahorrarPuro && !/\b(tarjeta|visa|mastercard|diners)\b/.test(txt) ? { signo: 1, metaId: null, sinRef: true } : null;
+    const base = { metaId: m.meta ? m.meta.id : null, metaNombre: m.meta ? m.meta.nombre : null, fondo: !!m.fondo };
+    if (/\b(saque|sacamos|retire|retiramos|use|usamos|tome|tomamos|quite|saco|retiro|retira|saca)\b(?: \$?[\d.,]+| [a-z]+){0,4} (de|del|desde) (?:mi |mis |la |el |los |las )?(meta|metas|fondo|fondos|ahorro|ahorros|alcancia|chanchito|reserva|reservas|emergencia)/.test(txt)
+      || (m.meta && /\b(saque|sacamos|retire|retiramos|use|usamos|quite|retiro)\b/.test(txt) && /\b(de|del)\b/.test(txt))) return Object.assign({ signo: -1 }, base);
+    const verboAhorro = verb.some((a) => a && a.ahorro && !a.futuro) || /\baparte\b/.test(txt);
+    if (verboAhorro || /\b(aporte|aportes|ahorro|ahorros|deposito|abono)\b/.test(txt) || /\b(pase|pasamos|transferi|transferimos|mande|envie)\b/.test(txt)) return Object.assign({ signo: 1 }, base);
+    return null;
+  }
+  const RE_REEMBOLSO = /\b(reembols\w*|devolucion\w*|devolvieron|devolvio|devuelven|reverso|reversaron|reversado|reversion|anularon|anulacion|nota de credito|contracargo)\b/;
+  function detectarReembolso(n, txt, ctx) {
+    if (!RE_REEMBOLSO.test(txt)) return null;
+    const ts = ctx.tarjetas || [];
+    const bancoPal = palabrasBanco(ctx);
+    const conTarjeta = n.some((w) => PAL_TARJETA.has(w)) || (ts.length && n.some((w) => bancoPal.has(w)));
+    if (!conTarjeta) return null;
+    let tarjetaId = tarjetaDeTexto(n, ctx), tarjetaDuda = false, sinTarjetas = false;
+    if (!tarjetaId) { if (ts.length === 1) tarjetaId = ts[0].id; else if (!ts.length) sinTarjetas = true; else tarjetaDuda = true; }
+    return { tarjetaId, tarjetaDuda, sinTarjetas };
+  }
+  const RE_CREAR_META = /\b(?:quiero|quisiera|voy a|vamos a|deseo|me gustaria|necesito|ayudame a)\b.*\b(?:colocar|crear|poner|hacer|abrir|tener|armar|empezar|fijar|ponerme)\b.*\bmetas?\b|\b(?:quiero|quisiera|voy a|deseo|me gustaria|ayudame a)\b (?:empezar a )?ahorrar\b|\bcrea(?:me)? (?:una )?meta\b|\bnueva meta\b/;
+
+  /* ------------------------------------------------------------------- C30: plata propia que cambia de lugar */
+  // «saqué 40 del cajero», «retiré 100 del banco», «deposité 100 en mi cuenta», «pasé 50 a mi cuenta de ahorros»: no es gasto ni ingreso.
+  // Sí cuentan (no entran aquí): «me depositaron» (ingreso), «saqué 30 de mi fondo» (meta), «saqué un avance / un préstamo» (deuda),
+  // «saqué el sueldo», «me robaron», «me cobraron comisión», y si en la misma frase dice para qué lo usó («para pagar el arriendo»).
+  const NO_PROPIO = /\b(prestamo|prestamos|credito|avance|meta|metas|fondo|fondos|alcancia|chanchito|reserva|reservas|sueldo|quincena|salario|visa|mastercard|diners|amex|robaron|robo|comision|comisiones|me cobraron|me sacaron|me depositaron|me deposito|me consignaron|me transfirieron|para pagar|para comprar|y pague|y compre)\b/;
+  function esMovimientoPropio(txt) {
+    if (NO_PROPIO.test(txt) || /\btarjeta de credito\b/.test(txt) || (/\btarjeta\b/.test(txt) && !/\bdebito\b/.test(txt))) return false;
+    if (/\b(meses|cuotas|diferido|diferida|plazos)\b/.test(txt)) return false;                                   // «saqué una laptop a 6 meses»: es una compra a crédito
+    if (/\b(saque|sacamos|retire|retiramos|sacado|retirado)\b (?:un|una|unos|unas|el|la|los|las) (?!plata|dinero|efectivo|billete|billetes|platita)/.test(txt)) return false;   // «saqué una cama»: sacó una cosa (la compró)
+    if (/\b(saque|sacamos|retire|retiramos|sacado|retirado|fui a sacar|fui a retirar|tuve que sacar)\b/.test(txt) && /\b(cajero|cajeros|atm|banco|cuenta|cuentas|ahorros|debito|cajero automatico|banco del barrio)\b/.test(txt)) return true;
+    if (/\b(deposite|depositamos|depositado|consigne|consignamos)\b/.test(txt) && /\b(mi cuenta|mis cuentas|la cuenta|el banco|mi banco|cuenta de ahorros|mis ahorros|ahorros)\b/.test(txt) && !/\b(a|para) (mi |el |la |un |una )?(hermano|hermana|mama|papa|primo|prima|hijo|hija|amigo|amiga|esposa|esposo|novia|novio|jefe|vecino|vecina|tia|tio)\b/.test(txt)) return true;
+    if (/\b(transferi|transferimos|pase|pasamos|movi|movimos)\b/.test(txt) && /\b(a|de|entre) (mi|mis) (otra |otras )?(cuenta|cuentas|ahorros)\b/.test(txt)) return true;
+    return false;
+  }
+
+  /* ------------------------------------------------------------------- Registrar una cláusula */
+  const RE_DEUDA_COBRADA = /\b(deuda|deudas|prestamo|prestado|prestada|me debia|me debian|me debe|me deben|lo que le preste|lo que les preste|que le preste|que les preste|fiado|fiao)\b/;
+  // C31: devolver lo que te prestaron es pagar una deuda («le devolví a mi hermano lo que me prestó», «le pagué los 50 que le debía»)
+  const RE_DEUDA_PAGADA = /\b(que me prest\w*|que nos prest\w*|lo que le debia|lo que les debia|que le debia|que les debia|mi deuda|lo que me fiaron|lo fiado)\b/;
+  function registrarClausula(toks, n, ctx, her, fechaPrev, extra) {
+    extra = extra || {};
+    const txt = n.join(' ');
     const roles = new Array(toks.length).fill('');
     const consumidos = new Set();
     const marcar = (idxs, rol) => idxs.forEach((i) => { if (i >= 0 && i < toks.length) { consumidos.add(i); if (rol) roles[i] = rol; } });
+    const out = { items: [], roles, dudas: [], sinUsar: [] };
+    // conector del principio («y también», «después»): no es parte de lo comprado
+    const L0 = conectorEn(n, 0); if (L0) marcar([...Array(L0).keys()], 'otro');
+    const f = leerFecha(toks, ctx.hoy); marcar(f.usados, 'otro');
+    const fecha = f.hallada ? f.fecha : (fechaPrev || f.fecha);
+    out.fecha = fecha; out.fechaPropia = f.hallada;
+    if (esNegacion(txt)) { out.omitido = toks.map((t) => t.raw).join(' '); return out; }
+    // C30: sacar del cajero, depositar en tu cuenta o pasar plata entre tus cuentas: es tu misma plata, no es gasto ni ingreso
+    if (esMovimientoPropio(txt)) { out.propio = toks.map((t) => t.raw).join(' '); return out; }
+    // «…y ponme un límite de 100 en comida»
+    const pre = detectarPresupuesto(toks, n, txt, ctx);
+    if (pre) { out.accion = pre; return out; }
+    // «quiero colocar una meta mensual de 50»: es un plan, no un movimiento
+    if (RE_CREAR_META.test(txt)) {
+      const cant = toks.find((t, i) => t.num != null && !numeroDePeriodo(toks, n, i));
+      const tras = txt.match(/\bmetas? (?:de|para|por) (?:la |el |mi |una |un )?([a-z]+(?: [a-z]+)?)/);
+      const nombre = tras && !/^\d/.test(tras[1]) && !/^(mensual|ahorro|semanal|dinero|plata)/.test(tras[1]) ? U.cap(tras[1].replace(/\b(de|del|al|mensual\w*|cada|mes|por)\b.*$/, '').trim()) : null;
+      out.accion = { tipo: 'crear_meta', monto: cant ? cant.num : null, mensual: /\b(mensual\w*|al mes|cada mes|por mes|mes a mes)\b/.test(txt), semanal: /\b(semanal\w*|cada semana|a la semana|por semana)\b/.test(txt), nombre: nombre || null };
+      return out;
+    }
+    const verb = n.map((_, i) => analizarVerbo(n, i));
+    const numR = marcarNumeros(toks, n);
+    numR.forEach((r, i) => { if (r === 'otro' || r === 'cuota') consumidos.add(i); });
+    const elegirMonto = () => {
+      let cands = []; toks.forEach((t, i) => { if (numR[i] === 'monto' && !consumidos.has(i)) cands.push(i); });
+      if (!cands.length) toks.forEach((t, i) => { if (numR[i] === 'cantidad' && !consumidos.has(i)) cands.push(i); });
+      if (!cands.length) return { i: -1, otros: [] };
+      const puntaje = (i) => {
+        let s = 0; if (hayMarcaEn(toks, n, i)) s += 5;
+        if (verb[i - 1] || (n[i - 1] === 'de' && verb[i - 2])) s += 3;
+        if (/^(en|por|de|a|con)$/.test(n[i - 1] || '') && !hayMarcaEn(toks, n, i)) s += 1;
+        if (/^(era|eran|fue|fueron|son|es|sea)$/.test(n[i - 1] || '') || (extra.corrigeMonto && i > 0)) s += 6;
+        if (numR[i] === 'cantidad') s -= 3;
+        return s;
+      };
+      let best = cands[0], bs = -99; cands.forEach((i) => { const s = puntaje(i); if (s > bs || (s === bs && i > best)) { bs = s; best = i; } });
+      return { i: best, otros: cands.filter((i) => i !== best && numR[i] === 'monto' && !extra.corrigeMonto) };
+    };
+    const ponMonto = (i) => { if (i < 0) return; marcar([i], 'monto'); if (MONEDAS.has(n[i + 1] || '')) marcar([i + 1], 'monto'); if (n[i - 1] === '$') marcar([i - 1], 'monto'); };
 
-    /* ---- fecha */
-    const f = leerFecha(toks, hoy);
-    marcar(f.usados, 'otro');
-
-    /* ---- ¿es un pago A la tarjeta? (baja la deuda; no es una compra) */
+    /* ---- pago A la tarjeta (baja la deuda; no es una compra) */
     const pagoT = detectarPagoTarjeta(toks, n, txt, ctx);
     if (pagoT) {
-      const cands0 = []; toks.forEach((t, i) => { if (t.num != null && !consumidos.has(i) && !/%$/.test(t.n)) cands0.push(i); });
-      if (!cands0.length) return { tipo: 'registrar', items: [], falta: 'monto', partes: partes(toks, roles), texto: txt };
-      const elegido = cands0[cands0.length - 1];
-      marcar([elegido], 'monto'); n.forEach((w, i) => { if (V_PAGAR.has(w)) marcar([i], 'tipo'); }); marcar(pagoT.idxs, 'cat');
+      const em = elegirMonto(); ponMonto(em.i);
+      n.forEach((w, i) => { if (V_PAGAR.has(w)) marcar([i], 'tipo'); }); marcar(pagoT.idxs, 'cat');
       const t = (ctx.tarjetas || []).find((x) => x.id === pagoT.tarjetaId) || null;
-      const item = { tipo: 'pago_tarjeta', monto: toks[elegido].num, tarjetaId: pagoT.tarjetaId, tarjetaNombre: t ? t.nombre : null, fecha: f.fecha, desc: 'Pago ' + (t ? t.nombre : 'tarjeta'), cat: null, catNombre: 'Pago de tarjeta', catIcono: '💳', catConfianza: 'alta', cuenta: 'efectivo' };
-      const dudas = []; if (pagoT.tarjetaDuda) dudas.push('tarjeta');
-      return { tipo: 'registrar', items: [item], tarjetaDuda: pagoT.tarjetaDuda, sinTarjetas: pagoT.sinTarjetas, dudas, partes: partes(toks, roles), texto: txt, fecha: f.fecha, pagoTarjeta: true };
+      out.items.push({ tipo: 'pago_tarjeta', monto: em.i >= 0 ? toks[em.i].num : null, tarjetaId: pagoT.tarjetaId, tarjetaNombre: t ? t.nombre : null, fecha, desc: 'Pago ' + (t ? t.nombre : 'tarjeta'),
+        cat: null, catNombre: 'Pago de tarjeta', catIcono: '💳', catConfianza: 'alta', cuenta: 'efectivo', tarjetaDuda: pagoT.tarjetaDuda, sinTarjeta: pagoT.sinTarjetas });
+      if (em.i < 0) { out.items[0].falta = 'monto'; out.dudas.push('monto'); }
+      if (pagoT.tarjetaDuda) out.dudas.push('tarjeta');
+      out.sinUsar = em.otros; out.tarjetaDuda = pagoT.tarjetaDuda; out.sinTarjetas = pagoT.sinTarjetas; out.pagoTarjeta = true;
+      out.her = { tipo: 'pago_tarjeta', fecha };
+      return out;
+    }
+    /* ---- reembolso o devolución A la tarjeta (baja la deuda; no es ingreso ni sale de tu bolsillo) */
+    const re = detectarReembolso(n, txt, ctx);
+    if (re) {
+      const em = elegirMonto(); ponMonto(em.i);
+      n.forEach((w, i) => { if (RE_REEMBOLSO.test(w)) marcar([i], 'tipo'); if (PAL_TARJETA.has(w)) marcar([i], 'cat'); });
+      const t = (ctx.tarjetas || []).find((x) => x.id === re.tarjetaId) || null;
+      out.items.push({ tipo: 'pago_tarjeta', reembolso: true, monto: em.i >= 0 ? toks[em.i].num : null, tarjetaId: re.tarjetaId, tarjetaNombre: t ? t.nombre : null, fecha,
+        desc: 'Reembolso ' + (t ? t.nombre : 'tarjeta'), cat: null, catNombre: 'Reembolso a tarjeta', catIcono: '↩️', catConfianza: 'alta', cuenta: 'tarjeta', tarjetaDuda: re.tarjetaDuda, sinTarjeta: re.sinTarjetas });
+      if (em.i < 0) { out.items[0].falta = 'monto'; out.dudas.push('monto'); }
+      if (re.tarjetaDuda) out.dudas.push('tarjeta');
+      out.sinUsar = em.otros; out.tarjetaDuda = re.tarjetaDuda; out.sinTarjetas = re.sinTarjetas;
+      out.her = { tipo: 'pago_tarjeta', fecha };
+      return out;
+    }
+    /* ---- aporte o retiro de una meta («deposité 100 en mi fondo de reserva», «saqué 30 de la meta de la moto») */
+    const ap = detectarAporte(n, txt, verb, ctx);
+    if (ap) {
+      const em = elegirMonto(); ponMonto(em.i);
+      verb.forEach((a, i) => { if (a && (a.ahorro || /^(sacar|retirar|usar)$/.test(a.lema))) marcar([i], 'tipo'); });
+      n.forEach((w, i) => { if (META_PAL.has(w)) marcar([i], 'cat'); });
+      const metas = ctx.metas || [];
+      let metaId = ap.metaId, metaNombre = ap.metaNombre;
+      if (!metaId && ap.fondo) { const fm = metas.find((x) => x.esFondo); if (fm) { metaId = fm.id; metaNombre = fm.nombre; } }
+      if (!metaId && !ap.fondo && metas.length === 1) { metaId = metas[0].id; metaNombre = metas[0].nombre; }
+      out.items.push({ tipo: 'aporte_meta', signo: ap.signo, monto: em.i >= 0 ? toks[em.i].num : null, metaId: metaId || null, metaNombre: metaNombre || (ap.fondo ? 'Fondo de emergencia' : null),
+        esFondo: !!ap.fondo, crearFondo: !!(ap.fondo && !metaId), fecha, desc: (ap.signo < 0 ? 'Retiro de ' : 'Aporte a ') + (metaNombre || (ap.fondo ? 'Fondo de emergencia' : 'una meta')),
+        catNombre: ap.signo < 0 ? 'Retiro de una meta' : 'Aporte a una meta', catIcono: ap.fondo ? '🛟' : '🏁', catConfianza: 'alta', cat: null });
+      if (em.i < 0) { out.items[0].falta = 'monto'; out.dudas.push('monto'); }
+      if (!metaId) out.dudas.push('meta');
+      out.sinUsar = em.otros;
+      out.her = { tipo: 'aporte_meta', fecha };
+      return out;
     }
 
     /* ---- tarjeta y forma de pago */
@@ -1319,24 +2108,25 @@
     n.forEach((w, i) => {
       if (/^(tarjeta|tarjetas|visa|mastercard|master|diners|amex|american)$/.test(w)) {
         usaTarjeta = true; marcar([i], 'otro');
-        // «con la tarjeta del austro», «tarjeta de crédito del pichincha»: el banco no es parte del nombre de la compra
         let j = i + 1;
         while (j < n.length && j <= i + 4 && (/^(de|del|la|el|mi|credito|banco)$/.test(n[j]) || bancoPal.has(n[j]))) { if (bancoPal.has(n[j]) || /^(credito|banco)$/.test(n[j])) marcar([j], 'otro'); j++; }
+        if (/^(con|en)$/.test(n[i - 1] || '')) marcar([i - 1], 'otro'); else if (/^(la|mi|una)$/.test(n[i - 1] || '') && /^(con|en)$/.test(n[i - 2] || '')) marcar([i - 2, i - 1], 'otro');
       }
-      if (/^(credito)$/.test(w) && n[i - 1] !== 'del' && n[i - 1] !== 'de') { usaTarjeta = true; }
-      if (/^(efectivo|cash)$/.test(w)) { efectivoExplicito = true; marcar([i], 'otro'); }
-      if (/^(debito)$/.test(w)) { efectivoExplicito = true; marcar([i], 'otro'); }
-      if (/^(corriente|contado)$/.test(w)) { credito.modo = 'corriente'; usaTarjeta = true; marcar([i], 'otro'); }
+      if (w === 'credito' && n[i - 1] !== 'del' && n[i - 1] !== 'de') usaTarjeta = true;
+      if (bancoPal.has(w) && (ctx.tarjetas || []).length && (/^(con|en)$/.test(n[i - 1] || '') || (/^(la|mi|el)$/.test(n[i - 1] || '') && /^(con|en)$/.test(n[i - 2] || '')) || (/^(del|de)$/.test(n[i - 1] || '') && /^(la|mi)$/.test(n[i - 2] || '') && /^(con|en)$/.test(n[i - 3] || '')))) {
+        usaTarjeta = true; marcar([i], 'otro'); for (let k = i - 1; k >= i - 3 && k >= 0 && /^(con|en|la|mi|el|del|de)$/.test(n[k]); k--) marcar([k], 'otro');
+      }
+      if (/^(efectivo|cash|debito)$/.test(w)) { efectivoExplicito = true; marcar([i], 'otro'); if (/^(en|con)$/.test(n[i - 1] || '')) marcar([i - 1], 'otro'); }
+      // «la corriente» (la luz, en Cuba) y «cuenta corriente» (del banco) no son el pago corriente de la tarjeta
+      if (/^(corriente|contado)$/.test(w) && !(w === 'corriente' && (n[i - 1] === 'cuenta' || (n[i - 1] === 'la' && !n.some((x) => PAL_TARJETA.has(x)))))) { credito.modo = 'corriente'; usaTarjeta = true; marcar([i], 'otro'); }
       if (/^(rotativo|rotativa)$/.test(w)) { credito.modo = 'rotativo'; usaTarjeta = true; marcar([i], 'otro'); }
-      if (/^(diferido|diferida|diferi|diferir|diferidos)$/.test(w)) { credito.modo = 'diferido'; usaTarjeta = true; marcar([i], 'otro'); }
-      if ((w === 'sin' && /^intereses?$/.test(n[i + 1] || ''))) { credito.interes = false; marcar([i, i + 1], 'otro'); }
-      if ((w === 'con' && /^intereses?$/.test(n[i + 1] || ''))) { credito.interes = true; marcar([i, i + 1], 'otro'); }
+      if (/^(diferido|diferida|diferi|diferir|diferidos|diferidas)$/.test(w)) { credito.modo = 'diferido'; usaTarjeta = true; marcar([i], 'otro'); }
+      if (w === 'sin' && /^intereses?$/.test(n[i + 1] || '')) { credito.interes = false; marcar([i, i + 1], 'otro'); }
+      if (w === 'con' && /^intereses?$/.test(n[i + 1] || '')) { credito.interes = true; marcar([i, i + 1], 'otro'); }
       if (w === 'a' && n[i + 1] === 'plazos') { credito.modo = 'diferido'; usaTarjeta = true; marcar([i, i + 1], 'otro'); }
     });
     for (let i = 0; i < toks.length; i++) {
-      // cuotas de 49
       if (/^cuotas?$/.test(n[i])) {
-        // «la cuota del préstamo / del carro / de la casa»: es un préstamo, no una compra con tarjeta
         const sig = n[i + 1] === 'de' || n[i + 1] === 'del' ? (n[i + 2] === 'la' || n[i + 2] === 'el' ? n[i + 3] : n[i + 2]) : null;
         if (sig && /^(prestamo|prestamos|carro|auto|vehiculo|moto|credito|casa|departamento|hipoteca|hipotecario|cooperativa|colegio|universidad|terreno|lote|negocio|banco|alicuota)$/.test(sig)) continue;
         let j = i + 1;
@@ -1344,209 +2134,231 @@
         if (n[j] === 'de') j++;
         if (toks[j] && toks[j].num != null && !/^(meses|mes)$/.test(n[j + 1] || '')) {
           credito.cuota = toks[j].num; credito.modo = credito.modo || 'diferido'; usaTarjeta = true;
-          marcar([i, j], 'otro'); if (n[i + 1] === 'de' || /^(mensual|mensuales|fijas?)$/.test(n[i + 1] || '')) marcar([i + 1, j - 1 > i ? j - 1 : i + 1], 'otro');
           for (let k = i; k <= j; k++) marcar([k], 'otro');
           if (/^(mensual|mensuales)$/.test(n[j + 1] || '')) marcar([j + 1], 'otro');
         } else if (!credito.modo) { credito.modo = 'diferido'; usaTarjeta = true; marcar([i], 'otro'); }
         continue;
       }
-      // a 6 meses / en 12 cuotas / 6 meses
-      if (toks[i].num != null && /^(meses|mes|cuotas|pagos)$/.test(n[i + 1] || '') && Number.isInteger(toks[i].num) && toks[i].num >= 1 && toks[i].num <= 72) {
+      if (toks[i].num != null && /^(meses|mes|cuotas|pagos)$/.test(n[i + 1] || '') && Number.isInteger(toks[i].num) && toks[i].num >= 1 && toks[i].num <= 72 && numR[i] === 'otro') {
         credito.meses = toks[i].num; credito.modo = credito.modo || 'diferido'; usaTarjeta = true;
         marcar([i, i + 1], 'otro'); if (/^(a|en|por|de)$/.test(n[i - 1] || '')) marcar([i - 1], 'otro');
-        if (n[i + 1] === 'meses' && n[i + 2] === 'sin' && /^intereses?$/.test(n[i + 3] || '')) { credito.interes = false; }
+        if (n[i + 1] === 'meses' && n[i + 2] === 'sin' && /^intereses?$/.test(n[i + 3] || '')) credito.interes = false;
         continue;
       }
-      // a un año / a 1 año
       if (/^(a|en)$/.test(n[i]) && /^(1|un|una)$/.test(n[i + 1] || '') && /^anos?$/.test(n[i + 2] || '')) { credito.meses = 12; credito.modo = credito.modo || 'diferido'; usaTarjeta = true; marcar([i, i + 1, i + 2], 'otro'); }
     }
-    if (credito.modo === 'diferido' && credito.meses == null && credito.cuota == null) credito.meses = credito.meses; // pendiente: la app pregunta
-    if (credito.modo === 'diferido' && credito.interes == null) credito.interes = null; // se decide con la tarjeta o se pregunta
+    // sin decir con qué pagó: lo mismo que lo anterior del mismo grupo («con la tarjeta compré 20 de ropa y 30 de zapatos»)
+    let heredoPago = false;
+    if (!usaTarjeta && !efectivoExplicito && her && her.pago && !extra.verboPropio) { heredoPago = true; }
 
-    /* ---- tarjeta concreta */
-    let tarjetaId = null, tarjetaDuda = false, sinTarjetas = false;
-    if (usaTarjeta) {
-      tarjetaId = tarjetaDeTexto(n, ctx);
-      const ts = ctx.tarjetas || [];
-      if (!tarjetaId) {
-        if (ts.length === 1) tarjetaId = ts[0].id;
-        else if (ts.length === 0) sinTarjetas = true;
-        else tarjetaDuda = true;
-      }
-      if (!credito.modo) credito.modo = 'corriente';
-    }
-
-    /* ---- tipo (gasto / ingreso) */
-    let tipo = null, verboIdx = [];
-    const enTxt = (fr) => (' ' + txt + ' ').includes(' ' + fr + ' ');
-    FRASES_INGRESO.forEach((fr) => { if (!tipo && enTxt(fr)) tipo = 'ingreso'; });
-    FRASES_GASTO.forEach((fr) => {
-      if (tipo || !enTxt(fr)) return;
-      // «me salió un camello y cobré 14»: aquí «me salió» es un trabajo, no un gasto
-      if (fr === 'me salio' && n.some((w) => V_INGRESO.has(w)) && !/\bme salio (en |por |a )?\$?\d/.test(txt)) return;
-      tipo = 'gasto';
+    /* ---- ¿entra o sale? */
+    const ev = { in: 0, out: 0 };
+    const tipoIdx = [];
+    let verboPropio = false, futuro = FUTURO.test(txt), consumo = false, consumoLema = null; const lemas = new Set();
+    const montoCercaL = (i) => { for (let k = Math.max(0, i - 2); k <= i + 5 && k < toks.length; k++) if (numR[k] === 'monto' || numR[k] === 'cantidad') return true; return false; };
+    // «me salió en 20», «costó como 30»: el monto va justo después (si no, «me salió un trabajo» no es un gasto)
+    const montoTras = (i) => { for (let k = i + 1; k <= i + 4 && k < toks.length; k++) { if (numR[k] === 'monto' || numR[k] === 'cantidad') return true; if (!/^(en|a|por|como|unos|unas|de|el|la|me|nos|casi|mas|menos|\$)$/.test(n[k])) return false; } return false; };
+    verb.forEach((a, i) => {
+      if (!a) return;
+      if (/^(que|quien)$/.test(n[a.ini - 1] || '') && !(a.ini - 2 >= 0 && /^(tengo|tuve|tenemos|tuvimos|hay|hubo)$/.test(n[a.ini - 2]))) return;   // «por un servicio que di», «del arriendo que me pagan»: dice qué es, no qué pasó
+      if (/^(me|te|le|les|nos|se)$/.test(n[a.ini - 1] || '') && /^(que|quien)$/.test(n[a.ini - 2] || '') && a.lema === 'prestar') return;   // C31: «lo que le presté», «los 50 que me prestó»
+      if (a.debil && !(/^(salir|costar)$/.test(a.lema) ? montoTras(i) : montoCercaL(i))) return;
+      if (a.futuro) futuro = true;
+      if (a.consumo) { consumo = true; consumoLema = consumoLema || a.lema; }
+      lemas.add(a.lema);
+      if (a.dir) { ev[a.dir] += a.peso; verboPropio = verboPropio || a.finito; }
+      if (a.finito || a.persona === 'inf' || a.persona === 'ger') for (let k = a.ini; k <= i; k++) tipoIdx.push(k);
     });
-    for (let i = 0; i < n.length; i++) {
-      const w = n[i];
-      if (!tipo && V_INGRESO.has(w)) { tipo = 'ingreso'; verboIdx.push(i); }
-      else if (!tipo && V_GASTO.has(w)) { tipo = 'gasto'; verboIdx.push(i); }
-      else if (tipo === 'ingreso' && V_INGRESO.has(w)) verboIdx.push(i);
-      else if (tipo === 'gasto' && V_GASTO.has(w)) verboIdx.push(i);
-      if (w === 'saque' && /\bsueldo\b/.test(txt)) { tipo = 'ingreso'; verboIdx.push(i); }
+    // C31: lo que va en una frase de relativo («lo que le presté», «los 50 que me prestó») describe, no es otra acción
+    const txtSinRel = txt.replace(/\bque (?:le|les|me|nos|te) (?:preste|prestamos|presto|prestaron|prestaste|debia|debian|debo|fiaron|fio)\b/g, ' ');
+    const enTxt = (fr) => (' ' + txtSinRel + ' ').includes(' ' + fr + ' ');
+    FRASES_INGRESO.forEach((fr) => { if (enTxt(fr)) ev.in += 2; });
+    FRASES_GASTO.forEach((fr) => { if (!enTxt(fr)) return; if ((fr === 'me salio' && !montoTras(n.indexOf('salio'))) || (fr === 'me costo' && !montoTras(n.indexOf('costo')))) return; ev.out += 2; });
+    if (/\bse (?:me|nos) (?:fue|fueron|va|van|iba|iban)\b/.test(txt)) ev.out += 3;              // «se me fueron 9 en el cine»
+    if (/\b(?:abono|abonos|deposito|depositos|credito|transferencia|acreditacion)\b(?: de \$?[\d.,]+)? (?:a|en|al) (?:mi|mis|la) (?:cuenta|cuentas|saldo)\b/.test(txt)) ev.in += 3;
+    if (/\b(?:abono|abonos|pago|pagos|cuota)\b (?:a|al|de|del|para) (?:la |el |mi |mis )?(?:deuda|deudas|prestamo|prestamos|credito|cuota|hipoteca)\b/.test(txt)) ev.out += 3;
+    n.forEach((w) => { if (NOMBRE_IN.has(w)) ev.in += 1.2; if (NOMBRE_OUT.has(w)) ev.out += 1.2; });
+    if (MAS_SALDO.test(txt) || /^(?:mas|\+) \$?\d/.test(txt)) ev.in += 3;
+    if (MENOS_SALDO.test(txt)) ev.out += 3;
+    if (/\bsaque\b/.test(txt) && /\b(sueldo|salario|quincena)\b/.test(txt)) ev.in += 5;
+    if (/\bpedi prestad[oa]\b/.test(txt)) ev.in += 4;
+    if (RE_TRABAJITO_SALIO.test(txt)) ev.in += 4;                                          // «me salió una chamba de 300», «me salió un brete»
+    if (/\b(?:cambie|cobre|canjee) (?:el|mi) cheque\b/.test(txt)) ev.in += 4;            // «cambié el cheque» (EE. UU.)
+    if (usaTarjeta && !efectivoExplicito) ev.out += 2;
+    if (!verboPropio && her && her.tipo && /^(gasto|ingreso)$/.test(her.tipo) && !extra.verboPropio) ev[her.tipo === 'ingreso' ? 'in' : 'out'] += 2;
+    const decidir = () => (ev.in >= 0.6 && ev.in > ev.out * 1.4 ? 'ingreso' : ev.out >= 0.6 && ev.out > ev.in * 1.4 ? 'gasto' : null);
+    let tipo = decidir();
+    marcar(tipoIdx, 'tipo');
+
+    /* ---- monto */
+    const em = elegirMonto();
+    out.sinUsar = em.otros;
+    ponMonto(em.i);
+    const monto = em.i >= 0 ? toks[em.i].num : null;
+
+    /* ---- qué fue (nombre y categoría) */
+    const ctxSet = new Set(extra.ctxIdx || []);
+    const idx = [];
+    for (let i = 0; i < toks.length; i++) {
+      if (roles[i] === 'tipo' || roles[i] === 'monto' || roles[i] === 'otro') continue;
+      if (consumidos.has(i) && roles[i] !== 'cat') continue;
+      if (AUX[n[i]] && FORMAS.has(n[i + 1] || '')) continue;
+      if (verb[i] && verb[i].finito && verb[i].lema === 'prestar' && /^(me|te|le|les|nos|se)$/.test(n[i - 1] || '')) continue;   // C31: «me prestó» es el verbo, no el restaurante Presto
+      idx.push(i);
     }
-    // frases con "me" + verbo: marcar las dos palabras
-    n.forEach((w, i) => { if (w === 'me' && toks[i + 1] && /^(pagaron|pago|depositaron|llego|llegaron|entro|entraron|dieron|regalaron|regalo|transfirieron|abonaron|cobraron|cobro|costo|salio|acreditaron|devolvieron|devolvio|mandaron|mando|enviaron|envio|prestaron|presto|reembolsaron|reembolso|compraron|giraron|giro|ingresaron|cayo|cayeron)$/.test(n[i + 1])) { verboIdx.push(i, i + 1); } });
-    let tipoDuda = false;
-    if (!tipo && usaTarjeta) tipo = 'gasto'; // «saqué un celular a 12 meses con la tarjeta»: comprar a crédito es un gasto
+    const palabras = idx.map((i) => n[i]);
+    let c = clasificar(palabras, idx, tipo, ctx);
     if (!tipo) {
-      // sin verbo: ¿hay palabras de ingreso (sueldo, propina, venta)?
-      const rest = n.filter((w, i) => !PARADA.has(w) && toks[i].num == null);
-      const ci = clasificar(rest, rest.map((_, i) => i), 'ingreso', ctx);
-      const cg = clasificar(rest, rest.map((_, i) => i), 'gasto', ctx);
-      if (ci.cat && (ci.score > (cg.score || 0) || (/\bpropinas?\b/.test(txt) && ci.score >= (cg.score || 0)))) tipo = 'ingreso'; // «propina 5» sin verbo = la recibió (si la dio, dice «le di / dejé»)
-      else { tipo = 'gasto'; if (n.includes('saque')) tipoDuda = true; }
+      // sin verbo claro: la cosa nombrada decide («sueldo 800» entra; «luz 20» sale)
+      const c0 = clasificar(palabras, idx, null, ctx);
+      if (c0.cat) { if (c0.cat.tipo === 'ingreso') ev.in += 1.5; else ev.out += 0.8; tipo = decidir(); }
+      if (tipo) c = clasificar(palabras, idx, tipo, ctx); else c = c0;
     }
-    marcar(verboIdx, 'tipo');
-
-    /* ---- candidatos a monto */
-    const hayMarca = (i) => (toks[i].n.startsWith('$') || toks[i].n.endsWith('$') || /(usd|dolares|dolar)$/.test(toks[i].n) || (n[i + 1] && MONEDAS.has(n[i + 1])) || (n[i - 1] && n[i - 1] === '$'));
-    let cands = [];
-    const CANTIDAD = /^(amigos|amigas|personas|persona|gente|ninos|ninas|companeros|invitados|veces|vez|horas|hora|dias|kilos|kilo|libras|libra|litros|litro|galones|galon|unidades|metros)$/;
-    toks.forEach((t, i) => { if (t.num != null && t.num > 0 && !consumidos.has(i) && !/%$/.test(t.n) && !CANTIDAD.test(n[i + 1] || '')) cands.push(i); });
-    const puntaje = (i) => {
-      let s = 0;
-      if (hayMarca(i)) s += 5;
-      const ant = n[i - 1] || '';
-      if (verboIdx.includes(i - 1)) s += 3;
-      if (/^(en|por|de|a|con)$/.test(ant) && !hayMarca(i)) s += 1;
-      const sig = n[i + 1];
-      if (sig && !MONEDAS.has(sig) && !PARADA.has(sig) && !hayMarca(i) && toks[i].num <= 12 && Number.isInteger(toks[i].num) && !verboIdx.includes(i + 1)) return -4; // "2 pizzas", "3 cebollas": cantidad, no monto
-      if (sig && !MONEDAS.has(sig) && !PARADA.has(sig) && !hayMarca(i)) s -= 0.5;
-      return s;
+    const tipoItem = tipo;
+    // ¿Hay algo que anotar? (un monto, o una compra/consumo con su cosa aunque falte el precio)
+    const contIdx = idx.filter((i) => esContenidoN(n, toks, i) && !ctxSet.has(i));
+    if (monto == null && !(tipo && (consumo || verboPropio) && (contIdx.length || ctxSet.size)) && !(tipo === 'ingreso' && verboPropio)) {
+      out.nada = true; out.her = her; return out;
+    }
+    let catId = null, conf = 'ninguna', palabraCat = c.palabra || null;
+    const medidas = (AF.PLAN.medidasHogar || []);
+    const hayMedida = palabras.some((w) => medidas.includes(w));
+    if (c.cat && (!tipoItem || c.cat.tipo === tipoItem)) {
+      catId = c.cat.id; conf = c.aprendido || c.score >= 2 ? 'alta' : 'media';
+      marcar(c.usados, 'cat');
+      if (hayMedida && !c.aprendido && (catId === 'comida_fuera' || catId === 'antojos')) catId = 'comida_hogar';
+    }
+    if (tipoItem === 'ingreso' && (!c.cat || c.cat.tipo !== 'ingreso' || !c.aprendido)) {   // sin palabra de ingreso conocida: se deduce de cómo lo dijo
+      const sueldoLike = /\b(me pagaron|me pago|me depositaron|me deposito|cobre|cobramos|me cayo|ya me pagaron|me transfirieron|recibi mi pago|me llego el pago|pago de mi trabajo|me acreditaron|me ingresaron|sueldo|salario|quincena)\b/.test(txt);
+      const ventaLike = /\b(vendi|vendimos|venta|ventas|vendido|me compraron)\b/.test(txt) && ctx.categorias.some((x) => x.id === 'ventas');
+      const llegaLike = /\b(me regalaron|me regalo|me devolvieron|me devolvio|me mandaron|me mando|me enviaron|me envio|me prestaron|me presto|me reembolsaron|me reembolso|me giraron|me giro|lo que me deb\w+|reembolso|devolucion|pedi prestad\w+)\b/.test(txt);
+      const deuda = RE_DEUDA_COBRADA.test(txt) && /\b(cobr\w+|me pag\w+|me devolv\w+|me abon\w+|me deposit\w+|recib\w+)\b/.test(txt);
+      const porAlgo = sueldoLike && /\bpor (?!(el |la |este |ese |mi |todo |todo el )?(mes|quincena|semana|trabajo|sueldo|rol|nomina|salario|jornada|dia|octubre|noviembre|septiembre|agosto|diciembre)\b)\w+/.test(txt);
+      const extraLike = RE_EXTRA.test(txt);
+      if (!c.cat || c.cat.tipo !== 'ingreso' || deuda) {
+        catId = deuda ? 'otros_ingresos' : ventaLike ? 'ventas' : llegaLike ? 'otros_ingresos' : (porAlgo || extraLike) ? 'extra' : sueldoLike ? 'sueldo' : 'extra';
+        conf = ventaLike || llegaLike || sueldoLike || deuda || extraLike ? 'alta' : 'media';
+        if (!ctx.categorias.some((x) => x.id === catId)) catId = 'extra';
+      }
+      if (deuda) out.cobroDeuda = true;
+    }
+    if (tipoItem === 'gasto' && !c.aprendido && RE_DEUDA_PAGADA.test(txt) && /\b(pague|pagamos|devolvi|devolvimos|abone|abonamos|cancele|di|le di|le pague|le devolvi)\b/.test(txt) && ctx.categorias.some((x) => x.id === 'deudas')) { catId = 'deudas'; conf = 'alta'; out.pagoDeuda = true; }
+    if (!catId && tipoItem === 'gasto') { if (hayMedida) { catId = 'comida_hogar'; conf = 'alta'; } else { catId = 'otros'; conf = 'ninguna'; } }
+    if (catId === 'comida_hogar' && consumoLema && !/^(tomar|beber)$/.test(consumoLema) && !hayMedida && !c.aprendido && ctx.categorias.some((x) => x.id === 'comida_fuera')) catId = 'comida_fuera';   // «me comí una arepa»: ya hecha
+    // «pagué el celular»: en Ecuador casi siempre es el teléfono (o su cuota); en EE. UU. y España es la cuenta del mes → plan.js → palabrasPais
+    if (!catId && !tipoItem && c.cat) { catId = c.cat.id; conf = 'media'; }
+    // nombre limpio: lo que compró, sin verbos ni muletillas (lo que solo era contexto, «fui al mercado», no va si hay algo mejor)
+    const esNombreConNumero = (i) => toks[i].num != null && (numR[i] === 'nombre' || (roles[i] !== 'monto' && Number.isInteger(toks[i].num) && toks[i].num <= 99 && i > 0 && idx.includes(i - 1) && toks[i - 1].num == null && !DESC_EXCLUIR.has(n[i - 1]) && !PARADA.has(n[i - 1]) && (!n[i + 1] || PARADA.has(n[i + 1]) || consumidos.has(i + 1) || roles[i + 1])));
+    const base0 = idx.filter((i) => !PARADA.has(n[i]) && !DESC_EXCLUIR.has(n[i]) && !verb[i] && !CONECTOR_PAL.has(n[i]) && roles[i] !== 'monto' && (toks[i].num == null || esNombreConNumero(i)));
+    let contenidoIdx = base0.filter((i) => !medidas.includes(n[i]));
+    if (!contenidoIdx.length) contenidoIdx = base0;                // «compré un saco en 40»: «saco» también es medida, pero aquí es lo comprado
+    const sinCtx = contenidoIdx.filter((i) => !ctxSet.has(i));
+    if (sinCtx.length) contenidoIdx = sinCtx;
+    const contenido = contenidoIdx.map((i) => toks[i].raw.replace(/[?!.,;:]+$/, ''));
+    let desc = contenido.join(' ').trim();
+    if (c.cat && c.usados && c.usados.length >= 2 && c.palabra && c.palabra.split(' ').length >= 3) desc = c.usados.map((i) => toks[i].raw.replace(/[?!.,;:]+$/, '')).join(' ');
+    if (catId === 'comida_hogar' && contenido.length >= 2 && !(c.palabra && c.palabra.split(' ').length >= 2)) desc = contenido.slice(0, -1).join(', ') + ' y ' + contenido[contenido.length - 1];
+    if (out.cobroDeuda) desc = 'Cobro de deuda' + (contenido.filter((w) => !RE_DEUDA_COBRADA.test(U.norm(w)) && !/^(tenia|tenian|debia|debian)$/.test(U.norm(w))).length ? ' · ' + contenido.filter((w) => !RE_DEUDA_COBRADA.test(U.norm(w)) && !/^(tenia|tenian|debia|debian)$/.test(U.norm(w))).join(' ') : '');
+    if (lemas.has('prestar') && !out.cobroDeuda && !out.pagoDeuda && !c.aprendido) { const quien = contenido.filter((w) => !/^(prestamo|prestado|prestada|plata|dinero)$/.test(U.norm(w))); desc = 'Préstamo' + (quien.length ? ' · ' + quien.join(' ') : ''); }   // «le presté 20 a mi primo»
+    if (out.pagoDeuda) { const quien = contenido.filter((w) => !RE_DEUDA_PAGADA.test(U.norm(w)) && !/^(tenia|tenian|debia|debian|deuda|presto|prestaron|fiaron|fiado)$/.test(U.norm(w))); desc = 'Pago de deuda' + (quien.length ? ' · ' + quien.join(' ') : ''); }
+    // C10: «almorcé en 5», «desayuné por 3»: el verbo ya dice qué fue (y «almorcé un corviche» es comida aunque no conozca «corviche»)
+    const COMIDA_VERBO = { almorzar: 'Almuerzo', desayunar: 'Desayuno', cenar: 'Cena', merendar: 'Merienda', comer: 'Comida', tomar: 'Bebida', beber: 'Bebida' };
+    if (tipoItem === 'gasto' && consumoLema && COMIDA_VERBO[consumoLema] && (!catId || catId === 'otros') && conf === 'ninguna' && !(/^(tomar|beber)$/.test(consumoLema) && contenido.length)) {
+      const ok = ctx.categorias.find((x) => x.id === (/^(tomar|beber)$/.test(consumoLema) ? 'antojos' : 'comida_fuera'));
+      if (ok) { catId = ok.id; conf = contenido.length ? 'media' : 'alta'; if (!desc) desc = COMIDA_VERBO[consumoLema]; }
+    }
+    if (tipoItem === 'gasto' && (!catId || catId === 'otros' || catId === 'transporte') && !c.aprendido && (lemas.has('tanquear') || lemas.has('repostar')) && ctx.categorias.some((x) => x.id === 'combustible')) { catId = 'combustible'; conf = 'alta'; if (!desc) desc = 'Combustible'; }   // «tanqueé el carro», «he repostado»
+    if (tipoItem === 'gasto' && (!catId || catId === 'otros') && !c.aprendido && (lemas.has('motilar') || lemas.has('peluquear')) && ctx.categorias.some((x) => x.id === 'cuidado_personal')) { catId = 'cuidado_personal'; conf = 'alta'; if (!desc) desc = 'Corte de pelo'; }   // «me motilé en 5»
+    let palabraNueva = null;
+    if (conf === 'ninguna' && contenido.length) {
+      palabraNueva = U.norm(contenido[contenido.length - 1]);
+      if (contenido.length > 1 && contenido.length <= 3) palabraNueva = U.norm(contenido.join(' '));
+    }
+    const cat = (ctx.categorias.find((x) => x.id === catId)) || null;
+    let nec = cat ? cat.nec : null;
+    if (c.necAprendido !== undefined) nec = c.necAprendido;
+    let pago = null;
+    if (tipoItem === 'gasto' && usaTarjeta && !efectivoExplicito) {
+      let tarjetaId = tarjetaDeTexto(n, ctx), tarjetaDuda = false, sinTarjetas = false;
+      const ts = ctx.tarjetas || [];
+      if (!tarjetaId) { if (ts.length === 1) tarjetaId = ts[0].id; else if (!ts.length) sinTarjetas = true; else tarjetaDuda = true; }
+      pago = { cuenta: 'tarjeta', tarjetaId, credito, tarjetaDuda, sinTarjetas };
+    } else if (tipoItem === 'gasto' && heredoPago) pago = her.pago;
+    else if (tipoItem === 'gasto') pago = { cuenta: 'efectivo' };
+    const item = {
+      tipo: tipoItem, monto, cat: catId, catNombre: cat ? cat.nombre : null, catIcono: cat ? cat.icono : null,
+      catConfianza: conf, desc: desc ? U.cap(desc) : '', fecha, nec, palabraNueva, palabraCat,
+      cuenta: pago && pago.cuenta === 'tarjeta' ? 'tarjeta' : 'efectivo',
     };
-
-    // ¿varias cosas en una frase? ("gasté 3 en salchipapa y 5 en pasaje"). Los números que parecen cantidad («3 cebollas») no separan nada.
-    let segmentos = [{ desde: 0, hasta: toks.length - 1 }];
-    const candsFuertes = cands.filter((i) => puntaje(i) > -3);
-    if (candsFuertes.length >= 1) cands = candsFuertes;
-    if (cands.length > 1) {
-      const cortes = [];
-      let ok = true;
-      for (let k = 0; k < cands.length - 1; k++) {
-        const a = cands[k], b = cands[k + 1];
-        let corte = -1;
-        for (let i = b - 1; i > a; i--) { if (/^(y|e|ademas|tambien|luego|despues|mas)$/.test(n[i]) || toks[i].coma) { corte = toks[i].coma && !/^(y|e)$/.test(n[i]) ? i + 1 : i + 1; break; } }
-        if (corte < 0) { ok = false; break; }
-        cortes.push(corte);
-      }
-      if (ok) {
-        const segs = [];
-        let ini = 0;
-        cortes.forEach((c) => { segs.push({ desde: ini, hasta: c - 1 }); ini = c; });
-        segs.push({ desde: ini, hasta: toks.length - 1 });
-        const cuenta = (s) => cands.filter((i) => i >= s.desde && i <= s.hasta).length;
-        if (segs.every((s) => cuenta(s) === 1)) segmentos = segs;
-      }
+    if (item.cuenta === 'tarjeta') {
+      Object.assign(item, { tarjetaId: pago.tarjetaId, credito: Object.assign({}, pago.credito), tarjetaDuda: !!pago.tarjetaDuda, sinTarjeta: !!pago.sinTarjetas });
+      if (pago.tarjetaDuda) out.dudas.push('tarjeta');
+      if (!item.credito.modo) out.dudas.push('modo');
+      if (item.credito.modo === 'diferido' && item.credito.meses == null && item.credito.cuota == null) out.dudas.push('meses');
+      out.tarjetaDuda = !!pago.tarjetaDuda; out.sinTarjetas = !!pago.sinTarjetas;
     }
+    if (!tipoItem) { item.tipoDuda = true; out.dudas.push('tipo'); }
+    // «…pagué 41 del curso con la tarjeta me compré medicinas…»: no se sabe de cuál de los dos es la tarjeta → se pregunta
+    if (extra.pagoAmbiguo && tipoItem === 'gasto') { item.pagoDuda = true; out.dudas.push('pago'); }
+    if (monto == null) { item.falta = 'monto'; out.dudas.push('monto'); }
+    if (conf === 'ninguna') out.dudas.push('categoria');
+    if (cat && cat.pregunta && !c.aprendido && tipoItem === 'gasto' && (!cat.ambiguas || (palabraCat && cat.ambiguas.includes(palabraCat)))) {
+      item.duda = { texto: cat.pregunta.texto, opciones: cat.pregunta.opciones.map((o) => Object.assign({}, o)), palabra: palabraCat || palabraNueva };
+    }
+    // ¿Monto raro para lo que es? (un pantalón de $1.250 casi siempre es $12,50 mal oído; o más que tu sueldo entero)
+    if (monto != null && tipoItem === 'gasto' && em.i >= 0 && Number.isInteger(monto) && !/[.,]/.test(toks[em.i].n) && !toks[em.i].palabras && !toks[em.i].miles && !toks[em.i].dicho) {   // «2 mil», «7 tejas»: lo dijo claro, no se duda
+      const escala = (AF.PLAN.monedas && ctx.moneda && AF.PLAN.monedas[ctx.moneda] && AF.PLAN.monedas[ctx.moneda].porDolar) || 1;   // C11: los topes están en dólares
+      const caro = cat && cat.palabrasCaras && palabraCat && cat.palabrasCaras.includes(palabraCat);   // «seguro del carro 300» no es raro
+      const max = cat && cat.montoMax ? (caro && cat.montoMaxCaro ? cat.montoMaxCaro : cat.montoMax) * escala : null;
+      const chico = U.r2(monto / 100);
+      const raro = (max && monto > max * 2) || (ctx.sueldo && monto > ctx.sueldo && (!max || monto > max));
+      if (raro && chico >= 0.25 && (!max || chico <= max)) item.dudaMonto = [chico, monto];
+      else if (raro && ctx.sueldo && monto > ctx.sueldo) item.montoAlto = true;
+    }
+    if (futuro && /^(gasto|ingreso)$/.test(tipoItem || '')) item.futuro = true;
+    if (consumo) item.consumo = true;
+    out.items.push(item);
+    out.her = { tipo: tipoItem || (her && her.tipo) || null, pago: pago && (usaTarjeta || efectivoExplicito || heredoPago) ? pago : (her && her.pago) || null, fecha };
+    return out;
+  }
 
-    const items = [];
-    const nuevos = [];
-    segmentos.forEach((sg, si) => {
-      const mios = cands.filter((i) => i >= sg.desde && i <= sg.hasta);
-      if (!mios.length) return;
-      let elegido = mios[0], mejorS = -99;
-      mios.forEach((i) => { const s = puntaje(i); if (s > mejorS || (s === mejorS && i > elegido)) { mejorS = s; elegido = i; } });
-      marcar([elegido], 'monto');
-      // palabra de moneda pegada al monto
-      if (n[elegido + 1] && MONEDAS.has(n[elegido + 1])) marcar([elegido + 1], 'monto');
-      if (n[elegido - 1] === '$') marcar([elegido - 1], 'monto');
-
-      // concepto = tokens del segmento que no son verbo/monto/fecha/tarjeta/palabras de relleno
-      const idx = [];
-      for (let i = sg.desde; i <= sg.hasta; i++) {
-        if (roles[i] === 'tipo' || roles[i] === 'monto' || roles[i] === 'otro') continue;
-        if (consumidos.has(i) && roles[i] !== 'cat') continue;
-        idx.push(i);
+  /* ------------------------------------------------------------------- Registrar (todo lo dictado) */
+  function interpretarRegistro(toks, n, txt, ctx, claus) {
+    claus = claus || partirClausulas(toks, n, ctx);
+    const roles = new Array(toks.length).fill('');
+    const items = [], preguntas = [], acciones = [], omitidos = [], propios = [], sinUsar = [], dudas = [];
+    let her = null, fecha = null, tarjetaDuda = false, sinTarjetas = false, pagoTarjeta = false;
+    const fg = leerFecha(toks, ctx.hoy);
+    const fechaGeneral = fg.hallada ? fg.fecha : null;
+    claus.forEach((cl, k) => {
+      const sub = toks.slice(cl.desde, cl.hasta + 1), subN = n.slice(cl.desde, cl.hasta + 1);
+      if (cl.pregunta && !ctx.sinPartir) {
+        const q = interpretar(sub.map((t) => t.raw).join(' ').replace(/^(y|e|pero)\s+/i, ''), Object.assign({}, ctx, { sinPartir: true }));
+        if (q && /^(preguntar|pantalla|informe)$/.test(q.tipo)) { preguntas.push(q); for (let i = cl.desde; i <= cl.hasta; i++) roles[i] = 'pregunta'; return; }
       }
-      const palabras = idx.map((i) => n[i]).filter((w, k) => true);
-      // el tipo del segmento: hereda del primero salvo que tenga verbo propio
-      let tipoItem = tipo;
-      if (si > 0) {
-        const vp = n.slice(sg.desde, sg.hasta + 1).findIndex((w) => V_INGRESO.has(w) || w === 'gane');
-        const vg = n.slice(sg.desde, sg.hasta + 1).findIndex((w) => V_GASTO.has(w));
-        if (vp >= 0) tipoItem = 'ingreso'; else if (vg >= 0) tipoItem = 'gasto';
-      }
-      const c = clasificar(palabras, idx, tipoItem, ctx);
-      let catId = null, conf = 'ninguna', palabraCat = c.palabra || null;
-      // Medidas de mercado («2 libras de papa», «una funda de arroz») = compra para la casa, aunque suene a comida.
-      const medidas = (AF.PLAN.medidasHogar || []);
-      const hayMedida = palabras.some((w) => medidas.includes(w));
-      if (c.cat) {
-        catId = c.cat.id;
-        conf = c.aprendido || c.score >= 2 ? 'alta' : 'media';
-        marcar(c.usados, 'cat');
-        if (hayMedida && !c.aprendido && (catId === 'comida_fuera' || catId === 'antojos')) catId = 'comida_hogar';
-      } else if (tipoItem === 'ingreso') {
-        // «me pagaron 800», «cobré», «me depositaron» sin más = el sueldo (es lo normal). Regalos, ventas, premios tienen sus palabras.
-        const sueldoLike = /\b(me pagaron|me pago|me depositaron|me deposito|cobre|cobramos|me cayo|ya me pagaron|me transfirieron|recibi mi pago|me llego el pago|pago de mi trabajo|me acreditaron|me ingresaron)\b/.test(txt);
-        const ventaLike = /\b(vendi|vendimos|venta|vendido|me compraron)\b/.test(txt) && ctx.categorias.some((c) => c.id === 'ventas');
-        // «me regalaron», «me devolvieron», «me mandó mi hermano», «lo que me debían»: dinero que llega, no sueldo
-        const llegaLike = /\b(me regalaron|me regalo|me devolvieron|me devolvio|me mandaron|me mando|me enviaron|me envio|me prestaron|me presto|me reembolsaron|me reembolso|me giraron|me giro|lo que me deb\w+)\b/.test(txt);
-        // «me pagaron 40 por unas clases» = un trabajo aparte, no el sueldo (salvo «por el mes», «por la quincena»…)
-        const porAlgo = sueldoLike && /\bpor (?!(el |la |este |ese |mi |todo |todo el )?(mes|quincena|semana|trabajo|sueldo|rol|nomina|salario|jornada|dia|octubre|noviembre|septiembre|agosto|diciembre)\b)\w+/.test(txt);
-        catId = ventaLike ? 'ventas' : llegaLike ? 'otros_ingresos' : porAlgo ? 'extra' : sueldoLike ? 'sueldo' : 'extra'; conf = ventaLike || llegaLike || sueldoLike ? 'alta' : 'media';
-        if (!ctx.categorias.some((c) => c.id === catId)) catId = 'extra';
-      } else if (hayMedida) {
-        catId = 'comida_hogar'; conf = 'alta';
-      } else { catId = 'otros'; conf = 'ninguna'; }
-      // nombre limpio del movimiento: lo que compró, sin verbos ni muletillas
-      const esNombreConNumero = (i) => toks[i].num != null && roles[i] !== 'monto' && Number.isInteger(toks[i].num) && toks[i].num <= 99 && i > sg.desde && idx.includes(i - 1) && toks[i - 1].num == null && !DESC_EXCLUIR.has(n[i - 1]) && !PARADA.has(n[i - 1]) && (!n[i + 1] || PARADA.has(n[i + 1]) || consumidos.has(i + 1) || roles[i + 1]);
-      const contenidoIdx = idx.filter((i) => !PARADA.has(n[i]) && !DESC_EXCLUIR.has(n[i]) && !medidas.includes(n[i]) && roles[i] !== 'monto' && (toks[i].num == null || esNombreConNumero(i)));
-      const contenido = contenidoIdx.map((i) => toks[i].raw.replace(/[?!.,;:]+$/, ''));
-      let desc = contenido.join(' ').trim();
-      // si lo que dijo es una frase completa del diccionario («comida para mi hogar»), el nombre es esa frase tal cual
-      if (c.cat && c.usados && c.usados.length >= 2 && c.palabra && c.palabra.split(' ').length >= 3) desc = c.usados.map((i) => toks[i].raw.replace(/[?!.,;:]+$/, '')).join(' ');
-      // varias cosas del mercado: «Cebollas, papa y arroz»
-      if (catId === 'comida_hogar' && contenido.length >= 2 && !(c.palabra && c.palabra.split(' ').length >= 2)) desc = contenido.slice(0, -1).join(', ') + ' y ' + contenido[contenido.length - 1];
-      let palabraNueva = null;
-      if (conf === 'ninguna' && contenido.length) {
-        palabraNueva = U.norm(contenido[contenido.length - 1]);
-        if (contenido.length > 1 && contenido.length <= 3) palabraNueva = U.norm(contenido.join(' '));
-        nuevos.push(palabraNueva);
-      }
-      const cat = (ctx.categorias.find((x) => x.id === catId)) || null;
-      let nec = cat ? cat.nec : null;
-      if (c.necAprendido !== undefined) nec = c.necAprendido;
-      const item = {
-        tipo: tipoItem, monto: toks[elegido].num, cat: catId, catNombre: cat ? cat.nombre : null, catIcono: cat ? cat.icono : null,
-        catConfianza: conf, desc: desc ? U.cap(desc) : '', fecha: f.fecha, nec, palabraNueva, palabraCat,
-        cuenta: tipoItem === 'gasto' && usaTarjeta && !efectivoExplicito ? 'tarjeta' : 'efectivo',
-      };
-      // ¿La palabra es ambigua? (una cola: ¿antojo o para la casa?; unos auriculares: ¿para el trabajo?) → se pregunta UNA vez y se aprende.
-      if (cat && cat.pregunta && !c.aprendido && tipoItem === 'gasto' && (!cat.ambiguas || (palabraCat && cat.ambiguas.includes(palabraCat)))) {
-        item.duda = { texto: cat.pregunta.texto, opciones: cat.pregunta.opciones.map((o) => Object.assign({}, o)), palabra: palabraCat || palabraNueva };
-      }
-      // ¿Monto raro para lo que se compró? (una hamburguesa de $350 casi siempre es $3,50 mal oído)
-      if (cat && cat.montoMax && tipoItem === 'gasto' && Number.isInteger(item.monto) && item.monto > cat.montoMax * 2 && item.monto / 100 >= 0.5 && item.monto / 100 <= cat.montoMax && !toks[elegido].n.includes(',') && !toks[elegido].n.includes('.')) {
-        item.dudaMonto = [U.r2(item.monto / 100), item.monto];
-      }
-      if (tipoItem === 'gasto' && FUTURO.test(txt)) item.futuro = true;
-      items.push(item);
+      const mismoGrupo = k > 0 && claus[k - 1].grupo === cl.grupo;
+      const r = registrarClausula(sub, subN, ctx, (mismoGrupo || !cl.verboPropio) ? her : null, fecha || fechaGeneral,
+        { ctxIdx: (cl.ctxIdx || []).map((i) => i - cl.desde), corrigeMonto: cl.corrigeMonto, verboPropio: cl.verboPropio && !mismoGrupo, pagoAmbiguo: cl.pagoAmbiguo });
+      r.roles.forEach((rol, j) => { if (rol) roles[cl.desde + j] = rol; });
+      if (r.fechaPropia) fecha = r.fecha;
+      if (r.omitido) { omitidos.push(r.omitido); return; }
+      if (r.propio) { propios.push(r.propio); for (let i = cl.desde; i <= cl.hasta; i++) roles[i] = 'otro'; return; }
+      if (r.accion) { acciones.push(r.accion); return; }
+      r.items.forEach((it) => items.push(it));
+      r.sinUsar.forEach((j) => sinUsar.push(sub[j].raw));
+      r.dudas.forEach((d) => { if (!dudas.includes(d)) dudas.push(d); });
+      if (r.tarjetaDuda) tarjetaDuda = true; if (r.sinTarjetas) sinTarjetas = true; if (r.pagoTarjeta) pagoTarjeta = true;
+      if (r.her) her = r.her;
     });
-
+    const base = { partes: partes(toks, roles), texto: txt };
     if (!items.length) {
-      // hay verbo pero ningún monto
-      return { tipo: 'registrar', items: [], falta: 'monto', partes: partes(toks, roles), texto: txt };
+      if (acciones.length === 1 && !preguntas.length) return Object.assign(acciones[0], { texto: txt });
+      if (preguntas.length === 1 && !acciones.length) return preguntas[0];
+      if (preguntas.length > 1 && !acciones.length) return { tipo: 'preguntar', tema: 'varias', varias: preguntas, periodo: preguntas[preguntas.length - 1].periodo, texto: txt };
+      if ((omitidos.length || propios.length) && !acciones.length && !preguntas.length) return { tipo: 'nada', texto: txt, omitidos, propios };
+      if (!acciones.length) return Object.assign({ tipo: 'registrar', items: [], falta: 'monto' }, base);
     }
-    if (items[0].cuenta === 'tarjeta') {
-      items.forEach((it) => { if (it.cuenta === 'tarjeta') Object.assign(it, { tarjetaId, credito: Object.assign({}, credito) }); });
-    }
-    const dudas = [];
-    if (items.some((it) => it.catConfianza === 'ninguna')) dudas.push('categoria');
-    if (tarjetaDuda) dudas.push('tarjeta');
-    if (tipoDuda) dudas.push('tipo');
-    if (credito.modo === 'diferido' && credito.meses == null && credito.cuota == null) dudas.push('meses');
-    return { tipo: 'registrar', items, tarjetaDuda, sinTarjetas, dudas, partes: partes(toks, roles), texto: txt, fecha: f.fecha };
+    return Object.assign({ tipo: 'registrar', items, preguntas, acciones, omitidos, propios, numerosSinUsar: sinUsar, tarjetaDuda, sinTarjetas, dudas, fecha: items.length ? items[0].fecha : fecha, pagoTarjeta }, base);
   }
 
   // Convierte tokens + roles en trozos para mostrar la frase anotada
@@ -1565,18 +2377,38 @@
   }
 
   /* ---------------------------------------------------------------------- Principal */
+  // U21: palabras que solo valen en un país («la corriente» es la luz en Cuba; «la colonia» es un supermercado en Honduras)
+  const catsPaisCache = new WeakMap();
+  function catsDePais(cats, pais) {
+    const pp = pais && AF.PLAN.palabrasPais && AF.PLAN.palabrasPais[pais];
+    if (!pp) return cats;
+    let m = catsPaisCache.get(cats); if (!m) { m = new Map(); catsPaisCache.set(cats, m); }
+    if (!m.has(pais)) m.set(pais, cats.map((c) => (pp[c.id] ? Object.assign({}, c, { palabrasPais: pp[c.id] }) : c)));
+    return m.get(pais);
+  }
   function interpretar(texto, ctx) {
     ctx = Object.assign({ hoy: U.hoyISO(), categorias: AF.PLAN.categorias, dicc: {}, tarjetas: [] }, ctx || {});
+    if (ctx.pais) ctx.categorias = catsDePais(ctx.categorias, ctx.pais);
     const crudo = String(texto || '').slice(0, 3000).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(); // sin etiquetas (<b>pan</b>); nadie dicta más de 3.000 letras
     if (!crudo) return { tipo: 'desconocido', texto: '' };
     const depurado = depurar(U.norm(crudo).replace(/[¿?¡!]/g, ' ').replace(/\s+/g, ' ')) || crudo;
-    const toks = tokenizar(depurado === U.norm(crudo).replace(/[¿?¡!]/g, ' ').replace(/\s+/g, ' ').trim() ? crudo : depurado + (/\?\s*$/.test(crudo) ? '?' : ''));
+    const toks = tokenizar(depurado === U.norm(crudo).replace(/[¿?¡!]/g, ' ').replace(/\s+/g, ' ').trim() ? crudo : depurado + (/\?\s*$/.test(crudo) ? '?' : ''), { mult: multiplicadores(ctx.pais) });
     const n = toks.map((t) => t.n);
     const txt = n.join(' ');
     if (/^(ayuda|que puedes hacer|como funciona|que haces)\b/.test(txt) && !toks.some((t) => t.num != null)) return { tipo: 'ayuda', texto: txt };
 
     const cor = detectarCorreccion(toks, n, txt, ctx);
     if (cor) return Object.assign(cor, { texto: txt, partes: partes(toks, new Array(toks.length).fill('')) });
+    const hayNumero = toks.some((t, i) => t.num != null && !numeroDePeriodo(toks, n, i));
+    const hayVerbo = n.some((w, i) => { const a = analizarVerbo(n, i); return a && a.finito && (a.dir || a.ahorro || a.consumo); }) || n.some((w) => V_GASTO.has(w) || V_INGRESO.has(w))
+      || FRASES_INGRESO.concat(FRASES_GASTO).some((fr) => (' ' + txt + ' ').includes(' ' + fr + ' '));
+    // Varias cosas en una frase (gastos + ingresos + una pregunta + un límite…): cada una por su lado, sin perder ninguna.
+    if ((hayNumero || hayVerbo) && !ctx.sinPartir) {
+      const cl = partirClausulas(toks, n, ctx);
+      const anclas = cl.filter((c) => c.ancla);
+      const esPreguntaEntera = /\?\s*$/.test(crudo) && anclas.every((c) => !c.verbos.length);   // «cuánto gasté en comida este mes, más de 100?»
+      if (cl.length > 1 && anclas.length && !esPreguntaEntera && (anclas.length > 1 || cl.some((c) => c.pregunta) || /\b(limite|presupuesto|tope)\b/.test(txt))) return interpretarRegistro(toks, n, txt, ctx, cl);
+    }
     const pre = detectarPresupuesto(toks, n, txt, ctx);
     if (pre) return Object.assign(pre, { texto: txt });
     const pan = detectarPantalla(toks, n, txt);
@@ -1598,13 +2430,11 @@
     // «no gasté nada hoy», «aún no me pagan el sueldo»: no hay nada que anotar
     if (esNegacion(txt)) return { tipo: 'nada', texto: txt };
 
-    const hayNumero = toks.some((t, i) => t.num != null && !numeroDePeriodo(toks, n, i));
-    const hayVerbo = n.some((w) => V_GASTO.has(w) || V_INGRESO.has(w)) || FRASES_INGRESO.concat(FRASES_GASTO).some((fr) => (' ' + txt + ' ').includes(' ' + fr + ' '));
     if (hayNumero || hayVerbo) return interpretarRegistro(toks, n, txt, ctx);
     return { tipo: 'desconocido', texto: txt, partes: partes(toks, new Array(toks.length).fill('')) };
   }
 
-  AF.parser = { interpretar, tokenizar, clasificar, leerPeriodo, leerFecha, depurar, detectarPagoTarjeta, puntuarTarjetas, tarjetaDeTexto };
+  AF.parser = { interpretar, tokenizar, clasificar, leerPeriodo, leerFecha, depurar, detectarPagoTarjeta, puntuarTarjetas, tarjetaDeTexto, partirClausulas, analizarVerbo, marcarNumeros, FORMAS };
   if (typeof module === 'object' && module.exports) module.exports = AF.parser;
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
@@ -2889,11 +3719,15 @@
     const compras = movs.filter((m) => m.tipo === 'gasto' && m.cuenta === 'tarjeta' && m.tarjetaId === tarjeta.id);
     const pagos = movs.filter((m) => m.tipo === 'pago_tarjeta' && m.tarjetaId === tarjeta.id);
     let todas = [], avisos = [], sinTasa = [];
+    // Compras que aún no se pueden repartir en cuotas (sin día de corte/pago, diferido sin meses o sin tasa): SON deuda igual,
+    // bajan el cupo y no salen del efectivo; solo falta saber cuándo se pagan.
+    const sinPlan = [];
     compras.forEach((c) => {
       const p = planCompra(c, tarjeta);
       p.avisos.forEach((a) => avisos.push(a));
       if (p.faltaTasa) sinTasa.push(c);
       p.cuotas.forEach((q) => todas.push(Object.assign({ compraId: c.id, desc: c.desc, cat: c.cat }, q)));
+      if (!p.cuotas.length) sinPlan.push({ compraId: c.id, desc: c.desc, cat: c.cat, fecha: c.fecha, monto: r2(c.monto), falta: p.faltanDatos.slice() });
     });
     todas.sort((a, b) => (a.vence < b.vence ? -1 : a.vence > b.vence ? 1 : a.n - b.n));
     // pagos aplicados a las cuotas más antiguas primero
@@ -2902,9 +3736,13 @@
       const aplica = Math.min(abono, q.monto);
       q.pagado = r2(aplica); q.pendiente = r2(q.monto - aplica); abono = r2(abono - aplica);
     });
+    sinPlan.sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
+    sinPlan.forEach((q) => { const aplica = Math.min(abono, q.monto); q.pagado = r2(aplica); q.pendiente = r2(q.monto - aplica); abono = r2(abono - aplica); });
+    const sinCalendario = sinPlan.filter((q) => q.pendiente > 0.004);
+    const deudaSinFecha = r2(sinCalendario.reduce((s, q) => s + q.pendiente, 0));
     const pendientes = todas.filter((q) => q.pendiente > 0.004);
-    const deudaTotal = r2(pendientes.reduce((s, q) => s + q.pendiente, 0));
-    const capitalPendiente = r2(pendientes.reduce((s, q) => s + q.capital * (q.pendiente / q.monto), 0));
+    const deudaTotal = r2(pendientes.reduce((s, q) => s + q.pendiente, 0) + deudaSinFecha);
+    const capitalPendiente = r2(pendientes.reduce((s, q) => s + q.capital * (q.pendiente / q.monto), 0) + deudaSinFecha);
     // próximo vencimiento = la fecha más próxima con algo pendiente
     const prox = pendientes[0] || null;
     const proximoVence = prox ? prox.vence : null;
@@ -2928,7 +3766,7 @@
       diferidasProximo, cubiertas, pagoMinimo, siguienteCorte,
       diasParaVencer: proximoVence ? U.diasEntre(hoy, proximoVence) : null,
       diasParaCorte: siguienteCorte ? U.diasEntre(hoy, siguienteCorte) : null,
-      faltanDatos, avisos, comprasSinTasa: sinTasa.length,
+      faltanDatos, avisos, comprasSinTasa: sinTasa.length, sinCalendario, deudaSinFecha, saldoAFavor: r2(abono),
     };
   }
 
@@ -2961,12 +3799,12 @@
   // opciones.sinTarjeta: no cuenta las compras hechas con tarjeta de crédito.
   function totales(d, desde, hasta, opciones) {
     const sinTarjeta = !!(opciones && opciones.sinTarjeta);
-    let ingresos = 0, gastos = 0, pagosTarjeta = 0, conTarjeta = 0, veces = 0;
+    let ingresos = 0, gastos = 0, pagosTarjeta = 0, conTarjeta = 0, veces = 0, reembolsos = 0;
     const cat = {}, nec = { N: 0, G: 0, sin: 0 };
     d.movs.forEach((m) => {
       if (!enRango(m, desde, hasta)) return;
       if (m.tipo === 'ingreso') ingresos += m.monto;
-      else if (m.tipo === 'pago_tarjeta') pagosTarjeta += m.monto;
+      else if (m.tipo === 'pago_tarjeta') { if (m.reembolso) reembolsos += m.monto; else pagosTarjeta += m.monto; }   // un reembolso baja la deuda pero no sale de tu bolsillo
       else if (m.tipo === 'gasto') {
         if (m.cuenta === 'tarjeta') { conTarjeta += m.monto; if (sinTarjeta) return; }
         gastos += m.monto; veces++;
@@ -2977,7 +3815,7 @@
     });
     const lista = Object.entries(cat).map(([id, total]) => ({ id, total: r2(total), cat: catDe(d, id) })).sort((a, b) => b.total - a.total);
     lista.forEach((x) => { x.pct = gastos ? x.total / gastos : 0; });
-    return { ingresos: r2(ingresos), gastos: r2(gastos), veces, pagosTarjeta: r2(pagosTarjeta), conTarjeta: r2(conTarjeta), balance: r2(ingresos - gastos), porCategoria: lista, nec: { N: r2(nec.N), G: r2(nec.G), sin: r2(nec.sin) } };
+    return { ingresos: r2(ingresos), gastos: r2(gastos), veces, pagosTarjeta: r2(pagosTarjeta), reembolsos: r2(reembolsos), conTarjeta: r2(conTarjeta), balance: r2(ingresos - gastos), porCategoria: lista, nec: { N: r2(nec.N), G: r2(nec.G), sin: r2(nec.sin) } };
   }
 
   /* ------------------------------------------------------- Resumen del periodo (UNA sola cuenta para toda la app) */
@@ -3118,22 +3956,29 @@
   //   − lo gastado en efectivo o débito       − lo que pagaste a tus tarjetas
   //   − pagos fijos que aún no pagas           − cuotas de tarjeta que vencen antes del cobro (apartadas)
   //   − lo que apartas para metas
-  // Las compras con tarjeta no salen de tu bolsillo hoy: se apartan sus cuotas. Si la tarjeta no tiene fechas, la compra cuenta como gasto de una vez.
+  // Las compras con tarjeta NUNCA salen de tu bolsillo el día de la compra: se apartan sus cuotas cuando vencen antes del cobro.
+  // Si la tarjeta no tiene día de corte/pago, la compra igual es deuda (no efectivo) y se avisa que faltan las fechas (Luis, 12 nov).
+  // El sueldo que pusiste se cuenta como estimado mientras no registres tu sueldo real del ciclo, aunque ya tengas otros ingresos (U9).
   // Aportes de una meta: los que anotó la persona + los que se apartan solos (AF.ahorro, si está cargado)
   const aportesDe = (d, mt) => (AF.ahorro ? AF.ahorro.aportesDe(d, mt) : (mt.aportes || []));
   function puedesGastarHoy(d, hoy) {
     const cic = ciclo(d, hoy);
-    let ingresos = 0, estimado = false;
-    d.movs.forEach((m) => { if (m.tipo === 'ingreso' && enRango(m, cic.inicio, hoy)) ingresos += m.monto; });
-    if (ingresos === 0 && d.ajustes.sueldo && cic.modo !== 'variable') { ingresos = d.ajustes.sueldo; estimado = true; }
+    let ingresos = 0, estimado = false, haySueldoReal = false;
+    const sueldo = d.ajustes.sueldo || 0;
+    d.movs.forEach((m) => { if (m.tipo === 'ingreso' && enRango(m, cic.inicio, hoy)) { ingresos += m.monto; if (m.cat === 'sueldo' || (sueldo && m.monto >= sueldo * 0.8)) haySueldoReal = true; } });
+    const ingresosReales = r2(ingresos);
+    if (!haySueldoReal && sueldo && cic.modo !== 'variable') { ingresos += sueldo; estimado = true; }
     const tarjetasConFechas = new Set((d.tarjetas || []).filter((t) => t.diaCorte && t.diaVencimiento).map((t) => t.id));
-    const esEfectivo = (m) => m.tipo === 'gasto' && !(m.cuenta === 'tarjeta' && tarjetasConFechas.has(m.tarjetaId));
-    let antes = 0, hoyG = 0, pagosTarjeta = 0, conTarjeta = 0;
+    const esEfectivo = (m) => m.tipo === 'gasto' && m.cuenta !== 'tarjeta';
+    let antes = 0, hoyG = 0, pagosTarjeta = 0, conTarjeta = 0, antesRitmo = 0;
+    // C23: lo del día a día (sin lo que se paga una vez al mes ni las compras grandes de una sola vez), para la alerta del ritmo
+    const A = PLAN.alertas || {}, unaVez = new Set(A.deUnaVezAlMes || []), grande = (A.compraGrandeDeUnaVez || 0) * ingresos;
+    const esDelDia = (m) => !unaVez.has(m.cat) && !m.pagoFijoId && !(grande > 0 && m.monto > grande);
     d.movs.forEach((m) => {
-      if (m.tipo === 'pago_tarjeta' && enRango(m, cic.inicio, hoy)) { pagosTarjeta += m.monto; return; }
-      if (m.tipo === 'gasto' && m.cuenta === 'tarjeta' && tarjetasConFechas.has(m.tarjetaId) && enRango(m, cic.inicio, hoy)) conTarjeta += m.monto;
+      if (m.tipo === 'pago_tarjeta' && enRango(m, cic.inicio, hoy)) { if (!m.reembolso) pagosTarjeta += m.monto; return; }
+      if (m.tipo === 'gasto' && m.cuenta === 'tarjeta' && enRango(m, cic.inicio, hoy)) conTarjeta += m.monto;
       if (!esEfectivo(m)) return;
-      if (enRango(m, cic.inicio, U.sumarDias(hoy, -1))) antes += m.monto; else if (m.fecha === hoy) hoyG += m.monto;
+      if (enRango(m, cic.inicio, U.sumarDias(hoy, -1))) { antes += m.monto; if (esDelDia(m)) antesRitmo += m.monto; } else if (m.fecha === hoy) hoyG += m.monto;
     });
     const fijos = fijosPendientes(d, cic, hoy);
     let cuotas = 0, metas = 0;
@@ -3150,12 +3995,14 @@
       metas += reservado;
       metasLista.push({ id: mt.id, nombre: mt.nombre, icono: mt.icono || '🏁', aportado: r2(aportado), reservado: r2(reservado), aporteMensual: mt.aporteMensual || 0 });
     });
+    // tarjetas con compras pendientes pero sin día de corte/pago: no se sabe cuándo se pagan → se avisa en Inicio
+    const tarjetasSinFechas = (d.tarjetas || []).filter((t) => !tarjetasConFechas.has(t.id)).map((t) => ({ id: t.id, nombre: t.nombre, deuda: AF.tarjetas.estado(t, d.movs, hoy).deudaTotal })).filter((x) => x.deuda > 0);
     const gastado = r2(antes + hoyG + pagosTarjeta);
     const apartado = r2(fijos.total + cuotas + metas);
     const resto = r2(ingresos - gastado - apartado);
     const porDia = r2(Math.max(0, resto) / cic.dias);
     return Object.assign({
-      ingresos: r2(ingresos), estimado, gastadoAntes: r2(antes), gastadoHoy: r2(hoyG), pagosTarjeta: r2(pagosTarjeta), comprasConTarjeta: r2(conTarjeta),
+      ingresos: r2(ingresos), estimado, ingresosReales, sueldoEstimado: estimado ? sueldo : 0, tarjetasSinFechas, gastadoAntes: r2(antes), gastadoRitmo: r2(antesRitmo), gastadoHoy: r2(hoyG), pagosTarjeta: r2(pagosTarjeta), comprasConTarjeta: r2(conTarjeta),
       fijos: fijos.total, fijosLista: fijos.lista, cuotas: r2(cuotas), cuotasLista, metas: r2(metas), metasLista, gastado, apartado,
       disponible: r2(ingresos - antes - apartado - pagosTarjeta), resto, porDia, hoyDisponible: r2(porDia), pasado: resto < 0, modo: 'unico',
     }, cic);
@@ -3197,10 +4044,11 @@
       const pg = puedesGastarHoy(d, hoy, 'completo');
       // Con pocos días de datos el ritmo no dice nada (un solo gasto grande lo dispara): se espera a tener una semana.
       const transcurridos = Math.max(1, U.diasEntre(pg.inicio, hoy));
-      const ritmo = pg.gastadoAntes / transcurridos;
+      // C23: el ritmo es solo el gasto del día a día; el arriendo, la luz o una compra grande de una vez no se repiten cada día
+      const ritmo = pg.gastadoRitmo / transcurridos;
       const proyectado = ritmo * pg.dias;
       const falta = r2(proyectado - (pg.disponible - pg.gastadoHoy));
-      if (transcurridos >= PLAN.alertas.diasMinimosPrediccion && pg.gastadoAntes > 0 && falta > 1) out.push({ tipo: 'prediccion', nivel: 'medio', pro: true, texto: 'Al ritmo actual te faltarán unos ' + $(Math.round(falta)) + ' antes de tu cobro.', accion: 'inicio' });
+      if (transcurridos >= PLAN.alertas.diasMinimosPrediccion && pg.gastadoRitmo > 0 && falta > 1) out.push({ tipo: 'prediccion', nivel: 'medio', pro: true, texto: 'Al ritmo actual te faltarán unos ' + $(Math.round(falta)) + ' antes de tu cobro.', accion: 'inicio' });
     }
     return out;
   }
@@ -3777,7 +4625,7 @@
     (d.tarjetas || []).forEach((t) => {
       if (!(t.diaCorte && t.diaVencimiento)) return;
       const cuotas = p.cuotasLista.filter((q) => q.tarjetaId === t.id);
-      const pagado = r2(d.movs.filter((m) => m.tipo === 'pago_tarjeta' && m.tarjetaId === t.id && m.fecha >= cic.inicio && m.fecha <= hoy).reduce((s, m) => s + m.monto, 0));
+      const pagado = r2(d.movs.filter((m) => m.tipo === 'pago_tarjeta' && !m.reembolso && m.tarjetaId === t.id && m.fecha >= cic.inicio && m.fecha <= hoy).reduce((s, m) => s + m.monto, 0));
       const pendiente = r2(cuotas.reduce((s, q) => s + q.monto, 0));
       if (pendiente + pagado <= 0) return;
       const vence = cuotas.map((q) => q.vence).sort()[0] || null;
@@ -3822,7 +4670,7 @@
     const fondoMeta = (d.metas || []).find((m) => m.esFondo) || null;
     if (!meses.length) {
       const parcial = r2(d.movs.filter((m) => m.tipo === 'gasto' && m.fecha >= U.inicioMes(hoy) && m.fecha <= hoy).reduce((s, m) => s + m.monto, 0));
-      return { disponible: false, mesesConDatos: 0, parcial, fondoMeta, motivo: 'Aún no tengo un mes completo de gastos tuyos. Cuando termine este mes (o tengas al menos ' + cfg.minGastosPorMes + ' gastos en un mes) calculo tu fondo con datos reales.' };
+      return { disponible: false, mesesConDatos: 0, parcial, fondoMeta, ahorrado: fondoMeta ? ahorrado(d, fondoMeta) : 0, motivo: 'Aún no tengo un mes completo de gastos tuyos. Cuando termine este mes (o tengas al menos ' + cfg.minGastosPorMes + ' gastos en un mes) calculo tu fondo con datos reales.' };
     }
     const prom = (f) => r2(meses.reduce((s, m) => s + m[f], 0) / meses.length);
     const necesarios = prom('necesarios'), todos = prom('total');
@@ -4397,7 +5245,7 @@
   function informe(d, rango, o) {
     o = o || {};
     const I = AF.informes, hoy = o.hoy || U.hoyISO();
-    const $ = (n) => U.dinero(n, o.moneda ? { moneda: o.moneda } : undefined);
+    const $ = (n) => U.dinero(n, Object.assign({ siempre: true }, o.moneda ? { moneda: o.moneda } : {}));      // el informe lleva las cifras reales aunque la pantalla las oculte
     const doc = crear({ titulo: 'Resumen ' + rango.etiqueta });
     const t = I.totales(d, rango.desde, rango.hasta);
     const movs = d.movs.filter((m) => m.fecha >= rango.desde && m.fecha <= rango.hasta && m.tipo !== 'pago_tarjeta')
@@ -4808,9 +5656,32 @@
   /* ------------------------------------------------------------------ borrados */
   async function borrarCuenta(ns, secretos) {
     bloquear();
+    await borrarEspacio(ns, secretos);
+  }
+  // Borra un espacio SIN cerrar la bóveda abierta (sirve para quitar el espacio «sin cuenta» después de pasarlo a una cuenta).
+  async function borrarEspacio(ns, secretos) {
     borrarAutoPin(ns);
     for (const p of ['boveda', 'datos', 'intentos']) await almacen.del(await clave(ns, p));
     try { if (secretos && secretos.borrar) await secretos.borrar(ns); } catch (e) { /* nada que borrar */ }
+  }
+
+  /* --------------------------------------------- pasar los datos «sin cuenta» a una cuenta (U3) */
+  // Copia la bóveda y los datos tal cual (siguen cifrados con la misma llave y el mismo PIN) de un espacio a otro.
+  // La huella NO se copia (está atada al espacio): se vuelve a activar. No borra el origen: eso se hace aparte, al comprobar que todo quedó bien.
+  async function copiarEspacio(nsDe, nsA) {
+    const b = await leerJSON(await clave(nsDe, 'boveda')), dd = await leerJSON(await clave(nsDe, 'datos'));
+    if (!b || !dd) throw new Error('SIN_DATOS');
+    await escribirJSON(await clave(nsA, 'boveda'), Object.assign({}, b, { bio: null }));
+    await escribirJSON(await clave(nsA, 'datos'), dd);
+    const l = obtenerAutoPin(nsDe); if (b.sinPin && l) guardarAutoPin(nsA, l); else borrarAutoPin(nsA);
+    await limpiarIntentos(nsA);
+  }
+  // La bóveda abierta pasa a ser la del espacio nsA (misma llave: sirve después de copiarEspacio).
+  function usarEspacio(ns) { nsActual = ns; }
+  // Abre un espacio que no tiene PIN (con su llave interna). Devuelve false si tiene PIN.
+  async function abrirSinPin(ns) {
+    const l = obtenerAutoPin(ns); if (!l) return false;
+    const r = await abrirConPin(ns, l); return !!r.ok;
   }
 
   /* ------------------------------------------------------------------- sesión */
@@ -4849,7 +5720,7 @@
 
   AF.seguridad = { usarAlmacen, pinValido, pinDebil, existe, longitudPin, crear, crearSinPin, obtenerAutoPin, tienePin, ponerPin, quitarPin, abrirConPin, cambiarPin, bloquear, estaAbierta, estadoIntentos,
     activarHuella, huellaActiva, desactivarHuella, abrirConHuella, guardarDatos, leerDatos, marcaDatos, paqueteRespaldo, restaurarPaquete,
-    borrarCuenta, sesion, guardarSesion, cerrarSesion, espacioDe, marcarSalida, marcarEntrada, debeBloquear, b64, deB64 };
+    borrarCuenta, borrarEspacio, copiarEspacio, usarEspacio, abrirSinPin, sesion, guardarSesion, cerrarSesion, espacioDe, marcarSalida, marcarEntrada, debeBloquear, b64, deB64 };
   if (typeof module === 'object' && module.exports) module.exports = AF.seguridad;
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
@@ -4937,8 +5808,13 @@
     const alcance = PLAN.sesion.googleAlcanceDrive;
     tokenGoogle = { token: r.access_token, vence: Date.now() + (Number(r.expires_in) || 3000) * 1000, drive: !!(g.google.accounts.oauth2.hasGrantedAllScopes && g.google.accounts.oauth2.hasGrantedAllScopes(r, alcance)), email: email || '' };
   };
-  async function iniciarGoogleWeb() {
-    const r = await pedirTokenGoogle('openid email profile ' + PLAN.sesion.googleAlcanceDrive);
+  // opc.volver: segunda vuelta después de que la persona no marcó la casilla de Drive (pide la pantalla de permisos completa otra vez).
+  async function iniciarGoogleWeb(opc) {
+    const r = await pedirTokenGoogle('openid email profile ' + PLAN.sesion.googleAlcanceDrive, '', !!(opc && opc.volver));
+    // En la pantalla de Google la casilla de Drive viene SIN marcar: si la persona la olvida y toca «Continuar», Google igual devuelve
+    // un token, pero sin Drive. No se crea la sesión: la portada le explica qué casilla marcar y la manda de nuevo a Google.
+    const alcance = PLAN.sesion.googleAlcanceDrive, O = g.google.accounts.oauth2;
+    if (PLAN.sesion.exigirPermisoDrive !== false && alcance && !(O.hasGrantedAllScopes && O.hasGrantedAllScopes(r, alcance))) throw err('sin_permiso_drive', 'Falta marcar el permiso de Drive.');
     let u;
     try { u = await (await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: 'Bearer ' + r.access_token } })).json(); }
     catch (e) { throw err('sin_red', 'Entraste a Google pero no pude leer tu cuenta. Revisa tu internet.'); }
@@ -4956,9 +5832,9 @@
   }
 
   // Devuelve { proveedor, id, nombre, email, foto }
-  async function iniciarSesion(proveedor) {
+  async function iniciarSesion(proveedor, opc) {
     if (!proveedorListo(proveedor)) throw err('sin_configurar', proveedor === 'google' ? 'Falta configurar Google (ID de cliente web).' : 'Falta configurar Facebook (ID de app).');
-    if (!esNativo()) return proveedor === 'google' ? iniciarGoogleWeb() : iniciarFacebookWeb();
+    if (!esNativo()) return proveedor === 'google' ? iniciarGoogleWeb(opc) : iniciarFacebookWeb();
     if (!plugin('SocialLogin')) throw err('no_disponible', 'El inicio de sesión no está disponible aquí.');
     const L = await prepararSociales();
     let r;
@@ -4987,21 +5863,73 @@
 
   /* ------------------------------------------------------------------------ huella */
   const BIO = 1;   // AccessControl.BIOMETRY_CURRENT_SET: el secreto muere si cambian las huellas registradas
+  /* Huella en la VERSIÓN WEB (U17, probado el 12 nov): llave de acceso del teléfono (WebAuthn) + extensión PRF.
+     El teléfono pide la huella y entrega un secreto de 32 bytes que solo existe con esa llave; con él se cifra (AES-GCM) el
+     secreto que abre tus datos. Si el navegador no tiene PRF, se dice y no se activa (nunca se finge). El PIN sigue sirviendo. */
+  const W_CLAVE = 'af.huella.web.';
+  const webauthnOk = () => typeof g.PublicKeyCredential !== 'undefined' && !!g.isSecureContext && !!(g.navigator && g.navigator.credentials);
+  const azar = (n) => g.crypto.getRandomValues(new Uint8Array(n));
+  const aB64 = (u8) => g.btoa(String.fromCharCode.apply(null, new Uint8Array(u8)));
+  const deB64 = (s) => Uint8Array.from(g.atob(s), (c) => c.charCodeAt(0));
+  const salDe = (ns) => new TextEncoder().encode('asistente-financiero/huella/v1/' + ns);
+  async function claveAES(prf) {
+    const base = await g.crypto.subtle.importKey('raw', prf, 'HKDF', false, ['deriveKey']);
+    return g.crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info: new TextEncoder().encode('af-huella-envoltura') }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  }
+  // Una sola petición de huella a la vez: si quedó una abierta (la persona escribió el PIN sin cerrar la ventana de huella), se cancela.
+  let pendiente = null;
+  const cancelarPendiente = () => { if (pendiente) { try { pendiente.abort(); } catch (e) { /* nada */ } pendiente = null; } };
+  async function prfDe(credId, ns) {
+    cancelarPendiente();
+    const ctl = typeof g.AbortController === 'function' ? new g.AbortController() : null; pendiente = ctl;
+    const r = await g.navigator.credentials.get({ signal: ctl ? ctl.signal : undefined, publicKey: { challenge: azar(32), rpId: g.location.hostname, allowCredentials: [{ type: 'public-key', id: credId }], userVerification: 'required', timeout: 60000, extensions: { prf: { eval: { first: salDe(ns) } } } } });
+    if (pendiente === ctl) pendiente = null;
+    const x = r.getClientExtensionResults();
+    const out = x && x.prf && x.prf.results && x.prf.results.first;
+    if (!out) throw err('sin_prf', 'Este navegador abre la huella pero no entrega el secreto para tus datos. Usa tu PIN.');
+    return out;
+  }
+  const huellaWeb = {
+    async disponible() { try { return webauthnOk() && !!(await g.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); } catch (e) { return false; } },
+    async guardar(ns, valor) {
+      if (!webauthnOk()) throw err('no_disponible', 'Este navegador no deja usar la huella.');
+      const cred = await g.navigator.credentials.create({ publicKey: {
+        challenge: azar(32), rp: { name: PLAN.app.nombre, id: g.location.hostname }, user: { id: azar(16), name: 'asistente-' + ns.slice(0, 12), displayName: PLAN.app.nombre },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+        authenticatorSelection: { authenticatorAttachment: 'platform', residentKey: 'preferred', userVerification: 'required' }, attestation: 'none', timeout: 60000, extensions: { prf: {} } } });
+      const prf = await prfDe(cred.rawId, ns);
+      const iv = azar(12);
+      const ct = await g.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await claveAES(prf), new TextEncoder().encode(valor));
+      g.localStorage.setItem(W_CLAVE + ns, JSON.stringify({ id: aB64(cred.rawId), iv: aB64(iv), ct: aB64(ct) }));
+    },
+    async leer(ns) {
+      let x = null; try { x = JSON.parse(g.localStorage.getItem(W_CLAVE + ns) || 'null'); } catch (e) { x = null; }
+      if (!x) return null;
+      const prf = await prfDe(deB64(x.id), ns);
+      const pl = await g.crypto.subtle.decrypt({ name: 'AES-GCM', iv: deB64(x.iv) }, await claveAES(prf), deB64(x.ct));
+      return new TextDecoder().decode(pl);
+    },
+    async borrar(ns) { try { g.localStorage.removeItem(W_CLAVE + ns); } catch (e) { /* nada */ } },
+  };
   async function huellaDisponible() {
-    const B = plugin('NativeBiometric'); if (!esNativo() || !B) return false;
+    if (!esNativo()) return huellaWeb.disponible();
+    const B = plugin('NativeBiometric'); if (!B) return false;
     try { const r = await B.isAvailable({ useFallback: false }); return !!r.isAvailable; } catch (e) { return false; }
   }
   const secretosHuella = {
     async guardar(ns, valor) {
+      if (!esNativo()) return huellaWeb.guardar(ns, valor);
       const B = plugin('NativeBiometric'); if (!B) throw err('no_disponible');
       await B.setData({ key: 'af.bio.' + ns, value: valor, accessControl: BIO, title: 'Activa tu huella', negativeButtonText: 'Cancelar' });
     },
     async leer(ns) {
+      if (!esNativo()) return huellaWeb.leer(ns);
       const B = plugin('NativeBiometric'); if (!B) return null;
       const r = await B.getSecureData({ key: 'af.bio.' + ns, title: PLAN.app.nombre, subtitle: 'Confirma que eres tú', negativeButtonText: 'Usar PIN' });
       return r && r.value;
     },
-    async borrar(ns) { const B = plugin('NativeBiometric'); if (B) await B.deleteData({ key: 'af.bio.' + ns }); },
+    async borrar(ns) { if (!esNativo()) return huellaWeb.borrar(ns); const B = plugin('NativeBiometric'); if (B) await B.deleteData({ key: 'af.bio.' + ns }); },
+    cancelar() { if (!esNativo()) cancelarPendiente(); },   // al entrar con el PIN se cierra la petición de huella que quedó abierta
   };
 
   /* -------------------------------------------------------------------------- voz */
@@ -5012,43 +5940,91 @@
     return !!(g.SpeechRecognition || g.webkitSpeechRecognition);
   }
   // Devuelve { parar(), terminado: Promise<string> }. alParcial(texto) recibe lo que va entendiendo.
+  /* Registro de la escucha (U15 d): qué pasó en cada escucha, para entender fallas del micrófono en el teléfono de la persona.
+     Guarda SOLO tipos de evento, tiempos y cuántas letras se oyeron; nunca lo que dijiste. Las 3 últimas escuchas. */
+  const REG_VOZ = 'af_registro_voz';
+  let regVoz = null;
+  function anotarVoz(ev, dato) {
+    if (ev === 'inicio') {
+      regVoz = { fecha: new Date().toISOString(), t0: Date.now(), modo: esNativo() ? 'app' : 'web', eventos: [] };
+      try { const prev = JSON.parse(g.localStorage.getItem(REG_VOZ) || '[]'); prev.unshift(regVoz); g.localStorage.setItem(REG_VOZ, JSON.stringify(prev.slice(0, 3))); } catch (e) { /* sin almacenamiento */ }
+    }
+    if (!regVoz) return;
+    regVoz.eventos.push({ ms: Date.now() - regVoz.t0, ev, dato: dato == null ? undefined : dato });
+    if (regVoz.eventos.length > 80) regVoz.eventos.splice(1, 1);
+    try { const prev = JSON.parse(g.localStorage.getItem(REG_VOZ) || '[]'); prev[0] = regVoz; g.localStorage.setItem(REG_VOZ, JSON.stringify(prev.slice(0, 3))); } catch (e) { /* sin almacenamiento */ }
+  }
+  const registroVoz = () => { try { return JSON.parse(g.localStorage.getItem(REG_VOZ) || '[]'); } catch (e) { return regVoz ? [regVoz] : []; } };
+
+  // C8: une pedazos de dictado SIN repetir. Chrome en Android puede mandar cada resultado con todo lo dicho antes,
+  // y al reabrir el micrófono puede volver a mandar lo ya oído. Si el pedazo nuevo ya contiene lo anterior, lo reemplaza;
+  // si lo anterior ya contiene el pedazo, no se agrega; si se solapan (2 o más palabras), el solape va una sola vez.
+  const sinTildes = (t) => String(t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9ñ ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  function unirSinRepetir(antes, nuevo) {
+    const a = String(antes || '').trim(), n = String(nuevo || '').trim();
+    if (!a) return n; if (!n) return a;
+    const A = sinTildes(a), Nn = sinTildes(n);
+    if (Nn.startsWith(A)) return n;
+    if (A.endsWith(Nn) || A.startsWith(Nn)) return a;      // ya lo tenía (o está volviendo a mandarlo desde el inicio)
+    const pa = a.split(/\s+/), pn = n.split(/\s+/), sa = A.split(' '), sn = Nn.split(' ');
+    for (let k = Math.min(sa.length, sn.length); k >= 2; k--) {
+      if (sa.slice(sa.length - k).join(' ') === sn.slice(0, k).join(' ')) return pa.slice(0, pa.length - k).concat(pn).join(' ');
+    }
+    return a + ' ' + n;
+  }
+
   async function escuchar(alParcial) {
+    anotarVoz('inicio');
     const R = plugin('SpeechRecognition');
     if (esNativo() && R) {
       let permiso = await R.checkPermissions();
       if (permiso.speechRecognition !== 'granted') permiso = await R.requestPermissions();
       if (permiso.speechRecognition !== 'granted') throw err('permiso', 'Sin permiso del micrófono no puedo escucharte. Puedes escribir.');
       let ultimo = '', cierra, cerrado = false;
-      const terminado = new Promise((res) => { cierra = (t) => { if (cerrado) return; cerrado = true; res(t); }; });
+      const terminado = new Promise((res) => { cierra = (t) => { if (cerrado) return; cerrado = true; anotarVoz('fin', (t || '').length); res(t); }; });
       await R.removeAllListeners();
-      await R.addListener('partialResults', (d) => { if (d && d.matches && d.matches[0]) { ultimo = d.matches[0]; if (alParcial) alParcial(ultimo); } });
-      await R.addListener('listeningState', (d) => { if (d && d.status === 'stopped') setTimeout(() => cierra(ultimo), 250); });
+      await R.addListener('partialResults', (d) => { if (d && d.matches && d.matches[0]) { ultimo = d.matches[0]; anotarVoz('oye', ultimo.length); if (alParcial) alParcial(ultimo); } });
+      await R.addListener('listeningState', (d) => { anotarVoz('estado', d && d.status); if (d && d.status === 'stopped') setTimeout(() => cierra(ultimo), 250); });
       await R.start({ language: idiomaVoz(), maxResults: 3, partialResults: true, popup: false });
-      return { parar: async () => { try { await R.stop(); } catch (e) { /* ya estaba detenido */ } setTimeout(() => cierra(ultimo), 400); }, terminado };
+      anotarVoz('empezo');
+      return { parar: async () => { anotarVoz('parar'); try { await R.stop(); } catch (e) { /* ya estaba detenido */ } setTimeout(() => cierra(ultimo), 400); }, terminado };
     }
     const W = g.SpeechRecognition || g.webkitSpeechRecognition;
     if (!W) throw err('sin_voz', 'Este equipo no tiene reconocimiento de voz. Escribe lo que quieres registrar.');
     const rec = new W(); rec.lang = idiomaVoz(); rec.interimResults = true; rec.maxAlternatives = 1; rec.continuous = true;
-    let ultimo = '', base = '', parado = false;
+    let ultimo = '', base = '', parado = false, listo = false, resolver = null, rechazar = null;
     const terminado = new Promise((res, rej) => {
+      resolver = (t, porque) => { if (listo) return; listo = true; anotarVoz('fin', porque + ' · ' + (t || '').length); res(t); };
+      rechazar = (e) => { if (listo) return; listo = true; anotarVoz('error_fin', e.codigo); rej(e); };
+      rec.onstart = () => anotarVoz('empezo');
       rec.onresult = (e) => {
         // En modo continuo, acumular todos los resultados (finales e intermedios). `base` guarda lo dicho antes de un reinicio.
         let acum = '';
-        for (let i = 0; i < e.results.length; i++) acum += e.results[i][0].transcript + ' ';
-        ultimo = (base + acum).replace(/\s+/g, ' ').trim();
+        for (let i = 0; i < e.results.length; i++) acum = unirSinRepetir(acum, e.results[i][0].transcript);
+        ultimo = unirSinRepetir(base, acum).replace(/\s+/g, ' ').trim();
+        anotarVoz('oye', ultimo.length);
         if (alParcial) alParcial(ultimo);
       };
       rec.onerror = (e) => {
+        anotarVoz('error', e.error);
         if (e.error === 'no-speech' || e.error === 'aborted') return; // el silencio no es error; quien escucha decide cuándo terminar
-        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { parado = true; rej(err('permiso', 'Sin permiso del micrófono no puedo escucharte. Puedes escribir.')); return; }
-        if (e.error === 'network') { parado = true; rej(err('sin_voz', 'El reconocimiento de voz necesita internet. Puedes escribir.')); return; }
-        rej(err('sin_voz', 'No pude escuchar (' + e.error + ').'));
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { parado = true; rechazar(err('permiso', 'Sin permiso del micrófono no puedo escucharte. Puedes escribir.')); return; }
+        if (e.error === 'network') { parado = true; rechazar(err('sin_voz', 'El reconocimiento de voz necesita internet. Puedes escribir.')); return; }
+        rechazar(err('sin_voz', 'No pude escuchar (' + e.error + ').'));
       };
       // Android corta la escucha cada pocos segundos: se reinicia sin perder lo dicho hasta que quien escucha llame a parar()
-      rec.onend = () => { if (!parado) { base = ultimo ? ultimo + ' ' : ''; try { rec.start(); } catch (er) { res(ultimo); } } else res(ultimo); };
+      rec.onend = () => {
+        anotarVoz('se_corto', parado ? 'pedido' : 'solo');
+        if (!parado) { base = ultimo || ''; try { rec.start(); anotarVoz('reinicio'); } catch (er) { anotarVoz('reinicio_fallo', er && er.name); resolver(ultimo, 'no_reinicia'); } } else resolver(ultimo, 'normal');
+      };
     });
     rec.start();
-    return { parar: async () => { parado = true; try { rec.stop(); } catch (e) { /* nada */ } }, terminado };
+    return { parar: async () => {
+      anotarVoz('parar'); parado = true;
+      try { rec.stop(); } catch (e) { /* nada */ }
+      // C7: si el navegador no avisa que terminó (onend), no quedarse «Escuchando…» para siempre: se cierra igual con lo oído.
+      setTimeout(() => { if (!listo) { anotarVoz('sin_aviso_del_navegador'); try { rec.abort(); } catch (e) { /* nada */ } resolver(ultimo, 'plazo'); } }, 1500);
+    }, terminado };
   }
   async function hablar(texto) {
     if (!texto) return;
@@ -5168,7 +6144,7 @@
       const sesionEmail = (tokenGoogle && tokenGoogle.email) || '';
       const r = await pedirTokenGoogle(PLAN.sesion.googleAlcanceDrive, sesionEmail);
       guardarTokenGoogle(r, sesionEmail);
-      if (!tokenGoogle.drive) throw err('sin_permiso', 'Para la copia en Drive tienes que marcar el permiso de Drive cuando Google lo pregunte.');
+      if (!tokenGoogle.drive) throw err('sin_permiso', 'Para la copia en Drive marca la casilla «Ver, crear y eliminar sus propios datos de configuración…» cuando Google la muestre.');
       return tokenGoogle.token;
     }
     const L = await prepararSociales();
@@ -5233,7 +6209,7 @@
   };
   /* ------------------------------------------------------ versión web: saber si hay una versión nueva y aplicarla */
   // La compilación la escribe scripts/construir-web.js (huella de todos los archivos). En desarrollo queda sin escribir y no se busca nada.
-  const COMPILACION = '753221c397';
+  const COMPILACION = '5352f6b617';
   const esCompilada = /^[0-9a-f]{10}$/.test(COMPILACION);
   let registro = null, nuevaCompilacion = null, ultimaBusqueda = 0;
   const oyentesVersion = [];
@@ -5305,7 +6281,7 @@
   function botonAtras(cb) { const A = plugin('App'); if (esNativo() && A) A.addListener('backButton', cb); }
   async function salir() { const A = plugin('App'); if (A && A.exitApp) await A.exitApp(); }
 
-  AF.nativo = { esNativo, esLocal, plugin, almacenNativo, proveedorListo, iniciarSesion, cerrarSesionSocial, huellaDisponible, secretosHuella, vozDisponible, escuchar, hablar, callar,
+  AF.nativo = { unirSinRepetir, anotarVoz, registroVoz, esNativo, esLocal, plugin, almacenNativo, proveedorListo, iniciarSesion, cerrarSesionSocial, huellaDisponible, secretosHuella, vozDisponible, escuchar, hablar, callar,
     leerTextoDeImagen, escucharCompartidos, permisoAvisos, programarAvisos, compartirTexto, entregarArchivo, comprarPro, restaurarCompras,
     respaldoSubir, respaldoInfo, respaldoBajar, respaldoBorrar, drivePermisoAMano, precargarWeb, prepararWeb, version, instalacion, vibrar, alVolverAPrimerPlano, alAbrirEnlace, botonAtras, salir, espera };
   if (typeof module === 'object' && module.exports) module.exports = AF.nativo;
@@ -5389,6 +6365,10 @@
     return partes.join(' · ');
   }
   function filaMov(m, hoy, onclick, conFecha) {
+    if (m.tipo === 'pago_tarjeta' && m.reembolso) {
+      const t = AF.store.buscar('tarjetas', m.tarjetaId);
+      return fila({ icono: '↩️', tono: 'neutro', titulo: 'Reembolso a ' + (t ? t.nombre : 'tarjeta'), sub: 'Baja tu deuda · no es ingreso' + (conFecha && hoy ? ' · ' + U.fechaCorta(m.fecha, hoy) : ''), derecha: h('span', { class: 'monto pago' }, $(m.monto)), onclick });
+    }
     if (m.tipo === 'pago_tarjeta') {
       const t = AF.store.buscar('tarjetas', m.tarjetaId);
       return fila({ icono: '💳', tono: 'neutro', titulo: 'Pago de ' + (t ? t.nombre : 'tarjeta'), sub: 'Baja tu deuda' + (conFecha && hoy ? ' · ' + U.fechaCorta(m.fecha, hoy) : ''), derecha: h('span', { class: 'monto pago' }, '−' + $(m.monto)), onclick });
@@ -5405,7 +6385,7 @@
     movs.forEach((m) => { (mapa[m.fecha] = mapa[m.fecha] || []).push(m); });
     return Object.keys(mapa).sort().reverse().map((f) => {
       const lista = mapa[f].sort((a, b) => b.creado - a.creado);
-      const total = lista.reduce((s, m) => s + (m.tipo === 'gasto' || m.tipo === 'pago_tarjeta' ? -m.monto : m.tipo === 'ingreso' ? m.monto : 0), 0);
+      const total = lista.reduce((s, m) => s + ((m.tipo === 'gasto' && m.cuenta !== 'tarjeta') || (m.tipo === 'pago_tarjeta' && !m.reembolso) ? -m.monto : m.tipo === 'ingreso' ? m.monto : 0), 0);
       return { fecha: f, titulo: U.cap(U.fechaCorta(f, hoy)), total, movs: lista };
     });
   }
@@ -5469,7 +6449,7 @@
     const tarjetasTodas = AF.store.d.tarjetas;
     if (e.tipo === 'pago_tarjeta' && !e.tarjetaId && tarjetasTodas.length) e.tarjetaId = tarjetasTodas[0].id;
     if (!e.cat && e.tipo !== 'pago_tarjeta') e.cat = AF.store.categorias(e.tipo).find((c) => c.id === (e.tipo === 'gasto' ? 'otros' : 'sueldo')).id;
-    const monto = h('input', { class: 'entrada grande', inputmode: 'decimal', placeholder: '0', value: m0.monto === '' ? '' : String(m0.monto).replace('.', ','), 'aria-label': 'Monto' });
+    const monto = h('input', { class: 'entrada grande', inputmode: 'decimal', placeholder: '0', value: m0.monto === '' ? '' : U.montoEditable(m0.monto), 'aria-label': 'Monto' });
     const simbolo = (PLAN.monedas[AF.store.d.ajustes.moneda] || PLAN.monedas.USD).simbolo;
     const montoCaja = h('div', { class: 'dinero-campo' }, h('span', { class: 'simbolo', 'aria-hidden': 'true' }, simbolo), monto);
     const desc = h('input', { class: 'entrada', placeholder: 'Detalle (opcional)', value: m0.desc || '', maxlength: 80 });
@@ -5499,7 +6479,7 @@
             const sel = h('select', { class: 'entrada', onchange: (ev) => { e.tarjetaId = ev.target.value; } }, tarjetas.map((t) => h('option', { value: t.id, selected: t.id === e.tarjetaId }, t.nombre)));
             zonaCuenta.appendChild(campo('Tarjeta', sel));
             const pro = AF.acceso.tiene('tarjetaDiferidoCuotas');
-            zonaCuenta.appendChild(campo('Forma de pago', h('div', { class: 'opciones' }, [['corriente', 'Corriente'], ['diferido', PLAN.pais(AF.store.d.ajustes.pais).palabraCuotas === 'diferido' ? 'Diferido' : 'En cuotas']].map(([k, t]) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': e.modo === k ? 'true' : 'false', onclick: () => { if (k === 'diferido' && !pro) { pedirPro('tarjetaDiferidoCuotas'); return; } e.modo = k; pintar(); } }, t, k === 'diferido' && !pro ? AF.ui.chipPro() : null)))));
+            zonaCuenta.appendChild(campo('Forma de pago', h('div', { class: 'opciones' }, [['corriente', 'Corriente'], ['diferido', PLAN.pais(AF.store.d.ajustes.pais).palabraCuotas === 'diferido' ? 'Diferido' : 'En cuotas']].map(([k, t]) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': e.modo === k ? 'true' : 'false', onclick: () => { e.modo = k; pintar(); } }, t)))));   // diferido se anota siempre (es lo que pasó); el detalle de cuotas e intereses es de Pro
             if (e.modo === 'diferido') {
               zonaCuenta.appendChild(campo('¿Con intereses?', h('div', { class: 'segmentos' }, [[false, 'Sin intereses'], [true, 'Con intereses']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': e.conInteres === k ? 'true' : 'false', onclick: () => { e.conInteres = k; pintar(); } }, t)))));
               zonaCuenta.appendChild(campo('Meses', h('div', { class: 'opciones' }, PLAN.tarjetas.mesesComunes.map((n) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': e.meses === n ? 'true' : 'false', onclick: () => { e.meses = n; pintar(); } }, String(n))))));
@@ -5624,16 +6604,23 @@
     const mensaje = h('p', { class: 'portada-error', role: 'alert' });
     const listos = PLAN.sesion.proveedores.filter((p) => N().proveedorListo(p));
 
+    const etiquetaG = h('span', null, 'Continuar con Google');
+    let volverAGoogle = false;     // true después de que la persona no marcó la casilla de Drive: la 2.ª vuelta pide la pantalla de permisos completa
     async function entrar(prov, boton) {
       mensaje.textContent = '';
       boton.disabled = true;
-      try { await app.iniciarSesion(await N().iniciarSesion(prov)); }
+      try { await app.iniciarSesion(await N().iniciarSesion(prov, { volver: prov === 'google' && volverAGoogle })); }
       catch (e) {
-        if (e.codigo !== 'cancelado') mensaje.textContent = e.codigo === 'sin_red' ? 'No hay internet. Revisa tu conexión e inténtalo otra vez.' : 'No pude entrar con ' + (prov === 'google' ? 'Google' : 'Facebook') + '. Inténtalo otra vez o entra sin cuenta.';
+        if (e.codigo === 'sin_permiso_drive') {
+          // La casilla de Drive viene sin marcar en Google. Sin ella no hay copia de seguridad, así que no se deja entrar: se explica y se vuelve a Google.
+          volverAGoogle = true;
+          etiquetaG.textContent = 'Volver a Google';
+          mensaje.textContent = 'Falta marcar la casilla de Drive. En la pantalla de Google marca «Ver, crear y eliminar sus propios datos de configuración» y toca Continuar. Sin eso no puedo guardar tu copia.';
+        } else if (e.codigo !== 'cancelado') mensaje.textContent = e.codigo === 'sin_red' ? 'No hay internet. Revisa tu conexión e inténtalo otra vez.' : 'No pude entrar con ' + (prov === 'google' ? 'Google' : 'Facebook') + '. Inténtalo otra vez o entra sin cuenta.';
         boton.disabled = false;
       }
     }
-    const bG = h('button', { class: 'btn btn-bloque btn-google', type: 'button', onclick: () => entrar('google', bG) }, AF.ui.logoGoogle(), 'Continuar con Google');
+    const bG = h('button', { class: 'btn btn-bloque btn-google', type: 'button', onclick: () => entrar('google', bG) }, AF.ui.logoGoogle(), etiquetaG);
     const bF = h('button', { class: 'btn btn-bloque', type: 'button', estilo: { background: '#1877F2', color: '#fff' }, onclick: () => entrar('facebook', bF) }, h('span', { estilo: { display: 'grid', placeItems: 'center', width: '22px', height: '22px', background: '#fff', borderRadius: '50%' } }, AF.ui.logoFacebook()), 'Continuar con Facebook');
     const botones = listos.map((p) => (p === 'google' ? bG : bF));
     const sinCuenta = () => app.iniciarSesion({ proveedor: 'demo', id: 'local', nombre: '', email: '' });
@@ -5841,7 +6828,7 @@
     let vista;
     async function intentarHuella() {
       const r = await Sg().abrirConHuella(ns, N().secretosHuella);
-      if (r.ok) await app.entrar();
+      if (r.ok && !app.abierta) await app.entrar();
     }
     async function enEspera() {
       const e = await Sg().estadoIntentos(ns);
@@ -5853,7 +6840,7 @@
       pie: [h('button', { class: 'btn-texto', type: 'button', onclick: () => olvidePin() }, '¿Olvidaste tu PIN?')],
       alCompletar: async (pin) => {
         const r = await Sg().abrirConPin(ns, pin);
-        if (r.ok) { await app.entrar(); return { ok: true }; }
+        if (r.ok) { if (N().secretosHuella.cancelar) N().secretosHuella.cancelar(); if (!app.abierta) await app.entrar(); return { ok: true }; }
         if (r.motivo === 'espera') return { ok: false, mensaje: 'Demasiados intentos. Espera ' + r.espera + ' s.' };
         return { ok: false, mensaje: 'PIN incorrecto. Te quedan ' + r.restantes + ' intentos.' };
       },
@@ -5878,7 +6865,28 @@
     });
   }
 
-  V.acceso = { portada, bienvenida, ofrecerHuella, bloqueo, pantallaPin, formCobro, cobroListo, textoCobro, elegirPais, paisDelTelefono, campoDinero };
+  // ¿Eres tú? Pide la huella (si está activa) o el PIN sin salir de lo que estás viendo (para ver los montos ocultos). Promise<boolean>
+  async function confirmarIdentidad(motivo) {
+    const app = AF.app, ns = app.ns;
+    if (!(await Sg().tienePin(ns))) return true;
+    const conHuella = (await Sg().huellaActiva(ns)) && (await N().huellaDisponible());
+    if (conHuella) { try { const r = await Sg().abrirConHuella(ns, N().secretosHuella); if (r.ok) return true; } catch (e) { /* se pide el PIN */ } }
+    const len = await Sg().longitudPin(ns);
+    return new Promise((res) => {
+      let api = null, listo = false;
+      const fin = (v) => { if (listo) return; listo = true; res(v); if (api) api.cerrar(); };
+      const vista = pantallaPin({ titulo: 'Confirma que eres tú', sub: motivo || 'Escribe tu PIN.', len,
+        huella: conHuella ? async () => { try { const r = await Sg().abrirConHuella(ns, N().secretosHuella); if (r.ok) fin(true); } catch (e) { /* sigue el PIN */ } } : null,
+        alCompletar: async (pin) => {
+          const r = await Sg().abrirConPin(ns, pin);
+          if (r.ok) { if (N().secretosHuella.cancelar) N().secretosHuella.cancelar(); setTimeout(() => fin(true), 60); return { ok: true }; }
+          if (r.motivo === 'espera') return { ok: false, mensaje: 'Demasiados intentos. Espera ' + r.espera + ' s.' };
+          return { ok: false, mensaje: 'PIN incorrecto. Te quedan ' + r.restantes + ' intentos.' };
+        } });
+      api = hoja({ cuerpo: vista.el, alCerrar: () => { if (!listo) { listo = true; res(false); } } });
+    });
+  }
+  V.acceso = { confirmarIdentidad, portada, bienvenida, ofrecerHuella, bloqueo, pantallaPin, formCobro, cobroListo, textoCobro, elegirPais, paisDelTelefono, campoDinero };
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
 
@@ -5927,17 +6935,55 @@
         const dias = p.dias === 1 ? 'Mañana es tu cobro' : 'Faltan ' + p.dias + ' días';
     const datos = [['entra', 'subir', 'Entró', $(p.ingresos)], ['sale', 'baja', 'Salió', $(p.gastado)]];
     if (p.apartado > 0) datos.push(['guarda', 'ahorro', 'Apartado', $(p.apartado)]);
+    // C19: la cifra grande se achica según su largo (pesos colombianos, chilenos…) y los datos de abajo pasan a otra fila si no caben
+    const cifra = sinDinero ? '−' + $(-p.resto) : $(resto);
+    const largo = Math.max.apply(null, datos.map((x) => x[3].length));
     cont.appendChild(h('div', { class: 'hero-card' },
       h('div', { class: 'hero-fila' },
-        h('div', { class: 'hero-etiqueta' }, sinDinero ? 'Ya no te queda dinero' : 'Te queda'),
+        h('div', { class: 'hero-etiqueta', estilo: { display: 'flex', alignItems: 'center', gap: '8px' } }, sinDinero ? 'Ya no te queda dinero' : 'Te queda', AF.app.botonOjo ? AF.app.botonOjo() : null),
         p.modo === 'variable' ? null : h('span', { class: 'hero-pildora' }, ico('calendario'), dias)),
-      h('div', { class: 'hero-cifra' + (sinDinero ? ' pasado' : ''), 'aria-live': 'polite' }, h('span', { class: 'cambio-cifra' }, sinDinero ? '−' + $(-p.resto) : $(resto))),
+      h('div', { class: 'hero-cifra' + (sinDinero ? ' pasado' : ''), 'aria-live': 'polite', style: '--n:' + cifra.length }, h('span', { class: 'cambio-cifra' }, cifra)),
+      compararAnterior(D, hoy, p),
       h('div', { class: 'hero-meta' }, sinDinero ? 'Usaste ' + $(p.gastado + p.apartado) + ' de ' + $(p.ingresos) + '. Tu cobro: ' + p.etiqueta.replace(/^el /, '') + '.' : (p.modo === 'variable' ? 'Hasta fin de mes · usaste ' + Math.round(usado * 100) + ' %' : 'Hasta tu cobro ' + p.etiqueta.replace(/^el /, 'del ') + ' · usaste ' + Math.round(usado * 100) + ' %')),
       h('div', { class: 'hero-barra' + (usado > 0.85 ? ' alerta' : ''), role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(usado * 100), 'aria-label': 'Parte del ingreso ya usada' }, h('i', { estilo: { width: Math.round(usado * 100) + '%' } })),
-      h('div', { class: 'hero-datos', style: '--cols:' + datos.length }, datos.map(([cls, icono, t, v]) => h('div', { class: 'hero-dato' },
+      h('div', { class: 'hero-datos', style: '--cols:' + datos.length + ';--min:' + Math.round(40 + largo * 7.6) + 'px' }, datos.map(([cls, icono, t, v]) => h('div', { class: 'hero-dato' },
         h('span', { class: 'hero-dato-ico ' + cls }, ico(icono)),
         h('div', { estilo: { minWidth: 0 } }, h('div', { class: 'hero-dato-etq' }, t), h('div', { class: 'hero-dato-val' }, v)))))));
+    // «Entró» con el sueldo estimado: se dice claro (antes el estimado desaparecía al anotar un ingreso extra)
+    if (p.estimado && p.sueldoEstimado) cont.appendChild(h('p', { class: 'texto-sm suave', estilo: { margin: '8px 4px 0' } }, 'En «Entró» cuento tu sueldo de ' + $(p.sueldoEstimado) + ' como estimado' + (p.ingresosReales ? ' + ' + $(p.ingresosReales) + ' que anotaste' : '') + ', hasta que registres tu cobro.'));
     return cont;
+  }
+
+  // Tarjetas con compras pero sin día de corte/pago: es deuda (no salió de tu efectivo) y falta saber cuándo se paga.
+  // U1 (c): va con los demás avisos, debajo del tablero (antes quedaba entre la tarjeta principal y el micrófono).
+  function tarjetasSinFechas(D, hoy) {
+    const lista = AF.informes.puedesGastarHoy(D, hoy).tarjetasSinFechas || [];
+    if (!lista.length) return null;
+    return h('div', { estilo: { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px' } }, lista.map((x) => {
+      const t = AF.store.buscar('tarjetas', x.id);
+      return h('div', { class: 'nota' }, ico('info'), h('div', null,
+        h('span', null, 'Debes ' + $(x.deuda) + ' en ' + x.nombre + ', pero falta su día de corte y de pago: no sé cuándo te toca pagar. '),
+        t && V.tarjetas && V.tarjetas.formTarjeta ? h('button', { class: 'enlace', type: 'button', onclick: () => V.tarjetas.formTarjeta(t) }, 'Ponerlos') : null));
+    }));
+  }
+
+  // U1 (b): como en las maquetas, «vs. el mes anterior»: lo que salió de tu bolsillo hasta hoy, contra lo que salió en el ciclo
+  // anterior hasta el mismo día. Solo si el ciclo anterior tiene datos (nunca se inventa).
+  function compararAnterior(D, hoy, p) {
+    if (!p.inicio || p.inicio > hoy) return null;
+    const prev = AF.informes.ciclo(D, U.sumarDias(p.inicio, -1));
+    if (!prev.inicio || prev.inicio >= p.inicio) return null;
+    // C32: si empezó a anotar a mitad del mes pasado, la comparación no dice nada (una semana contra medio mes)
+    const primero = D.movs.reduce((a, m) => (m.fecha && (!a || m.fecha < a) ? m.fecha : a), null);
+    if (!primero || primero > U.sumarDias(prev.inicio, 3)) return null;
+    const hasta = U.sumarDias(prev.inicio, U.diasEntre(p.inicio, hoy));
+    const fin = hasta < p.inicio ? hasta : U.sumarDias(p.inicio, -1);
+    const salio = (a, b) => D.movs.filter((m) => m.fecha >= a && m.fecha <= b && ((m.tipo === 'gasto' && m.cuenta !== 'tarjeta') || (m.tipo === 'pago_tarjeta' && !m.reembolso))).reduce((x, m) => x + m.monto, 0);
+    const antes = salio(prev.inicio, fin), ahora = salio(p.inicio, hoy);
+    if (antes <= 0) return null;
+    const dif = (ahora - antes) / antes, pct = Math.round(Math.abs(dif) * 100);
+    const menos = dif < 0;
+    return h('div', { class: 'hero-comparar ' + (pct === 0 ? '' : menos ? 'bien' : 'mal') }, pct === 0 ? '= Igual que el mes pasado a esta fecha' : (menos ? '↓ ' : '↑ ') + pct + ' % ' + (menos ? 'menos' : 'más') + ' que el mes pasado a esta fecha');
   }
 
   /* ------------------------------------------------------------------ escribir o dictar */
@@ -5999,77 +7045,101 @@
       } }, { texto: 'Ahora no', clase: 'btn-borde', onclick: () => {} }] });
   }
 
-  /* --------------------------------------------------------------- gastos del mes (anillo) */
-  // El total es TODO lo que compraste en el mes: el mismo «Gastos» que ves en Movimientos.
-  function gastosDelMes(D, hoy) {
-    const r = AF.informes.resumenMes(D, U.inicioMes(hoy), U.finMes(hoy));
-    if (!r.gastos) return null;
-    const paleta = PLAN.apariencia.paleta;
-    const top = r.porCategoria.slice(0, 4).map((x, i) => ({ nombre: x.cat.nombre, valor: x.total, color: colorOk(x.cat.color) || paleta[i % paleta.length] }));
-    const resto = r2(r.gastos - top.reduce((s, x) => s + x.valor, 0));
-    if (resto > 0.004) top.push({ nombre: 'Otros', valor: resto, color: paleta[9] });
-    const R = 52, L = 2 * Math.PI * R;
-    let acum = 0;
-    const arcos = top.map((x) => { const largo = Math.max(0, (x.valor / r.gastos) * L); const s = '<circle cx="66" cy="66" r="' + R + '" fill="none" stroke="' + x.color + '" stroke-width="15" stroke-dasharray="' + Math.max(0, largo - 2).toFixed(2) + ' ' + (L - Math.max(0, largo - 2)).toFixed(2) + '" stroke-dashoffset="' + (-acum).toFixed(2) + '" transform="rotate(-90 66 66)"/>'; acum += largo; return s; }).join('');
-    const svg = g.document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 132 132'); svg.setAttribute('class', 'dona'); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', 'Gastos del mes por categoría');
-    svg.innerHTML = '<circle cx="66" cy="66" r="' + R + '" fill="none" stroke="var(--panel-suave)" stroke-width="15"/>' + arcos;
-    const t1 = g.document.createElementNS('http://www.w3.org/2000/svg', 'text'); t1.setAttribute('x', '66'); t1.setAttribute('y', '66'); t1.setAttribute('text-anchor', 'middle'); t1.setAttribute('class', 'dona-centro-valor'); t1.textContent = $(r.gastos);
-    const t2 = g.document.createElementNS('http://www.w3.org/2000/svg', 'text'); t2.setAttribute('x', '66'); t2.setAttribute('y', '82'); t2.setAttribute('text-anchor', 'middle'); t2.setAttribute('class', 'dona-centro-etq'); t2.textContent = 'gastos';
-    svg.appendChild(t1); svg.appendChild(t2);
-    t1.setAttribute('font-size', r.gastos >= 100000 ? '15' : '19');
-    return h('section', { class: 'seccion' },
-      h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Gastos de ' + U.nombreMes(hoy)), h('button', { class: 'enlace', type: 'button', onclick: () => AF.app.ir('movimientos', { periodo: 'mes', vista: 'categorias', tipo: 'gasto' }) }, 'Ver detalle', ico('adelante'))),
-      h('div', { class: 'tarjeta' },
-        r.conTarjeta > 0 ? h('p', { class: 'texto-xs suave', estilo: { marginBottom: '12px' } }, 'Incluye ' + $(r.conTarjeta) + ' con tarjeta, que se paga después' + (r.pagosTarjeta ? ' (ya pagaste ' + $(r.pagosTarjeta) + ' a tu tarjeta). Por eso arriba «Salió» es menos.' : '. Por eso arriba «Salió» es menos.')) : null,
-        h('div', { class: 'dona-caja' }, svg,
-          h('ul', { class: 'dona-leyenda' }, top.map((x) => h('li', null, h('i', { estilo: { background: x.color } }), h('span', { class: 'nombre' }, x.nombre), h('span', { class: 'pct' }, Math.round((x.valor / r.gastos) * 100) + ' %'))))),
-        revisarOtros()));
-  }
   const r2 = (n) => U.r2(n);
 
-  /* --------------------------------------------------------------- ingresos vs gastos (últimos 6 meses) */
-  // Solo con datos reales: sin ningún ingreso ni gasto en esos meses, no se muestra.
-  function ingresosVsGastos(D, hoy) {
-    const serie = AF.informes.serieMensual(D, hoy, 6);
-    const max = Math.max.apply(null, serie.map((x) => Math.max(x.ingresos, x.gastos)));
-    if (!max) return null;
-    const alto = (v) => (v > 0 ? Math.max(4, Math.round((v / max) * 100)) : 0) + '%';
-    const actual = serie[serie.length - 1];
-    return h('section', { class: 'seccion' },
-      h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Ingresos vs gastos'), h('button', { class: 'enlace', type: 'button', onclick: () => AF.app.abrir('Resumen', (c) => V.informesUI.resumen(c)) }, 'Ver más', ico('adelante'))),
-      h('div', { class: 'tarjeta' },
-        h('div', { class: 'leyenda', estilo: { marginTop: '0', marginBottom: '12px' } },
-          h('span', null, h('i', { estilo: { background: 'var(--ingreso)' } }), 'Ingresos ' + $(actual.ingresos)),
-          h('span', null, h('i', { estilo: { background: 'var(--gasto)' } }), 'Gastos ' + $(actual.gastos))),
-        h('div', { class: 'barra-vertical', role: 'img', 'aria-label': 'Ingresos y gastos de los últimos seis meses' }, serie.map((x) => h('button', { class: 'col-mes', type: 'button', 'aria-label': x.etiqueta + ': ingresos ' + $(x.ingresos) + ', gastos ' + $(x.gastos), onclick: () => V.movimientos.irAMes(x.mes + '-01') },
-          h('div', { class: 'par' }, h('i', { class: 'i', estilo: { height: alto(x.ingresos) } }), h('i', { class: 'g', estilo: { height: alto(x.gastos) } })), h('small', null, x.etiqueta))))));
+  /* --------------------------------------------------------------- tablero en dos columnas (U1 a, como las maquetas) */
+  // Gastos del mes (anillo chico) | Meta de ahorro, y Últimos movimientos | Ingresos vs gastos. Cada tarjeta lleva a su pantalla completa.
+  function anillo(r, tam) {
+    const paleta = PLAN.apariencia.paleta;
+    // cada categoría con su color, salvo que se parezca demasiado a uno ya usado en el anillo (Tecnología, Vivienda y Ropa son
+    // azules): entonces toma el primer color de la paleta que se distinga, para que la leyenda se pueda leer
+    const rgb = (c) => { c = c.replace('#', ''); if (c.length === 3) c = c.split('').map((x) => x + x).join(''); return [0, 2, 4].map((k) => parseInt(c.substr(k, 2), 16)); };
+    const lejos = (a, b) => { const x = rgb(a), y = rgb(b); return Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]) > 110; };
+    const usados = [];
+    const top = r.porCategoria.slice(0, 3).map((x, i) => {
+      let color = colorOk(x.cat.color) || paleta[i % paleta.length];
+      if (!usados.every((u) => lejos(u, color))) color = paleta.find((c) => usados.every((u) => lejos(u, c))) || color;
+      usados.push(color);
+      return { nombre: x.cat.nombre, valor: x.total, color };
+    });
+    const resto = r2(r.gastos - top.reduce((x, y) => x + y.valor, 0));
+    if (resto > 0.004) top.push({ nombre: 'Otros', valor: resto, color: paleta[9] });
+    const R = 52, L = 2 * Math.PI * R; let acum = 0;
+    const arcos = top.map((x) => { const largo = Math.max(0, (x.valor / r.gastos) * L); const t = '<circle cx="66" cy="66" r="' + R + '" fill="none" stroke="' + x.color + '" stroke-width="18" stroke-dasharray="' + Math.max(0, largo - 2).toFixed(2) + ' ' + (L - Math.max(0, largo - 2)).toFixed(2) + '" stroke-dashoffset="' + (-acum).toFixed(2) + '" transform="rotate(-90 66 66)"/>'; acum += largo; return t; }).join('');
+    const svg = g.document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 132 132'); svg.setAttribute('width', tam); svg.setAttribute('height', tam); svg.setAttribute('class', 'anillo-mini'); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', 'Gastos por categoría');
+    svg.innerHTML = '<circle cx="66" cy="66" r="' + R + '" fill="none" stroke="var(--panel-suave)" stroke-width="18"/>' + arcos;
+    return { svg, top };
   }
-
-  /* --------------------------------------------------------------- meta de ahorro y límite de gasto */
-  function metaYLimite(D, hoy) {
-    const cajas = [];
+  function miniGastos(D, hoy, r) {
+    if (!r.gastos) return null;
+    const { svg, top } = anillo(r, 52);
+    return h('button', { class: 'tarjeta mini-tarjeta', type: 'button', onclick: () => AF.app.ir('movimientos', { periodo: 'mes', vista: 'categorias', tipo: 'gasto' }) },
+      h('div', { class: 'h3' }, 'Gastos del mes', ico('adelante', 'chico')),
+      h('div', { class: 'mini-cifra chica' }, $(r.gastos)),
+      h('div', { class: 'mini-anillo' }, svg, h('ul', { class: 'mini-leyenda' }, top.slice(0, 3).map((x) => h('li', { title: x.nombre }, h('i', { estilo: { background: x.color } }), h('span', null, x.nombre + ' ', h('b', null, Math.round((x.valor / r.gastos) * 100) + ' %')))))),
+      r.conTarjeta > 0 ? h('div', { class: 'mini-sub' }, 'Incluye ' + $(r.conTarjeta) + ' con tarjeta') : null);
+  }
+  function miniMeta(D, hoy) {
     const metas = D.metas.map((m) => ({ m, a: V.finanzas.ahorrado(m) })).map((x) => Object.assign(x, { pct: x.m.objetivo ? x.a / x.m.objetivo : 0 }));
     const meta = metas.filter((x) => x.pct < 1).sort((a, b) => b.pct - a.pct)[0] || metas[0];
-    if (meta) {
-      cajas.push(h('button', { class: 'tarjeta', type: 'button', estilo: { width: '100%', textAlign: 'left' }, onclick: () => AF.app.abrir('Metas', (c) => V.finanzas.metas(c)) },
-        h('div', { class: 'bloque-fila' }, h('div', { class: 'ico' }, meta.m.icono || '🏁'),
-          h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, meta.m.nombre), h('div', { class: 'fila-sub' }, 'Meta de ahorro · ' + $(meta.a) + ' de ' + $(meta.m.objetivo))),
-          h('span', { class: 'monto' }, Math.round(meta.pct * 100) + ' %')),
-        h('div', { class: 'progreso ' + (meta.pct >= 1 ? 'ok' : ''), estilo: { marginTop: '12px' }, role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(Math.min(1, meta.pct) * 100) }, h('i', { estilo: { width: Math.min(1, meta.pct) * 100 + '%' } }))));
+    if (!meta) {
+      return h('button', { class: 'tarjeta mini-tarjeta', type: 'button', onclick: () => AF.app.abrir('Metas', (c) => V.finanzas.metas(c)) },
+        h('div', { class: 'h3' }, 'Meta de ahorro', ico('adelante', 'chico')), h('div', { class: 'mini-sub' }, 'Ahorra para algo concreto: una moto, un viaje, tu fondo de emergencia.'), h('div', { class: 'enlace', estilo: { marginTop: 'auto' } }, 'Crear una meta'));
     }
+    const pct = Math.min(1, meta.pct);
+    return h('button', { class: 'tarjeta mini-tarjeta', type: 'button', onclick: () => AF.app.abrir('Metas', (c) => V.finanzas.metas(c)) },
+      h('div', { class: 'h3' }, 'Meta de ahorro', ico('adelante', 'chico')),
+      h('div', { class: 'mini-titulo' }, (meta.m.icono ? meta.m.icono + ' ' : '') + meta.m.nombre),
+      h('div', { class: 'mini-cifra chica' }, $(meta.a), meta.m.objetivo ? h('span', { class: 'mini-de' }, ' / ' + $(meta.m.objetivo)) : null),
+      meta.m.objetivo && meta.pct < 1 ? h('div', { class: 'mini-sub' }, 'Te faltan ' + $(r2(meta.m.objetivo - meta.a))) : null,
+      meta.m.objetivo ? h('div', { class: 'mini-progreso' }, h('div', { class: 'progreso ' + (meta.pct >= 1 ? 'ok' : ''), role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(pct * 100) }, h('i', { estilo: { width: pct * 100 + '%' } })), h('b', null, Math.round(meta.pct * 100) + ' %'))
+        : h('div', { class: 'mini-sub' }, 'Ponle cuánto quieres juntar'));
+  }
+  const cuandoFue = (f, hoy) => (f === hoy ? 'Hoy' : f === U.sumarDias(hoy, -1) ? 'Ayer' : U.deISO(f).getDate() + ' ' + U.nombreMes(f).slice(0, 3));
+  function miniUltimos(D, hoy) {
+    const movs = D.movs.slice().sort((a, b) => (b.fecha === a.fecha ? b.creado - a.creado : b.fecha < a.fecha ? -1 : 1)).slice(0, 3);
+    if (!movs.length) return null;
+    const signo = (m) => (m.tipo === 'ingreso' ? '+' : m.tipo === 'pago_tarjeta' && m.reembolso ? '↩ ' : '−');
+    const clase = (m) => (m.tipo === 'ingreso' ? 'ingreso' : m.tipo === 'gasto' ? 'gasto' : '');
+    return h('div', { class: 'tarjeta mini-tarjeta' },
+      h('button', { class: 'h3 mini-cabeza', type: 'button', onclick: () => AF.app.ir('movimientos') }, 'Últimos', h('span', { class: 'enlace' }, 'Ver todos')),
+      h('ul', { class: 'mini-movs' }, movs.map((m) => h('li', null, h('button', { type: 'button', onclick: () => C().editarMov(m) },
+        h('span', { class: 'mini-mov-nombre' }, m.desc || (m.tipo === 'pago_tarjeta' ? 'Pago de tarjeta' : AF.store.categoria(m.cat).nombre), h('small', null, cuandoFue(m.fecha, hoy))),
+        h('span', { class: 'mini-mov-monto ' + clase(m) }, signo(m) + $(m.monto)))))));
+  }
+  function miniIngresosGastos(D, hoy) {
+    // C20: solo los meses desde que la persona empezó a anotar (nada de rayitas en meses vacíos)
+    const primero = D.movs.reduce((a, m) => (m.fecha && (!a || m.fecha < a) ? m.fecha : a), null);
+    const serie = AF.informes.serieMensual(D, hoy, 3).filter((x, i, l) => i === l.length - 1 || (primero && x.mes >= primero.slice(0, 7)));
+    const max = Math.max.apply(null, serie.map((x) => Math.max(x.ingresos, x.gastos)));
+    if (!max) return null;
+    const alto = (v) => (v > 0 ? Math.max(6, Math.round((v / max) * 100)) : 0) + '%';
+    const barra = (cls, v) => (v > 0 ? h('i', { class: cls, estilo: { height: alto(v) } }) : h('i', { class: cls + ' cero', 'aria-hidden': 'true' }));
+    const actual = serie[serie.length - 1];
+    return h('button', { class: 'tarjeta mini-tarjeta', type: 'button', onclick: () => AF.app.abrir('Resumen', (c) => V.informesUI.resumen(c)) },
+      h('div', { class: 'h3' }, 'Ingresos y gastos', ico('adelante', 'chico')),
+      h('div', { class: 'mini-barras', role: 'img', 'aria-label': serie.length === 1 ? 'Ingresos y gastos de este mes' : 'Ingresos y gastos de los últimos ' + serie.length + ' meses' }, serie.map((x) => h('div', { class: 'col-mes' }, h('div', { class: 'par' }, barra('i', x.ingresos), barra('g', x.gastos)), h('small', null, x.etiqueta)))),
+      h('div', { class: 'mini-sub' }, h('span', { class: 'punto i' }), 'Entró ' + $(actual.ingresos), h('br'), h('span', { class: 'punto g' }), 'Gastos ' + $(actual.gastos)));
+  }
+  function limiteFila(D, hoy) {
     const pres = AF.informes.presupuestos(D, hoy).sort((a, b) => b.pct - a.pct)[0];
-    if (pres) {
-      const nivel = pres.nivel === 'detente' ? 'alto' : pres.nivel === 'aviso' ? 'aviso' : '';
-      cajas.push(h('button', { class: 'tarjeta', type: 'button', estilo: { width: '100%', textAlign: 'left' }, onclick: () => AF.app.abrir('Límites de gasto', (c) => V.finanzas.presupuestos(c)) },
-        h('div', { class: 'bloque-fila' }, h('div', { class: 'ico' }, pres.cat ? AF.store.categoria(pres.cat).icono : '🎯'),
-          h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, pres.nombre), h('div', { class: 'fila-sub' }, 'Límite · ' + $(pres.gastado) + ' de ' + $(pres.monto) + ' este mes')),
-          h('span', { class: 'monto' }, Math.round(pres.pct * 100) + ' %')),
-        h('div', { class: 'progreso ' + nivel, estilo: { marginTop: '12px' }, role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(Math.min(1, pres.pct) * 100) }, h('i', { estilo: { width: Math.min(1, pres.pct) * 100 + '%' } })),
-        h('div', { class: 'texto-xs suave', estilo: { marginTop: '8px' } }, pres.queda >= 0 ? 'Te quedan ' + $(pres.queda) : 'Te pasaste ' + $(-pres.queda))));
-    }
-    if (!cajas.length) return null;
-    return h('section', { class: 'seccion' }, h('div', { estilo: { display: 'flex', flexDirection: 'column', gap: '12px' } }, cajas));
+    if (!pres) return null;
+    const nivel = pres.nivel === 'detente' ? 'alto' : pres.nivel === 'aviso' ? 'aviso' : '';
+    return h('section', { class: 'seccion' }, h('button', { class: 'tarjeta', type: 'button', estilo: { width: '100%', textAlign: 'left' }, onclick: () => AF.app.abrir('Límites de gasto', (c) => V.finanzas.presupuestos(c)) },
+      h('div', { class: 'bloque-fila' }, h('div', { class: 'ico' }, pres.cat ? AF.store.categoria(pres.cat).icono : '🎯'),
+        h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, 'Límite: ' + pres.nombre.toLowerCase()), h('div', { class: 'fila-sub envuelve' }, $(pres.gastado) + ' de ' + $(pres.monto) + ' este mes · ' + (pres.queda >= 0 ? 'te quedan ' + $(pres.queda) : 'te pasaste ' + $(-pres.queda)))),
+        h('span', { class: 'monto' }, Math.round(pres.pct * 100) + ' %')),
+      h('div', { class: 'progreso ' + nivel, estilo: { marginTop: '10px' }, role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(Math.min(1, pres.pct) * 100) }, h('i', { estilo: { width: Math.min(1, pres.pct) * 100 + '%' } }))));
+  }
+  function tablero(D, hoy) {
+    if (!D.movs.length) return null;
+    const r = AF.informes.resumenMes(D, U.inicioMes(hoy), U.finMes(hoy));
+    const filas = [[miniGastos(D, hoy, r), miniMeta(D, hoy)], [miniUltimos(D, hoy), miniIngresosGastos(D, hoy)]]
+      .map((f) => f.filter(Boolean)).filter((f) => f.length)
+      .map((f) => h('div', { class: f.length === 2 ? 'dos-columnas tablero-fila' : 'tablero-fila' }, f));
+    if (!filas.length) return null;
+    return h('section', { class: 'seccion tablero', 'aria-label': 'Resumen del mes' }, filas, revisarOtros());
   }
 
   /* --------------------------------------------------------------- innecesarios y tarjetas, lado a lado */
@@ -6121,6 +7191,19 @@
       h('span', { class: 'ico' }, ico('corona')), h('span', { estilo: { flex: 1 } }, h('strong', null, txt), h('span', null, 'Mira qué incluye Pro')), ico('adelante', 'chico')));
   }
 
+  // U4: estando «sin cuenta», un aviso para iniciar sesión (se puede cerrar; la opción sigue en Más)
+  function avisoSinCuenta(D) {
+    if (!(V.cuenta && V.cuenta.esSinCuenta()) || D.ajustes.avisoCuentaCerrado) return null;
+    const provs = PLAN.sesion.proveedores.filter((p) => AF.nativo.proveedorListo(p));
+    if (!provs.length) return null;
+    const p = provs[0], nombre = p === 'google' ? 'Google' : 'Facebook';
+    return h('div', { class: 'nota info', estilo: { marginTop: '16px', alignItems: 'flex-start' } }, ico('info'), h('div', { estilo: { flex: '1' } },
+      h('div', null, h('strong', null, 'Estás sin cuenta. '), 'Tus datos solo están en este teléfono: si lo pierdes o borras la app, se pierden.'),
+      h('div', { estilo: { display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' } },
+        h('button', { class: 'btn btn-primario', type: 'button', estilo: { minHeight: '40px', padding: '0 14px' }, onclick: () => V.cuenta.iniciarDesdeSinCuenta(p) }, 'Iniciar sesión con ' + nombre),
+        h('button', { class: 'btn-texto', type: 'button', onclick: () => AF.store.ajustar({ avisoCuentaCerrado: true }) }, 'Ahora no'))));
+  }
+
   function render(cont) {
     const D = AF.store.d, hoy = AF.app.hoy();
     cont.appendChild(cabecera(D));
@@ -6128,7 +7211,9 @@
     cont.appendChild(dictar());
     const cuerpo = h('div', { class: 'contenido' });
     cuerpo.appendChild(atajos());
-    [porRevisar(), avisos(D, hoy), V.ahorro ? V.ahorro.tarjetaInicio(D, hoy) : null, gastosDelMes(D, hoy), ingresosVsGastos(D, hoy), resumenesChicos(D, hoy), metaYLimite(D, hoy), ultimos(D, hoy), pro()].forEach((s) => s && cuerpo.appendChild(s));
+    // U1: como las maquetas: primero el tablero (gastos, meta, últimos, ingresos vs gastos), después los avisos
+    const hayMovs = D.movs.length > 0;
+    [porRevisar(), tablero(D, hoy), resumenesChicos(D, hoy), limiteFila(D, hoy), tarjetasSinFechas(D, hoy), avisos(D, hoy), avisoSinCuenta(D), V.ahorro ? V.ahorro.tarjetaInicio(D, hoy) : null, hayMovs ? null : ultimos(D, hoy), pro()].forEach((s) => s && cuerpo.appendChild(s));
     cuerpo.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '22px', textAlign: 'center' } }, PLAN.app.avisoLegal));
     cont.appendChild(cuerpo);
   }
@@ -6147,13 +7232,14 @@
   const U = AF.util, PLAN = AF.PLAN;
   const V = (AF.vistas = AF.vistas || {});
   const d = g.document;
-  const $ = (n) => U.dinero(n);
+  const $ = (n) => U.dinero(n);                          // saldos y respuestas: respetan «Ocultar mis montos»
+  const $d = (n) => U.dinero(n, { siempre: true });      // lo que la persona ACABA de dictar: se ve siempre, para que pueda revisarlo antes de guardar
   const S = () => AF.store, N = () => AF.nativo, C = () => V.comun;
 
   let capa = null, telon = null, escucha = null, vivo = false;
 
-  const ctx = () => ({ hoy: AF.app.hoy(), categorias: S().categorias(), dicc: S().d.diccionario, tarjetas: S().d.tarjetas, bancos: AF.bancos ? AF.bancos.lista(S().d.ajustes.pais) : [] });
-  const hablar = (t) => { if (S().d.ajustes.respuestaVoz) N().hablar(t); };
+  const ctx = () => ({ hoy: AF.app.hoy(), categorias: S().categorias(), dicc: S().d.diccionario, tarjetas: S().d.tarjetas, metas: S().d.metas, sueldo: S().d.ajustes.sueldo || null, pais: S().d.ajustes.pais, moneda: S().d.ajustes.moneda, bancos: AF.bancos ? AF.bancos.lista(S().d.ajustes.pais) : [] });
+  const hablar = (t) => { if (S().d.ajustes.respuestaVoz) N().hablar(String(t).replace(/\S*••••\S*/g, 'una cifra oculta')); };
   const fechaBonita = (iso) => U.deISO(iso).getDate() + ' de ' + U.nombreMes(iso);
 
   /* ------------------------------------------------------------- diálogos pequeños */
@@ -6196,6 +7282,7 @@
     telon = h('div', { class: 'telon', onclick: cerrar });
     capa = h('div', { class: 'voz', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Asistente' });
     const raiz = d.getElementById('app'); raiz.appendChild(telon); raiz.appendChild(capa); vivo = true;
+    AF.ui.deslizarParaCerrar(capa, cerrar);              // se cierra deslizando hacia abajo, como las demás ventanas
     return capa;
   }
   function cerrar() {
@@ -6206,8 +7293,10 @@
     if (telon) { telon.remove(); telon = null; }
   }
   const cabeza = (izq) => h('div', { class: 'voz-cabeza' }, h('div', { class: 'suave' }, izq || ''), h('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Cerrar', onclick: cerrar }, ico('cerrar')));
+  let pantallaN = 0;          // cambia cada vez que se pinta otra pantalla (C12)
   function pintar(partes) {
     if (!capa) return;
+    pantallaN++;
     AF.ui.vaciar(capa);
     capa.appendChild(h('div', { class: 'hoja-asa', estilo: { marginTop: '10px', marginBottom: '0' } }));
     partes.forEach((p) => p && capa.appendChild(p));
@@ -6224,9 +7313,10 @@
     let ultimo = '', tSilencio = 0, tInicial = 0, tMax = 0;
     const trans = h('p', { class: 'transcripcion', 'aria-live': 'polite' }, h('span', { class: 'tenue' }, 'Te escucho. Di lo que gastaste o pregúntame algo.'));
     const estado = h('div', { class: 'escucha' }, h('span', { class: 'punto-escucha', 'aria-hidden': 'true' }), h('span', { class: 'voz-estado' }, 'Escuchando…'));
-    const terminarYa = () => { if (escucha) escucha.parar(); };
+    const anotar = (ev, dd) => { if (N().anotarVoz) N().anotarVoz(ev, dd); };
+    const terminarYa = (porque) => { anotar('app_termina', typeof porque === 'string' ? porque : 'boton'); if (escucha) escucha.parar(); };
     pintar([cabeza('Hablar'), h('div', { class: 'voz-cuerpo' }, estado, trans),
-      h('div', { class: 'voz-pie' }, h('button', { class: 'mic-grande escuchando', type: 'button', 'aria-label': 'Terminar', onclick: terminarYa }, ico('mic')),
+      h('div', { class: 'voz-pie' }, h('button', { class: 'mic-grande escuchando', type: 'button', 'aria-label': 'Terminar', onclick: () => terminarYa('boton') }, ico('mic')),
         h('p', { class: 'texto-xs suave', estilo: { textAlign: 'center' } }, 'Cuando termines de hablar, se cierra solo. O toca el micrófono.'),
         btnTxt('Prefiero escribir', () => { escribir(ultimo); }))]);
     const limpiar = () => { clearTimeout(tSilencio); clearTimeout(tInicial); clearTimeout(tMax); };
@@ -6234,20 +7324,22 @@
       const e = await N().escuchar((t) => {
         ultimo = t; AF.ui.vaciar(trans); trans.appendChild(d.createTextNode(t));
         clearTimeout(tInicial); clearTimeout(tSilencio);
-        tSilencio = setTimeout(terminarYa, (PLAN.voz.silencioSeg || 2.5) * 1000);
+        tSilencio = setTimeout(() => terminarYa('silencio'), (PLAN.voz.silencioSeg || 2.5) * 1000);
       });
       escucha = e;
-      tInicial = setTimeout(terminarYa, (PLAN.voz.esperaInicialSeg || 12) * 1000);
-      tMax = setTimeout(terminarYa, (PLAN.voz.maximoSeg || 60) * 1000);
+      tInicial = setTimeout(() => terminarYa('nadie_hablo'), (PLAN.voz.esperaInicialSeg || 12) * 1000);
+      tMax = setTimeout(() => terminarYa('tiempo_maximo'), (PLAN.voz.maximoSeg || 60) * 1000);
       const final = await e.terminado;
       limpiar();
-      if (escucha !== e) return;
+      if (escucha !== e) { anotar('app_ignora', 'otra_escucha'); return; }
       escucha = null;
-      if (!vivo) return;
-      if (!final || !final.trim()) return sinAudio();
+      if (!vivo) { anotar('app_ignora', 'ventana_cerrada'); return; }
+      if (!final || !final.trim()) { anotar('app_no_oyo'); return sinAudio(); }
+      anotar('app_procesa', final.trim().length);
       procesar(final.trim());
     } catch (er) {
       limpiar(); escucha = null;
+      anotar('app_error', er && (er.codigo || er.message));
       if (!vivo) return;
       sinAudio(er && er.message);
     }
@@ -6291,50 +7383,164 @@
       case 'presupuesto': return vistaPresupuesto(r, texto);
       case 'informe': cerrar(); return V.informesUI.abrir({ formato: r.formato, periodo: r.periodo });
       case 'pantalla': cerrar(); return V.ahorro.abrirPantalla(r.pantalla);
+      case 'crear_meta': return vistaCrearMeta(r, texto);
       case 'ayuda': return vistaAyuda();
-      case 'nada': return vistaNada(texto);
+      case 'nada': return vistaNada(texto, r);
       default: return vistaNoEntendi(texto);
     }
   }
 
   /* ------------------------------------------------------------------------- nada */
   // «No gasté nada hoy», «aún no me pagan»: no hay nada que anotar, y la app lo dice en vez de pedir un monto.
-  function vistaNada(texto) {
-    const linea = 'Entendido, no anoté nada.';
+  function vistaNada(texto, r) {
+    // C30: sacar del cajero o pasar plata a tu cuenta no es gasto: se dice por qué
+    const linea = r && r.propios && r.propios.length ? 'No anoté nada: sacar plata del cajero o pasarla a tu cuenta no es un gasto, es tu misma plata. La cuento cuando la gastes.' : 'Entendido, no anoté nada.';
     pintar([cabeza(), h('div', { class: 'voz-cuerpo', estilo: { alignItems: 'center', textAlign: 'center' } }, h('div', { class: 'mic-grande ok' }, ico('ok')), h('p', { class: 'frase' }, '«' + texto + '»'), h('p', { class: 'voz-respuesta' }, linea)),
       h('div', { class: 'voz-pie' }, btnPrim('Listo', cerrar), btnTxt('Sí quería anotar algo', () => { escribir(''); }))]);
     hablar(linea);
-    setTimeout(() => { if (capa && vivo && capa.querySelector('.mic-grande.ok')) cerrar(); }, 3200);
+    { const esta = pantallaN; setTimeout(() => { if (capa && vivo && pantallaN === esta) cerrar(); }, 3200); }
   }
 
   /* ------------------------------------------------------------------- registrar */
   function vistaRegistrar(r, texto) {
     if (!r.items || !r.items.length) {
+      if (r.acciones && r.acciones.length) return vistaSoloAcciones(r, texto);
       const t0 = r.falta === 'monto' ? 'Entendí qué fue, pero no cuánto. ¿De cuánto fue?' : 'No pude armar un movimiento con eso.';
       return Salir([h('p', { class: 'frase' }, '«' + texto + '»'), h('p', { class: 'voz-respuesta' }, t0)],
         [btnPrim('Completar a mano', () => { cerrar(); C().formMovimiento({ inicial: { desc: texto }, alGuardar: (m) => C().guardarMov(m) }); }), btnTxt('Decirlo otra vez', escuchar)]);
     }
     const items = r.items.map((i) => Object.assign({}, i, { credito: i.credito ? Object.assign({}, i.credito) : i.credito, duda: i.duda ? Object.assign({}, i.duda) : null }));
-    // monto raro: por defecto el más probable (el chico); la persona puede tocar el otro
-    items.forEach((it) => { if (it.dudaMonto) { it.montoOriginal = it.monto; it.monto = it.dudaMonto[0]; } });
-    const tarjetas = S().d.tarjetas;
+    const acciones = (r.acciones || []).map((a) => Object.assign({ activa: true }, a));
+    const tarjetas = () => S().d.tarjetas;
+    const metas = () => S().d.metas;
     let abierto = items.length === 1 ? 0 : -1;
     const etiquetaNec = (it) => (it.nec === 'G' ? 'Gasto innecesario' : it.nec === 'N' ? 'Gasto necesario' : 'Sin clasificar');
+    const vivos = () => items.filter((it) => !it.quitado);
+    const nombreCosa = (it) => '«' + (it.desc || it.catNombre || (it.tipo === 'ingreso' ? 'ingreso' : 'esto')) + '»';
+    const nombreTarjeta = (id) => { const t = tarjetas().find((x) => x.id === id); return t ? t.nombre : null; };
+
+    // Lo que falta saber de cada movimiento ANTES de guardar (en este orden). Mientras falte algo, no se guarda nada.
+    function pendientes(it) {
+      if (it.quitado) return [];
+      const p = [];
+      if (!it.tipo) p.push('tipo');
+      if (it.monto == null) p.push('monto');
+      if (it.dudaMonto) p.push('dudaMonto');
+      if (it.futuro) p.push('futuro');
+      if (it.tipo === 'gasto' && it.pagoDuda) p.push('pago');
+      if (it.tipo === 'gasto' && it.cuenta === 'tarjeta') {
+        if (!tarjetas().length) p.push('sinTarjeta');
+        else if (!it.tarjetaId || !nombreTarjeta(it.tarjetaId)) p.push('tarjeta');
+        if (it.credito && !it.credito.modo) p.push('modo');
+        if (it.credito && it.credito.modo === 'diferido' && !it.credito.meses && !it.credito.cuota) p.push('meses');
+        if (it.credito && it.credito.modo === 'diferido' && it.credito.interes == null && it.credito.cuota == null) p.push('interes');
+      }
+      if (it.tipo === 'pago_tarjeta' && (!it.tarjetaId || !nombreTarjeta(it.tarjetaId))) p.push(tarjetas().length ? 'tarjeta' : 'sinTarjeta');
+      if (it.tipo === 'aporte_meta' && !it.metaId && !it.crearFondo) p.push('meta');
+      return p;
+    }
+    const faltan = () => vivos().reduce((s, it) => s + (pendientes(it).length ? 1 : 0), 0);
+
+    const opciones = (lista) => h('div', { class: 'opciones' }, lista.map(([t, f, pres]) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': pres ? 'true' : 'false', onclick: f }, t)));
+    const caja = (texto, lista, extra) => h('div', { class: 'duda-caja' + (extra ? ' ' + extra : '') }, h('p', null, texto), opciones(lista));
+    const recategorizar = (it) => {
+      const c = it.cat ? S().categoria(it.cat) : null;
+      if (!c || c.tipo !== it.tipo) { const id = it.tipo === 'ingreso' ? 'extra' : 'otros'; const k = S().categoria(id); it.cat = id; it.catNombre = k.nombre; it.catIcono = k.icono; it.catConfianza = 'ninguna'; }
+      if (it.tipo === 'gasto') { it.nec = it.nec || (S().categoria(it.cat).nec || null); if (!it.cuenta) it.cuenta = 'efectivo'; } else { it.cuenta = 'efectivo'; delete it.tarjetaId; delete it.credito; }
+    };
+    const ponTarjeta = (it, id) => { it.cuenta = 'tarjeta'; it.tarjetaId = id; it.credito = it.credito || { modo: null, meses: null, cuota: null, interes: null }; it.pagoDuda = false; };
+    const ponEfectivo = (it) => { it.cuenta = 'efectivo'; delete it.tarjetaId; delete it.credito; it.pagoDuda = false; };
+    async function agregarTarjetaY(it) {
+      if (!V.tarjetas || !V.tarjetas.formTarjeta) return;
+      V.tarjetas.formTarjeta(null, (t) => { if (t) { if (it.tipo === 'pago_tarjeta') it.tarjetaId = t.id; else ponTarjeta(it, t.id); } dibujar(); });
+    }
+    async function nuevaMeta(it) {
+      if (!AF.acceso.puedeAgregar('metas', metas().length)) { aviso('Con el plan Gratis tienes una meta. Elige la que ya tienes o pásate a Pro.'); return; }
+      const nombre = await dialogo('Nombre de la meta', (fin, cierra) => {
+        const inp = h('input', { class: 'entrada', maxlength: 40, placeholder: 'Ej.: moto, viaje, estudios' });
+        setTimeout(() => inp.focus(), 120);
+        const ok = () => { const v = inp.value.trim(); if (v) { fin(v); cierra(); } else inp.focus(); };
+        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok(); });
+        return h('div', null, h('div', { class: 'campo' }, inp), h('div', { class: 'hoja-acciones' }, h('button', { class: 'btn btn-primario', type: 'button', onclick: ok }, 'Crear meta')));
+      });
+      if (!nombre) return;
+      it.metaNueva = U.cap(nombre); it.metaNombre = it.metaNueva; it.metaId = 'nueva'; it.desc = (it.signo < 0 ? 'Retiro de ' : 'Aporte a ') + it.metaNueva;
+      dibujar();
+    }
+
+    // La pregunta que toca ahora para un movimiento (una a la vez, para no marear)
+    function pregunta(it) {
+      const p = pendientes(it)[0];
+      if (!p) return null;
+      const quitar = ['No era nada, quitarlo', () => { it.quitado = true; dibujar(); }];
+      if (p === 'tipo') return caja('¿' + nombreCosa(it) + ' te entró o lo gastaste?', [['Me entró', () => { it.tipo = 'ingreso'; it.tipoDuda = false; recategorizar(it); dibujar(); }], ['Lo gasté', () => { it.tipo = 'gasto'; it.tipoDuda = false; recategorizar(it); dibujar(); }], quitar], 'pendiente');
+      if (p === 'monto') {
+        const txt = it.tipo === 'ingreso' ? '¿Cuánto te entró por ' + nombreCosa(it) + '?' : it.tipo === 'pago_tarjeta' ? (it.reembolso ? '¿De cuánto fue el reembolso?' : '¿Cuánto pagaste a la tarjeta?') : it.tipo === 'aporte_meta' ? '¿Cuánto fue?' : '¿Cuánto costó ' + nombreCosa(it) + '?';
+        return caja(txt, [['Escribir el monto', async () => { const v = await pedirNumero('Monto', ''); if (v) { it.monto = v; it.falta = null; dibujar(); } }], quitar], 'pendiente');
+      }
+      if (p === 'dudaMonto') return caja('¿' + nombreCosa(it) + ' fue ' + $d(it.dudaMonto[0]) + ' o ' + $d(it.dudaMonto[1]) + '?', it.dudaMonto.map((v) => [$d(v), () => { it.monto = v; it.dudaMonto = null; dibujar(); }]).concat([['Otro monto', async () => { const v = await pedirNumero('Monto', ''); if (v) { it.monto = v; it.dudaMonto = null; dibujar(); } }]]), 'pendiente');
+      if (p === 'futuro') return caja(nombreCosa(it) + ' suena a algo que todavía no pasa. ¿Ya lo ' + (it.tipo === 'ingreso' ? 'recibiste' : 'pagaste') + '?', [['Sí, anótalo hoy', () => { it.futuro = false; dibujar(); }], ['Todavía no', () => { it.quitado = true; dibujar(); }]], 'pendiente');
+      if (p === 'pago') return caja('¿Con qué pagaste ' + nombreCosa(it) + '?', [['Efectivo o débito', () => { ponEfectivo(it); dibujar(); }]].concat(tarjetas().map((t) => [t.nombre, () => { ponTarjeta(it, t.id); dibujar(); }])), 'pendiente');
+      if (p === 'sinTarjeta') return caja('Dijiste tarjeta, pero aún no tienes tarjetas guardadas. ¿Qué hago con ' + nombreCosa(it) + '?', [['Agregar mi tarjeta', () => agregarTarjetaY(it)]].concat(it.tipo === 'gasto' ? [['Fue en efectivo o débito', () => { ponEfectivo(it); dibujar(); }]] : []).concat([quitar]), 'pendiente');
+      if (p === 'tarjeta') return caja('¿Con cuál tarjeta' + (it.tipo === 'pago_tarjeta' ? '' : ' pagaste ' + nombreCosa(it)) + '?', tarjetas().map((t) => [t.nombre, () => { if (it.tipo === 'pago_tarjeta') it.tarjetaId = t.id; else ponTarjeta(it, t.id); dibujar(); }]), 'pendiente');
+      if (p === 'modo') return caja('¿' + nombreCosa(it) + ' con la tarjeta fue corriente o diferido?', [['Corriente (un solo pago)', () => { it.credito.modo = 'corriente'; dibujar(); }], ['Diferido (en cuotas)', () => { it.credito.modo = 'diferido'; dibujar(); }]], 'pendiente');
+      if (p === 'meses') return caja('¿A cuántos meses difiriste ' + nombreCosa(it) + '?', PLAN.tarjetas.mesesComunes.map((m) => [m + ' meses', () => { it.credito.meses = m; dibujar(); }]), 'pendiente');
+      if (p === 'interes') return caja('¿' + nombreCosa(it) + ' a ' + it.credito.meses + ' meses es con intereses o sin intereses?', [['Sin intereses', () => { it.credito.interes = false; dibujar(); }], ['Con intereses', () => { it.credito.interes = true; dibujar(); }]], 'pendiente');
+      if (p === 'meta') return caja('¿A cuál meta va ' + (it.monto != null ? $d(it.monto) : 'esto') + '?', metas().map((m) => [m.nombre, () => { it.metaId = m.id; it.metaNombre = m.nombre; it.desc = (it.signo < 0 ? 'Retiro de ' : 'Aporte a ') + m.nombre; dibujar(); }]).concat([['Crear una meta nueva', () => nuevaMeta(it)], quitar]), 'pendiente');
+      return null;
+    }
+    // U21: una palabra que la app no conoce («mbejú», «Tía Rosa»): la pregunta UNA vez y la aprende. No frena el guardar:
+    // si no contesta, queda en «Otros gastos» y la puede cambiar después.
+    const CATS_RAPIDAS = ['comida_fuera', 'comida_hogar', 'antojos', 'transporte', 'ropa', 'servicios', 'salud', 'hogar'];
+    function preguntaPalabraNueva(it) {
+      if (it.tipo !== 'gasto' || it.catConfianza !== 'ninguna' || !it.palabraNueva || it.palabraVista) return null;
+      const elegir = (id) => {
+        const c = S().categoria(id); it.cat = c.id; it.catNombre = c.nombre; it.catIcono = c.icono; it.catConfianza = 'alta'; it.nec = c.nec || null;
+        S().aprender(it.palabraNueva, id); it.palabraVista = true; dibujar();
+      };
+      const opciones = CATS_RAPIDAS.map((id) => S().categoria(id)).filter((c) => c && c.id !== 'otros').map((c) => h('button', { type: 'button', class: 'opcion', onclick: () => elegir(c.id) }, c.icono + ' ' + c.nombre));
+      opciones.push(h('button', { type: 'button', class: 'opcion', onclick: async () => { const id = await elegirCategoria('gasto', it.cat); if (id) elegir(id); } }, 'Otra…'));
+      opciones.push(h('button', { type: 'button', class: 'opcion', onclick: () => { it.palabraVista = true; dibujar(); } }, 'Dejar en Otros'));
+      return h('div', { class: 'duda-caja' }, h('p', null, '¿Qué es «' + (it.desc || it.palabraNueva) + '»? Así lo aprendo para la próxima.'), h('div', { class: 'opciones' }, opciones));
+    }
+    function dudasSuaves(it) {
+      if (!it.duda) return pendientes(it).length ? null : preguntaPalabraNueva(it);
+      if (pendientes(it).length) return null;
+      return h('div', { class: 'duda-caja' }, h('p', null, it.duda.texto),
+        h('div', { class: 'opciones' }, it.duda.opciones.map((o) => h('button', { type: 'button', class: 'opcion', onclick: () => {
+          const c = S().categoria(o.cat); it.cat = c.id; it.catNombre = c.nombre; it.catIcono = c.icono; it.catConfianza = 'alta';
+          it.nec = o.nec !== undefined ? o.nec : (c.nec || null);
+          if (it.duda.palabra) S().aprender(it.duda.palabra, { cat: c.id, nec: it.nec });
+          it.duda = null; dibujar();
+        } }, o.texto))));
+    }
 
     function filasDetalle(it) {
       const fil = (etiqueta, valor, onclick, extraClase) => h('button', { class: 'entendido-fila', type: 'button', onclick }, h('span', { class: 'entendido-etiqueta' }, etiqueta), h('span', { class: 'entendido-valor ' + (extraClase || '') }, valor, ico('derecha', 'chico')));
       const filas = [];
+      const cambiarMonto = async () => { const v = await pedirNumero('Monto', it.monto || ''); if (v) { it.monto = v; it.dudaMonto = null; it.falta = null; dibujar(); } };
+      const montoTxt = it.monto != null ? $d(it.monto) : h('span', { class: 'suave' }, '¿Cuánto?');
+      const cambiarFecha = async () => { const f = await elegirFecha(it.fecha); if (f) { it.fecha = f; dibujar(); } };
       if (it.tipo === 'pago_tarjeta') {
-        filas.push(fil('Pago de', $(it.monto), async () => { const v = await pedirNumero('Monto', it.monto); if (v) { it.monto = v; dibujar(); } }, 'monto-grande'));
-        const t = tarjetas.find((x) => x.id === it.tarjetaId);
-        filas.push(fil('A la tarjeta', t ? t.nombre : tarjetas.length ? '¿Cuál tarjeta?' : 'Sin tarjeta guardada', async () => {
-          if (!tarjetas.length) { cerrar(); V.tarjetas.formTarjeta(null); return; }
-          const v = await elegirOpcion('¿A cuál tarjeta?', tarjetas.map((x) => [x.id, x.nombre])); if (v) { it.tarjetaId = v; dibujar(); }
-        }, t ? '' : 'duda'));
-        filas.push(fil('Fecha', U.cap(U.fechaCorta(it.fecha, AF.app.hoy())), async () => { const f = await elegirFecha(it.fecha); if (f) { it.fecha = f; dibujar(); } }));
+        filas.push(fil(it.reembolso ? 'Reembolso de' : 'Pago de', montoTxt, cambiarMonto, 'monto-grande'));
+        filas.push(fil(it.reembolso ? 'Vuelve a la tarjeta' : 'A la tarjeta', nombreTarjeta(it.tarjetaId) || (tarjetas().length ? '¿Cuál tarjeta?' : 'Sin tarjeta guardada'), async () => {
+          if (!tarjetas().length) { agregarTarjetaY(it); return; }
+          const v = await elegirOpcion('¿A cuál tarjeta?', tarjetas().map((x) => [x.id, x.nombre])); if (v) { it.tarjetaId = v; dibujar(); }
+        }, nombreTarjeta(it.tarjetaId) ? '' : 'duda'));
+        filas.push(fil('Fecha', U.cap(U.fechaCorta(it.fecha, AF.app.hoy())), cambiarFecha));
         return filas;
       }
-      filas.push(fil(it.tipo === 'ingreso' ? 'Ingreso de' : 'Gasto de', $(it.monto), async () => { const v = await pedirNumero('Monto', it.monto); if (v) { it.monto = v; it.dudaMonto = null; dibujar(); } }, 'monto-grande'));
+      if (it.tipo === 'aporte_meta') {
+        filas.push(fil(it.signo < 0 ? 'Retiro de' : 'Aporte de', montoTxt, cambiarMonto, 'monto-grande'));
+        filas.push(fil(it.signo < 0 ? 'Sale de' : 'Va a', it.metaNombre || (it.crearFondo ? 'Fondo de emergencia (nuevo)' : '¿Cuál meta?'), async () => {
+          const v = await elegirOpcion('¿Cuál meta?', metas().map((m) => [m.id, m.nombre]).concat([['nueva', 'Crear una meta nueva']]));
+          if (v === 'nueva') return nuevaMeta(it);
+          if (v) { const m = metas().find((x) => x.id === v); it.metaId = v; it.metaNombre = m.nombre; it.crearFondo = false; dibujar(); }
+        }, it.metaId || it.crearFondo ? '' : 'duda'));
+        filas.push(fil('Fecha', U.cap(U.fechaCorta(it.fecha, AF.app.hoy())), cambiarFecha));
+        return filas;
+      }
+      filas.push(fil(it.tipo === 'ingreso' ? 'Ingreso de' : it.tipo === 'gasto' ? 'Gasto de' : '¿Entró o salió?', montoTxt, cambiarMonto, 'monto-grande'));
       filas.push(fil('Nombre', it.desc || h('span', { class: 'suave' }, 'Ponerle nombre'), async () => {
         const v = await dialogo('Nombre del movimiento', (fin, cierra) => {
           const inp = h('input', { class: 'entrada', value: it.desc || '', maxlength: 80, placeholder: 'Ej. Arriendo, Internet, Hamburguesa' });
@@ -6345,88 +7551,135 @@
         });
         if (v !== null) { it.desc = v; dibujar(); }
       }));
-      filas.push(fil('Categoría', (it.catIcono || '') + ' ' + it.catNombre, async () => {
-        const id = await elegirCategoria(it.tipo, it.cat);
-        if (!id) return;
-        const c = S().categoria(id); it.cat = id; it.catNombre = c.nombre; it.catIcono = c.icono; it.catConfianza = 'alta'; it.duda = null; if (it.tipo === 'gasto') it.nec = c.nec || null;
-        const palabra = it.palabraNueva || it.palabraCat || (it.desc ? U.norm(it.desc) : null);
-        if (palabra) { S().aprender(palabra, id); it.palabraNueva = null; }
-        dibujar();
-      }));
+      if (it.tipo) {
+        filas.push(fil('Categoría', (it.catIcono || '') + ' ' + (it.catNombre || 'Elegir'), async () => {
+          const id = await elegirCategoria(it.tipo, it.cat);
+          if (!id) return;
+          const c = S().categoria(id); it.cat = id; it.catNombre = c.nombre; it.catIcono = c.icono; it.catConfianza = 'alta'; it.duda = null; if (it.tipo === 'gasto') it.nec = c.nec || null;
+          const palabra = it.palabraNueva || it.palabraCat || (it.desc ? U.norm(it.desc) : null);
+          if (palabra) { S().aprender(palabra, id); it.palabraNueva = null; }
+          dibujar();
+        }));
+      }
       if (it.tipo === 'gasto') filas.push(fil('Cuenta como', etiquetaNec(it), () => { it.nec = it.nec === 'G' ? 'N' : 'G'; if (it.palabraCat || it.palabraNueva) S().aprender(it.palabraCat || it.palabraNueva, { cat: it.cat, nec: it.nec }); dibujar(); }));
-      filas.push(fil('Fecha', U.cap(U.fechaCorta(it.fecha, AF.app.hoy())), async () => { const f = await elegirFecha(it.fecha); if (f) { it.fecha = f; dibujar(); } }));
-      if (it.tipo === 'gasto' && (tarjetas.length || it.cuenta === 'tarjeta')) {
+      filas.push(fil('Fecha', U.cap(U.fechaCorta(it.fecha, AF.app.hoy())), cambiarFecha));
+      if (it.tipo === 'gasto' && (tarjetas().length || it.cuenta === 'tarjeta')) {
         let txt = 'Efectivo o débito';
         if (it.cuenta === 'tarjeta') {
-          const t = tarjetas.find((x) => x.id === it.tarjetaId);
-          txt = t ? t.nombre : '¿Cuál tarjeta?';
-          if (it.credito && it.credito.modo === 'diferido') txt += ' · ' + (it.credito.meses ? it.credito.meses + ' cuotas' : '¿cuántos meses?') + (it.credito.interes === false ? ' sin intereses' : '');
+          txt = nombreTarjeta(it.tarjetaId) || '¿Cuál tarjeta?';
+          const cr = it.credito || {};
+          txt += cr.modo === 'corriente' ? ' · corriente' : cr.modo === 'diferido' ? ' · ' + (cr.meses ? cr.meses + ' cuotas' : 'diferido') + (cr.interes === false ? ' sin intereses' : cr.interes === true ? ' con intereses' : '') : ' · ¿corriente o diferido?';
         }
         filas.push(fil('Pagado con', txt, async () => {
-          const opc = [['efectivo', 'Efectivo o débito']].concat(tarjetas.map((t) => [t.id, t.nombre]));
+          const opc = [['efectivo', 'Efectivo o débito']].concat(tarjetas().map((t) => [t.id, t.nombre]));
           const v = await elegirOpcion('¿Con qué pagaste?', opc);
           if (!v) return;
-          if (v === 'efectivo') { it.cuenta = 'efectivo'; delete it.tarjetaId; delete it.credito; }
-          else { it.cuenta = 'tarjeta'; it.tarjetaId = v; it.credito = it.credito || { modo: 'corriente' }; }
+          if (v === 'efectivo') ponEfectivo(it); else ponTarjeta(it, v);
           dibujar();
-        }, it.cuenta === 'tarjeta' && !it.tarjetaId ? 'duda' : ''));
-        if (it.cuenta === 'tarjeta' && it.credito && it.credito.modo === 'diferido' && !it.credito.meses) {
-          filas.push(fil('Meses', '¿A cuántos?', async () => { const v = await elegirOpcion('¿A cuántos meses?', PLAN.tarjetas.mesesComunes.map((n) => [n, n + ' meses'])); if (v) { it.credito.meses = v; dibujar(); } }, 'duda'));
+        }, it.cuenta === 'tarjeta' && (!it.tarjetaId || !(it.credito && it.credito.modo)) ? 'duda' : ''));
+        if (it.cuenta === 'tarjeta' && it.credito && it.credito.modo) {
+          filas.push(fil('Forma de pago', it.credito.modo === 'diferido' ? 'Diferido' + (it.credito.meses ? ' a ' + it.credito.meses + ' meses' : '') : 'Corriente', async () => {
+            const v = await elegirOpcion('¿Cómo lo pagaste?', [['corriente', 'Corriente (un solo pago)'], ['diferido', 'Diferido (en cuotas)']]);
+            if (!v) return; it.credito.modo = v; if (v === 'corriente') { it.credito.meses = null; it.credito.interes = null; it.credito.cuota = null; } dibujar();
+          }));
         }
       }
       return filas;
     }
-    // Preguntas de duda: monto raro, palabra ambigua
-    function dudas(it) {
+
+    function linea(it, idx) {
+      const c = it.tipo === 'pago_tarjeta' ? { icono: it.reembolso ? '↩️' : '💳', nombre: it.reembolso ? 'Reembolso a ' + (nombreTarjeta(it.tarjetaId) || 'tarjeta') : 'Pago a ' + (nombreTarjeta(it.tarjetaId) || 'tarjeta') }
+        : it.tipo === 'aporte_meta' ? { icono: it.esFondo || it.crearFondo ? '🛟' : '🏁', nombre: (it.signo < 0 ? 'Sale de ' : 'Va a ') + (it.metaNombre || '¿cuál meta?') }
+          : { icono: it.catIcono || '❔', nombre: (it.catNombre || '¿entró o salió?') + (it.cuenta === 'tarjeta' ? ' · ' + (nombreTarjeta(it.tarjetaId) || 'tarjeta') : '') };
+      const signo = it.tipo === 'ingreso' || (it.tipo === 'aporte_meta' && it.signo < 0) ? '+' : it.tipo ? '−' : '';
+      const clase = it.tipo === 'ingreso' ? 'ingreso' : it.tipo === 'pago_tarjeta' ? 'pago' : it.tipo === 'aporte_meta' ? 'pago' : 'gasto';
+      return h('button', { class: 'entendido-item' + (pendientes(it).length ? ' pendiente' : ''), type: 'button', 'aria-expanded': abierto === idx ? 'true' : 'false', onclick: () => { abierto = abierto === idx ? -1 : idx; dibujar(); } },
+        h('div', { class: 'ico' }, c.icono), h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, it.desc || c.nombre), h('div', { class: 'fila-sub' }, c.nombre + (it.tipo === 'gasto' && it.nec === 'G' ? ' · innecesario' : ''))),
+        h('span', { class: 'monto ' + clase }, it.monto != null ? signo + $d(it.monto) : '¿?'));
+    }
+
+    function avisosDe() {
       const out = [];
-      if (it.futuro) out.push(h('div', { class: 'duda-caja' }, h('p', null, 'Esto suena a algo que todavía no pagas. ¿Ya lo pagaste?'),
-        h('div', { class: 'opciones' },
-          h('button', { type: 'button', class: 'opcion', onclick: () => { it.futuro = false; dibujar(); } }, 'Sí, anótalo hoy'),
-          h('button', { type: 'button', class: 'opcion', onclick: () => { cerrar(); aviso('Listo, no anoté nada. Cuando lo pagues, dímelo.'); } }, 'Todavía no'))));
-      if (it.dudaMonto) out.push(h('div', { class: 'duda-caja' }, h('p', null, '¿Fue ' + $(it.dudaMonto[0]) + ' o ' + $(it.dudaMonto[1]) + '?'),
-        h('div', { class: 'opciones' }, it.dudaMonto.map((v) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': it.monto === v ? 'true' : 'false', onclick: () => { it.monto = v; it.dudaMonto = null; dibujar(); } }, $(v))))));
-      if (it.duda) out.push(h('div', { class: 'duda-caja' }, h('p', null, it.duda.texto),
-        h('div', { class: 'opciones' }, it.duda.opciones.map((o) => h('button', { type: 'button', class: 'opcion', onclick: () => {
-          const c = S().categoria(o.cat); it.cat = c.id; it.catNombre = c.nombre; it.catIcono = c.icono; it.catConfianza = 'alta';
-          it.nec = o.nec !== undefined ? o.nec : (c.nec || null);
-          if (it.duda.palabra) S().aprender(it.duda.palabra, { cat: c.id, nec: it.nec });
-          it.duda = null; dibujar();
-        } }, o.texto)))));
-      return out;
+      items.forEach((it) => {
+        if (it.quitado) return;
+        if (it.crearFondo && it.tipo === 'aporte_meta') out.push('Aún no tienes tu fondo de emergencia: lo creo y le pongo este aporte.');
+        if (it.tipo === 'gasto' && it.cuenta === 'tarjeta' && it.tarjetaId) { const t = tarjetas().find((x) => x.id === it.tarjetaId); if (t && !(t.diaCorte && t.diaVencimiento)) out.push(t.nombre + ' no tiene día de corte ni de pago: la compra queda como deuda de la tarjeta (no sale de tu efectivo). Ponlos en Tarjetas para saber cuándo pagas.'); }
+        if (it.montoAlto && it.monto != null) out.push(nombreCosa(it) + ' por ' + $d(it.monto) + ' es más que tu sueldo. Revisa que el monto esté bien.');
+      });
+      if (r.numerosSinUsar && r.numerosSinUsar.length) out.push('También oí ' + r.numerosSinUsar.join(', ') + ', pero no supe a qué van. Si era otra cosa, díctala aparte.');
+      if (r.omitidos && r.omitidos.length) out.push('No anoté «' + r.omitidos.join('», «') + '» porque dijiste que no pasó.');
+      if (r.propios && r.propios.length) out.push('No anoté «' + r.propios.join('», «') + '»: sacar del cajero o pasar plata a tu cuenta no es un gasto (es tu misma plata). Lo cuento cuando lo gastes.');
+      if (r.preguntas && r.preguntas.length) out.push('Al guardar te respondo ' + (r.preguntas.length > 1 ? 'tus preguntas.' : 'tu pregunta.'));
+      return Array.from(new Set(out));
+    }
+    function filaAccion(a) {
+      if (a.tipo === 'presupuesto' && a.monto) {
+        const nombre = a.cat ? S().categoria(a.cat).nombre : 'todos tus gastos';
+        return h('button', { class: 'entendido-item', type: 'button', 'aria-pressed': a.activa ? 'true' : 'false', onclick: () => { a.activa = !a.activa; dibujar(); } },
+          h('div', { class: 'ico' }, '🎯'), h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, 'Límite de ' + $d(a.monto) + ' al mes'), h('div', { class: 'fila-sub' }, 'En ' + nombre.toLowerCase() + (a.activa ? '' : ' · no se guardará'))),
+          ico(a.activa ? 'ok' : 'cerrar'));
+      }
+      if (a.tipo === 'crear_meta') {
+        return h('div', { class: 'entendido-item' }, h('div', { class: 'ico' }, '🏁'), h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, 'Crear una meta' + (a.nombre ? ' «' + a.nombre + '»' : '')), h('div', { class: 'fila-sub' }, a.monto ? 'De ' + $d(a.monto) + (a.mensual ? ' al mes' : a.semanal ? ' a la semana' : '') + ' · la armas al guardar' : 'La armas al guardar')));
+      }
+      return null;
     }
 
     function dibujar() {
-      const cuerpo = [C().fraseAnotada(r.partes, items[0].tipo, false)];
-      if (items.length === 1) {
+      const v = vivos();
+      const cuerpo = [C().fraseAnotada(r.partes, (v[0] || items[0]).tipo, false)];
+      if (items.length === 1 && !acciones.length) {
         const it = items[0];
-        cuerpo.push(dudas(it));
-        cuerpo.push(h('div', { class: 'entendido' }, filasDetalle(it)));
+        cuerpo.push(pregunta(it), dudasSuaves(it));
+        if (!it.quitado) cuerpo.push(h('div', { class: 'entendido' }, filasDetalle(it)));
       } else {
-        // varios: una línea por movimiento; se toca una para cambiarla
+        // varios: una línea por movimiento; lo que falta se pregunta debajo de cada uno; se toca una línea para cambiarla
         cuerpo.push(h('div', { class: 'entendido' }, items.map((it, idx) => {
-          const c = it.tipo === 'pago_tarjeta' ? { icono: '💳', nombre: 'Pago de tarjeta' } : { icono: it.catIcono, nombre: it.catNombre };
-          const linea = h('button', { class: 'entendido-item', type: 'button', 'aria-expanded': abierto === idx ? 'true' : 'false', onclick: () => { abierto = abierto === idx ? -1 : idx; dibujar(); } },
-            h('div', { class: 'ico' }, c.icono), h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, it.desc || c.nombre), h('div', { class: 'fila-sub' }, c.nombre + (it.tipo === 'gasto' && it.nec === 'G' ? ' · innecesario' : ''))),
-            h('span', { class: 'monto ' + (it.tipo === 'ingreso' ? 'ingreso' : it.tipo === 'pago_tarjeta' ? 'pago' : 'gasto') }, (it.tipo === 'ingreso' ? '+' : '−') + $(it.monto)));
-          return abierto === idx ? h('div', null, linea, dudas(it), h('div', { estilo: { paddingLeft: '8px' } }, filasDetalle(it))) : h('div', null, linea, it.duda || it.dudaMonto || it.futuro ? dudas(it) : null);
-        })));
+          if (it.quitado) return null;
+          const q = pregunta(it);
+          return h('div', { 'data-item': String(idx) }, linea(it, idx), q, q ? null : dudasSuaves(it), abierto === idx ? h('div', { estilo: { paddingLeft: '8px' } }, filasDetalle(it)) : null);
+        }), acciones.map(filaAccion)));
       }
-      const avisos = [];
-      if (r.sinTarjetas && items.some((i) => i.tipo === 'pago_tarjeta')) avisos.push('Aún no tienes tarjetas guardadas. Si la agregas, el pago le baja la deuda; si no, lo guardo como pago de deuda.');
-      if (r.sinTarjetas && items.some((i) => i.cuenta === 'tarjeta' && !tarjetas.length)) avisos.push('Aún no tienes tarjetas guardadas. Lo guardo como pago normal; agrégala en la pestaña Tarjetas.');
-      items.forEach((it) => { if (it.cuenta === 'tarjeta' && it.credito && it.credito.modo === 'diferido' && !AF.acceso.tiene('tarjetaDiferidoCuotas')) avisos.push('Con Pro calculo las cuotas de «' + (it.desc || it.catNombre) + '». Ahora lo guardo como compra con tarjeta.'); });
+      const n = faltan();
+      const totalGuardar = vivos().length + acciones.filter((a) => a.activa && a.tipo === 'presupuesto').length;
+      const avisos = avisosDe();
+      const txtBoton = n ? (n === 1 ? 'Falta responder 1 cosa' : 'Faltan responder ' + n + ' cosas') : totalGuardar > 1 ? 'Guardar los ' + totalGuardar : totalGuardar === 1 ? 'Guardar' : 'Listo';
+      const boton = btnPrim(txtBoton, guardar);
+      if (n) { boton.setAttribute('aria-disabled', 'true'); boton.classList.add('btn-espera'); }
       pintar([cabeza('Esto entendí'), h('div', { class: 'voz-cuerpo' }, cuerpo, avisos.map((a) => h('p', { class: 'voz-extra' }, a))),
-        h('div', { class: 'voz-pie' }, btnPrim(items.length > 1 ? 'Guardar los ' + items.length : 'Guardar', guardar), btnTxt('Cancelar', cerrar))]);
+        h('div', { class: 'voz-pie' }, boton, btnTxt('Cancelar', cerrar))]);
     }
 
     async function guardar() {
       if (!vivo) return;
-      const guardados = [];
-      for (const it of items) {
+      if (faltan()) {
+        const caja0 = capa && capa.querySelector('.duda-caja.pendiente');
+        if (caja0) { caja0.scrollIntoView({ block: 'center', behavior: 'smooth' }); caja0.classList.remove('sacudir'); void caja0.offsetWidth; caja0.classList.add('sacudir'); }
+        hablar('Antes de guardar, respóndeme lo que falta.');
+        return;
+      }
+      const guardados = [], hechos = []; let pasos = 0;
+      for (const it of vivos()) {
         if (it.tipo === 'pago_tarjeta') {
           const t = S().buscar('tarjetas', it.tarjetaId);
-          if (t) guardados.push(S().agregar('movs', { tipo: 'pago_tarjeta', monto: U.r2(it.monto), fecha: it.fecha, tarjetaId: t.id, cat: null, desc: 'Pago ' + t.nombre }, 'Pagué ' + t.nombre));
-          else guardados.push(S().agregar('movs', { tipo: 'gasto', monto: U.r2(it.monto), cat: 'deudas', desc: 'Pago de tarjeta', fecha: it.fecha, nec: 'N', cuenta: 'efectivo' }, 'Pago de tarjeta'));
+          if (!t) continue;
+          const m = { tipo: 'pago_tarjeta', monto: U.r2(it.monto), fecha: it.fecha, tarjetaId: t.id, cat: null, desc: (it.reembolso ? 'Reembolso ' : 'Pago ') + t.nombre };
+          if (it.reembolso) m.reembolso = true;
+          guardados.push(S().agregar('movs', m, (it.reembolso ? 'Reembolso a ' : 'Pagué ') + t.nombre)); pasos++;
+          continue;
+        }
+        if (it.tipo === 'aporte_meta') {
+          let meta = it.metaId && it.metaId !== 'nueva' ? S().buscar('metas', it.metaId) : null;
+          if (!meta && it.metaNueva) { meta = S().agregar('metas', { nombre: it.metaNueva, icono: '🏁', objetivo: null, aporteMensual: null, fechaMeta: null, aportes: [] }, 'Creé la meta ' + it.metaNueva); pasos++; }
+          if (!meta && it.crearFondo) {
+            const fe = AF.ahorro ? AF.ahorro.fondoEmergencia(S().d, AF.app.hoy()) : null;
+            const cfg = PLAN.ahorro.fondo;
+            meta = S().agregar('metas', { nombre: cfg.nombre, icono: cfg.icono, objetivo: fe && fe.disponible && fe.sugerido ? U.r2(fe.sugerido.monto) : null, aporteMensual: null, fechaMeta: null, aportes: [], esFondo: true, fondoMeses: fe && fe.disponible && fe.sugerido ? fe.sugerido.meses : null }, 'Creé mi fondo de emergencia'); pasos++;
+          }
+          if (!meta) continue;
+          const monto = U.r2(it.monto * (it.signo < 0 ? -1 : 1));
+          S().editar('metas', meta.id, { aportes: (meta.aportes || []).concat([{ id: U.uid(), fecha: it.fecha, monto }]) }, (monto > 0 ? 'Aporté a ' : 'Saqué de ') + meta.nombre); pasos++;
+          hechos.push({ tipo: 'aporte', monto: Math.abs(monto), signo: it.signo, meta: meta.nombre });
           continue;
         }
         const m = { tipo: it.tipo, monto: U.r2(it.monto), cat: it.cat, desc: it.desc || '', fecha: it.fecha };
@@ -6434,32 +7687,72 @@
           m.nec = it.nec || null; m.cuenta = it.cuenta === 'tarjeta' && it.tarjetaId ? 'tarjeta' : 'efectivo';
           if (m.cuenta === 'tarjeta') {
             m.tarjetaId = it.tarjetaId;
-            const pro = AF.acceso.tiene('tarjetaDiferidoCuotas');
-            m.credito = it.credito && it.credito.modo === 'diferido' && pro && it.credito.meses ? { modo: 'diferido', meses: it.credito.meses, interes: it.credito.interes !== false, cuota: it.credito.cuota || null } : { modo: 'corriente' };
+            // se guarda lo que de verdad pasó (corriente o diferido), sea Gratis o Pro: así la deuda de la tarjeta siempre cuadra
+            const cr = it.credito || {};
+            m.credito = cr.modo === 'diferido' ? { modo: 'diferido', meses: cr.meses || null, interes: cr.interes === true || (cr.interes == null && cr.cuota != null), cuota: cr.cuota || null } : { modo: cr.modo === 'rotativo' ? 'rotativo' : 'corriente' };
             if (m.credito.modo === 'diferido' && m.credito.interes && m.credito.cuota == null) {
               const t = S().buscar('tarjetas', it.tarjetaId);
-              if (t && t.tasaAnual == null) { const tasa = await pedirTasa(t); if (tasa != null) S().editar('tarjetas', t.id, { tasaAnual: tasa }, 'Puse la tasa de ' + t.nombre); }
+              if (t && t.tasaAnual == null) { const tasa = await pedirTasa(t); if (tasa != null) { S().editar('tarjetas', t.id, { tasaAnual: tasa }, 'Puse la tasa de ' + t.nombre); pasos++; } }
             }
           }
         }
-        guardados.push(S().agregar('movs', m, 'Agregué ' + (it.desc || it.catNombre)));
+        guardados.push(S().agregar('movs', m, 'Agregué ' + (it.desc || it.catNombre))); pasos++;
+      }
+      let abrirMeta = null;
+      for (const a of acciones) {
+        if (a.tipo === 'presupuesto' && a.activa && a.monto) {
+          const D = S().d;
+          if (a.cat && !AF.acceso.tiene('presupuestoPorCategoria')) { hechos.push({ tipo: 'texto', texto: 'El límite por categoría es de Pro: no lo guardé.' }); continue; }
+          const ya = D.presupuestos.find((b) => (b.cat || null) === (a.cat || null));
+          if (!ya && !AF.acceso.puedeAgregar('presupuestos', D.presupuestos.length)) { hechos.push({ tipo: 'texto', texto: 'Ya tienes el límite que permite el plan Gratis: no guardé el nuevo.' }); continue; }
+          if (ya) S().editar('presupuestos', ya.id, { monto: a.monto }, 'Cambié un límite'); else S().agregar('presupuestos', { cat: a.cat || null, monto: a.monto, periodo: 'mes' }, 'Puse un límite');
+          pasos++;
+          hechos.push({ tipo: 'texto', texto: 'Límite de ' + $(a.monto) + ' al mes en ' + (a.cat ? S().categoria(a.cat).nombre.toLowerCase() : 'todos tus gastos') + '.' });
+        }
+        if (a.tipo === 'crear_meta') abrirMeta = a;
       }
       if (!vivo) return;
-      confirmacion(guardados);
+      confirmacion(guardados, { pasos, hechos, preguntas: r.preguntas || [], abrirMeta });
     }
     dibujar();
-    const it0 = items[0];
-    hablar(items.length === 1 ? (it0.tipo === 'pago_tarjeta' ? 'Pago de tarjeta de ' + $(it0.monto) : (it0.tipo === 'ingreso' ? 'Ingreso de ' : 'Gasto de ') + $(it0.monto) + ' en ' + it0.catNombre) + '. ¿Lo guardo?' : 'Entendí ' + items.length + ' movimientos. ¿Los guardo?');
+    const n0 = faltan();
+    const v0 = vivos();
+    const primeraDuda = v0.find((it) => pendientes(it).length);
+    const queFalta = primeraDuda ? (pendientes(primeraDuda)[0] === 'monto' ? ' ¿Cuánto costó ' + nombreCosa(primeraDuda) + '?' : ' Respóndeme lo que falta antes de guardar.') : '';
+    hablar((v0.length === 1 ? (v0[0].tipo === 'pago_tarjeta' ? (v0[0].reembolso ? 'Reembolso a la tarjeta' : 'Pago de tarjeta') + (v0[0].monto != null ? ' de ' + $d(v0[0].monto) : '') : v0[0].tipo === 'aporte_meta' ? (v0[0].signo < 0 ? 'Retiro de ' : 'Aporte a ') + (v0[0].metaNombre || 'una meta') : (v0[0].tipo === 'ingreso' ? 'Ingreso' : 'Gasto') + (v0[0].monto != null ? ' de ' + $d(v0[0].monto) : '') + (v0[0].catNombre ? ' en ' + v0[0].catNombre : '')) + '.'
+      : 'Entendí ' + v0.length + ' cosas.') + (n0 ? queFalta : ' ¿Lo guardo?'));
   }
-
+  // Solo un límite o una meta (sin movimientos), o varias acciones
+  function vistaSoloAcciones(r, texto) {
+    const a = r.acciones[0];
+    if (r.acciones.length === 1 && a.tipo === 'presupuesto') return vistaPresupuesto(a, texto);
+    if (r.acciones.length === 1 && a.tipo === 'crear_meta') return vistaCrearMeta(a, texto);
+    return vistaNoEntendi(texto);
+  }
+  // «Quiero colocar una meta mensual de 50»: no es un gasto; se arma la meta (con lo dicho ya puesto)
+  function vistaCrearMeta(a, texto) {
+    const linea = 'Eso es una meta de ahorro, no un gasto: no anoté nada en tus movimientos.';
+    pintar([cabeza('Esto entendí'), h('div', { class: 'voz-cuerpo' }, h('p', { class: 'frase' }, '«' + texto + '»'), h('p', { class: 'voz-respuesta' }, linea),
+      h('div', { class: 'entendido' }, h('div', { class: 'entendido-item' }, h('div', { class: 'ico' }, '🏁'), h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, 'Nueva meta' + (a.nombre ? ' «' + a.nombre + '»' : '')), h('div', { class: 'fila-sub' }, a.monto ? $d(a.monto) + (a.mensual ? ' al mes' : a.semanal ? ' a la semana' : '') : 'Sin monto todavía'))))),
+    h('div', { class: 'voz-pie' }, btnPrim('Armar la meta', () => { cerrar(); abrirFormMeta(a); }), btnTxt('Cancelar', cerrar))]);
+    hablar(linea + ' ¿Armo la meta?');
+  }
+  function abrirFormMeta(a) {
+    AF.app.ir('mas');
+    if (V.finanzas && V.finanzas.formMeta) V.finanzas.formMeta(null, { nombre: a.nombre || '', aporteMensual: a.mensual ? a.monto : null, objetivo: !a.mensual && !a.semanal ? a.monto : null });
+  }
   /* --------------------------------------------------------------- confirmación */
   // Dice qué guardó y cuánto te queda hasta tu cobro (la misma cifra del Inicio). Nada de «te pasaste de tu presupuesto diario».
-  function confirmacion(movs) {
+  function confirmacion(movs, extra) {
+    extra = extra || {};
     const D = S().d, hoy = AF.app.hoy();
     const total = movs.reduce((s, m) => s + m.monto, 0);
-    const nombreDe = (m) => (m.tipo === 'pago_tarjeta' ? 'pago de ' + ((S().buscar('tarjetas', m.tarjetaId) || {}).nombre || 'tarjeta') : (m.tipo === 'ingreso' ? 'ingreso en ' : '') + S().categoria(m.cat).nombre.toLowerCase());
-    const linea = movs.length === 1 ? 'Guardado: ' + $(movs[0].monto) + ' · ' + nombreDe(movs[0]) + '.' : 'Guardados ' + movs.length + ' movimientos por ' + $(total) + '.';
-    const extras = [];
+    const nombreDe = (m) => (m.tipo === 'pago_tarjeta' ? (m.reembolso ? 'reembolso a ' : 'pago de ') + ((S().buscar('tarjetas', m.tarjetaId) || {}).nombre || 'tarjeta') : (m.tipo === 'ingreso' ? 'ingreso en ' : '') + S().categoria(m.cat).nombre.toLowerCase());
+    const aportes = (extra.hechos || []).filter((x) => x.tipo === 'aporte');
+    let linea = movs.length === 1 ? 'Guardado: ' + $d(movs[0].monto) + ' · ' + nombreDe(movs[0]) + '.' : movs.length ? 'Guardados ' + movs.length + ' movimientos por ' + $d(total) + '.' : '';
+    aportes.forEach((x) => { linea += (linea ? ' ' : '') + (x.signo < 0 ? 'Saqué ' + $d(x.monto) + ' de ' : 'Puse ' + $d(x.monto) + ' en ') + x.meta + '.'; });
+    if (!linea) linea = 'Listo.';
+    const extras = (extra.hechos || []).filter((x) => x.tipo === 'texto').map((x) => x.texto);
     const p = AF.informes.puedesGastarHoy(D, hoy);
     if (p.ingresos) extras.push(p.resto > 0 ? 'Te quedan ' + $(p.resto) + ' hasta ' + p.etiqueta + '.' : 'Ya no te queda dinero hasta ' + p.etiqueta + '.');
     AF.informes.presupuestos(D, hoy).forEach((b) => {
@@ -6468,14 +7761,23 @@
         else if (b.nivel === 'aviso') extras.push('Vas en ' + Math.round(b.pct * 100) + ' % del límite de ' + b.nombre.toLowerCase() + '.');
       }
     });
-    movs.forEach((m) => { if (m.cuenta === 'tarjeta') { const t = S().buscar('tarjetas', m.tarjetaId); if (t && !(t.diaCorte && t.diaVencimiento)) extras.push('Completa el corte y el día de pago de ' + t.nombre + ' para calcular sus cuotas.'); } });
+    const sinFechas = new Set();
+    movs.forEach((m) => { if (m.cuenta === 'tarjeta') { const t = S().buscar('tarjetas', m.tarjetaId); if (t && !(t.diaCorte && t.diaVencimiento) && !sinFechas.has(t.id)) { sinFechas.add(t.id); extras.push('Completa el día de corte y de pago de ' + t.nombre + ' para saber cuándo pagas.'); } } });
+    // preguntas que venían en el mismo dictado: se responden ya con lo guardado
+    const respuestas = (extra.preguntas || []).map((q) => AF.informes.responder(q, S().d, hoy, AF.acceso.esPro())).filter(Boolean);
+    const pasos = extra.pasos != null ? extra.pasos : movs.length;
+    const quedarse = respuestas.length || extra.abrirMeta;
     pintar([cabeza(), h('div', { class: 'voz-cuerpo', estilo: { alignItems: 'center', textAlign: 'center' } },
       h('div', { class: 'mic-grande ok', 'aria-hidden': 'true' }, ico('ok')),
       h('p', { class: 'voz-respuesta' }, linea),
-      extras.map((t) => h('p', { class: 'voz-extra' }, t))),
-    h('div', { class: 'voz-pie' }, btnPrim('Listo', cerrar), btnTxt('Deshacer', () => { movs.forEach(() => S().deshacer()); cerrar(); aviso('Quité lo que acabas de guardar'); }))]);
-    hablar(linea + ' ' + extras.join(' '));
-    setTimeout(() => { if (capa && vivo && capa.querySelector('.mic-grande.ok')) cerrar(); }, 3200);
+      extras.map((t) => h('p', { class: 'voz-extra' }, t)),
+      respuestas.map((res) => h('div', { class: 'respuesta-caja' }, h('p', { class: 'voz-respuesta' }, res.bloqueado ? (res.gancho || res.texto) : res.texto), (res.extras || []).map((t) => h('p', { class: 'voz-extra' }, t))))),
+    h('div', { class: 'voz-pie' }, extra.abrirMeta ? btnPrim('Armar la meta', () => { const a = extra.abrirMeta; cerrar(); abrirFormMeta(a); }) : btnPrim('Listo', cerrar),
+      btnTxt('Deshacer', () => { for (let i = 0; i < pasos; i++) S().deshacer(); cerrar(); aviso('Quité lo que acabas de guardar'); }))]);
+    hablar(linea + ' ' + extras.join(' ') + ' ' + respuestas.map((x) => x.voz || x.texto).join(' '));
+    // C12: se cierra sola SOLO esta pantalla (si mientras tanto se abrió otra, el reloj no la toca)
+    const esta = pantallaN;
+    if (!quedarse) setTimeout(() => { if (capa && vivo && pantallaN === esta) cerrar(); }, 3200);
   }
 
   /* -------------------------------------------------------------------- preguntar */
@@ -6501,7 +7803,7 @@
       pintar([cabeza(), h('div', { class: 'voz-cuerpo', estilo: { alignItems: 'center', textAlign: 'center' } }, h('div', { class: 'mic-grande ok' }, ico('ok')), h('p', { class: 'voz-respuesta' }, linea)),
         h('div', { class: 'voz-pie' }, btnPrim('Listo', cerrar), deshacerPasos ? btnTxt('Deshacer', () => { for (let i = 0; i < deshacerPasos; i++) S().deshacer(); if (olvidar) olvidar(); cerrar(); aviso('Lo dejé como estaba'); }) : null)]);
       hablar(linea);
-      setTimeout(() => { if (capa && vivo && capa.querySelector('.mic-grande.ok')) cerrar(); }, 3200);
+      { const esta = pantallaN; setTimeout(() => { if (capa && vivo && pantallaN === esta) cerrar(); }, 3200); }
     };
     const res = AF.correcciones.aplicar(S(), r);
     if (res.noEntendi) return vistaNoEntendi(texto, res.linea);
@@ -6518,18 +7820,18 @@
       const ya = D.presupuestos.find((b) => (b.cat || null) === (r.cat || null));
       if (!ya && !AF.acceso.puedeAgregar('presupuestos', D.presupuestos.length)) { cerrar(); return C().pedirLimite('presupuestos', 'límite de gasto', 'límites de gasto'); }
       if (ya) S().editar('presupuestos', ya.id, { monto: r.monto }, 'Cambié un límite'); else S().agregar('presupuestos', { cat: r.cat || null, monto: r.monto, periodo: 'mes' }, 'Puse un límite');
-      const linea = 'Listo: límite de ' + $(r.monto) + ' al mes en ' + nombre.toLowerCase() + '.';
+      const linea = 'Listo: límite de ' + $d(r.monto) + ' al mes en ' + nombre.toLowerCase() + '.';
       pintar([cabeza(), h('div', { class: 'voz-cuerpo', estilo: { alignItems: 'center', textAlign: 'center' } }, h('div', { class: 'mic-grande ok' }, ico('ok')), h('p', { class: 'voz-respuesta' }, linea)),
         h('div', { class: 'voz-pie' }, btnPrim('Listo', cerrar), btnTxt('Deshacer', () => { S().deshacer(); cerrar(); }))]);
       hablar(linea);
     };
     pintar([cabeza('Esto entendí'), h('div', { class: 'voz-cuerpo' }, h('p', { class: 'frase' }, '«' + texto + '»'),
       h('div', { class: 'entendido' },
-        h('div', { class: 'entendido-fila' }, h('span', { class: 'entendido-etiqueta' }, 'Límite'), h('span', { class: 'entendido-valor monto-grande' }, $(r.monto))),
+        h('div', { class: 'entendido-fila' }, h('span', { class: 'entendido-etiqueta' }, 'Límite'), h('span', { class: 'entendido-valor monto-grande' }, $d(r.monto))),
         h('div', { class: 'entendido-fila' }, h('span', { class: 'entendido-etiqueta' }, 'En'), h('span', { class: 'entendido-valor' }, r.cat ? S().categoria(r.cat).icono + ' ' + nombre : 'Todos los gastos')),
         h('div', { class: 'entendido-fila' }, h('span', { class: 'entendido-etiqueta' }, 'Cada'), h('span', { class: 'entendido-valor' }, 'Mes')))),
     h('div', { class: 'voz-pie' }, btnPrim('Guardar límite', guardar), btnTxt('Cancelar', cerrar))]);
-    hablar('Un límite de ' + $(r.monto) + ' en ' + nombre.toLowerCase() + '. ¿Lo guardo?');
+    hablar('Un límite de ' + $d(r.monto) + ' en ' + nombre.toLowerCase() + '. ¿Lo guardo?');
   }
 
   /* --------------------------------------------------------------- ayuda / no entendí */
@@ -6626,6 +7928,7 @@
     const redibujar = () => AF.app.redibujar();
     cont.appendChild(h('header', { class: 'barra-superior' },
       h('h1', { class: 'h2' }, 'Movimientos'),
+      AF.app.botonOjo ? AF.app.botonOjo() : null,
       h('button', { class: 'boton-redondo', type: 'button', 'aria-label': 'Buscar', 'aria-pressed': est.buscar ? 'true' : 'false', onclick: () => { est.buscar = !est.buscar; if (!est.buscar) est.texto = ''; redibujar(); } }, ico('buscar')),
       h('button', { class: 'boton-redondo', type: 'button', 'aria-label': 'Exportar', onclick: exportar }, ico('archivo')),
       h('button', { class: 'boton-redondo', type: 'button', 'aria-label': 'Agregar movimiento', onclick: () => C().formMovimiento({ alGuardar: (m) => C().guardarMov(m) }) }, ico('mas_'))));
@@ -6634,7 +7937,7 @@
     sub.appendChild(resumenArriba());
     // periodo
     sub.appendChild(h('div', { class: 'periodo-fila' },
-      h('div', { class: 'segmentos' }, [['dia', 'Día'], ['semana', 'Semana'], ['mes', 'Mes'], ['anio', 'Año']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': est.periodo === k ? 'true' : 'false', onclick: () => { est.periodo = k; est.ref = hoy; est.pagina = 1; redibujar(); } }, t))),
+      h('div', { class: 'segmentos' }, [['dia', 'Día'], ['semana', 'Semana'], ['mes', 'Mes'], ['anio', 'Año']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': est.periodo === k ? 'true' : 'false', onclick: () => { est.periodo = k; est.ref = hoy; est.pagina = 1; S().ajustar({ periodoMovs: k }); redibujar(); } }, t))),
       h('button', { class: 'boton-redondo', type: 'button', 'aria-label': 'Cómo verlos: ' + NOMBRES_VISTA[est.vista], onclick: elegirVista }, ico(est.vista === 'categorias' ? 'grafica' : est.vista === 'libro' ? 'libro_texto' : est.vista === 'tabla' ? 'tabla' : 'lineas'))));
     if (est.buscar) {
       const inp = h('input', { class: 'entrada', type: 'search', placeholder: 'Buscar por nombre o categoría', value: est.texto, 'aria-label': 'Buscar movimientos',
@@ -6653,7 +7956,7 @@
   const NOMBRES_VISTA = { lista: 'Lista', categorias: 'Categorías', libro: 'Libro', tabla: 'Tabla' };
   function elegirVista() {
     const det = { lista: ['lineas', 'Lista', 'Tus movimientos por día'], categorias: ['grafica', 'Categorías', 'Cuánto va a cada categoría'], libro: ['libro_texto', 'Libro', 'Ingresos, egresos y saldo acumulado'], tabla: ['tabla', 'Tabla', 'Corrige varios movimientos a la vez'] };
-    const api = hoja({ titulo: 'Cómo verlos', cuerpo: h('div', { class: 'lista' }, Object.keys(det).map((k) => AF.ui.fila({ icono: ico(det[k][0]), tono: 'neutro', titulo: det[k][1], sub: det[k][2], derecha: est.vista === k ? ico('ok') : null, onclick: () => { est.vista = k; est.pagina = 1; api.cerrar(); AF.app.redibujar(); } }))) });
+    const api = hoja({ titulo: 'Cómo verlos', cuerpo: h('div', { class: 'lista' }, Object.keys(det).map((k) => AF.ui.fila({ icono: ico(det[k][0]), tono: 'neutro', titulo: det[k][1], sub: det[k][2], derecha: est.vista === k ? ico('ok') : null, onclick: () => { est.vista = k; est.pagina = 1; est.temporal = false; S().ajustar({ vistaMovs: k }); api.cerrar(); AF.app.redibujar(); } }))) });
   }
   function elegirFecha(hoy) {
     const inp = h('input', { class: 'entrada', type: 'date', value: est.ref, max: hoy });
@@ -6668,7 +7971,7 @@
     const gas = lista.filter((m) => m.tipo === 'gasto').reduce((s, m) => s + m.monto, 0);                       // todo lo que compraste (con tarjeta incluida)
     const efectivo = lista.filter((m) => m.tipo === 'gasto' && m.cuenta !== 'tarjeta').reduce((s, m) => s + m.monto, 0);
     const conTarjeta = gas - efectivo;
-    const pag = lista.filter((m) => m.tipo === 'pago_tarjeta').reduce((s, m) => s + m.monto, 0);
+    const pag = lista.filter((m) => m.tipo === 'pago_tarjeta' && !m.reembolso).reduce((s, m) => s + m.monto, 0);
     const inn = lista.filter(esInnecesario).reduce((s, m) => s + m.monto, 0);
     // balance = lo que entró menos lo que salió de tu bolsillo (las compras con tarjeta salen cuando pagas la tarjeta)
     return { ing, gas, efectivo, conTarjeta, pag, inn, balance: ing - efectivo - pag };
@@ -6743,7 +8046,7 @@
     const cuerpo = h('div', { class: 'contenido' });
     cuerpo.appendChild(resumen(movs));
     const grupos = {}; let pagosT = 0, nPagosT = 0;
-    movs.forEach((m) => { if (m.tipo === 'pago_tarjeta') { pagosT += m.monto; nPagosT++; return; } const k = m.cat; const gr = (grupos[k] = grupos[k] || { k, total: 0, n: 0, tipo: m.tipo === 'ingreso' ? 'ingreso' : 'gasto' }); gr.total += m.monto; gr.n++; });
+    movs.forEach((m) => { if (m.tipo === 'pago_tarjeta') { if (!m.reembolso) { pagosT += m.monto; nPagosT++; } return; } const k = m.cat; const gr = (grupos[k] = grupos[k] || { k, total: 0, n: 0, tipo: m.tipo === 'ingreso' ? 'ingreso' : 'gasto' }); gr.total += m.monto; gr.n++; });
     const arr = Object.values(grupos).sort((a, b) => b.total - a.total);
     if (!arr.length && !pagosT) { cuerpo.appendChild(vacio()); cont.appendChild(cuerpo); return; }
     // gastos e ingresos por separado: el porcentaje es sobre el total de su grupo
@@ -6754,14 +8057,14 @@
         h('div', { class: 'tarjeta' }, lista.map((x) => {
           const c = x.k === '__pago' ? { icono: '💳', nombre: 'Pagos de tarjeta', color: '#6B7280' } : S().categoria(x.k);
           const pct = total ? Math.round((x.total / total) * 100) : 0;
-          return h('button', { class: 'barra-cat', type: 'button', 'aria-label': c.nombre + ' ' + $(x.total), onclick: () => { if (x.k === '__pago') { est.tipo = 'gasto'; est.cat = null; est.texto = 'pago de tarjeta'; } else { est.cat = x.k; if (est.tipo === 'innecesarios') est.tipo = 'gasto'; } est.vista = 'lista'; AF.app.redibujar(); } },
+          return h('button', { class: 'barra-cat', type: 'button', 'aria-label': c.nombre + ' ' + $(x.total), onclick: () => { if (x.k === '__pago') { est.tipo = 'gasto'; est.cat = null; est.texto = 'pago de tarjeta'; } else { est.cat = x.k; if (est.tipo === 'innecesarios') est.tipo = 'gasto'; } est.vista = 'lista'; est.temporal = true; AF.app.redibujar(); } },
             h('div', { class: 'barra-cat-cab' }, h('span', null, c.icono + ' ' + c.nombre), h('span', { class: 'barra-cat-monto' }, $(x.total), h('span', { class: 'suave' }, ' · ' + pct + ' %'))),
             h('div', { class: 'barra-cat-pista' }, h('i', { estilo: { width: Math.max(2, Math.round((x.total / max) * 100)) + '%', background: c.color || 'var(--acento)' } })),
             h('div', { class: 'barra-cat-sub' }, x.n + (x.n === 1 ? ' movimiento' : ' movimientos') + ' · toca para verlos'));
         })));
     };
     [bloque('Gastos por categoría', arr.filter((x) => x.tipo === 'gasto')), bloque('Ingresos por categoría', arr.filter((x) => x.tipo === 'ingreso'))].forEach((b) => b && cuerpo.appendChild(b));
-    if (pagosT) cuerpo.appendChild(h('button', { class: 'tarjeta', type: 'button', estilo: { width: '100%', textAlign: 'left', marginTop: '14px' }, onclick: () => { est.tipo = 'gasto'; est.cat = null; est.texto = 'pago de tarjeta'; est.vista = 'lista'; AF.app.redibujar(); } },
+    if (pagosT) cuerpo.appendChild(h('button', { class: 'tarjeta', type: 'button', estilo: { width: '100%', textAlign: 'left', marginTop: '14px' }, onclick: () => { est.tipo = 'gasto'; est.cat = null; est.texto = 'pago de tarjeta'; est.vista = 'lista'; est.temporal = true; AF.app.redibujar(); } },
       h('div', { class: 'barra-cat-cab' }, h('span', null, '💳 Pagos a tus tarjetas'), h('span', { class: 'barra-cat-monto' }, $(pagosT))),
       h('div', { class: 'barra-cat-sub' }, nPagosT + (nPagosT === 1 ? ' pago' : ' pagos') + ' · no es un gasto nuevo: baja la deuda de compras que ya están arriba')));
     cont.appendChild(cuerpo);
@@ -6777,9 +8080,9 @@
     let saldo = 0, ing = 0, egr = 0, tarj = 0;
     const filas = movs.map((m) => {
       const esIng = m.tipo === 'ingreso', esTarj = m.tipo === 'gasto' && m.cuenta === 'tarjeta';
-      const nombre = m.tipo === 'pago_tarjeta' ? 'Pago ' + ((S().buscar('tarjetas', m.tarjetaId) || {}).nombre || 'tarjeta') : (m.desc || S().categoria(m.cat).nombre);
-      const catTxt = m.tipo === 'pago_tarjeta' ? 'Baja tu deuda' : S().categoria(m.cat).nombre;
-      if (esIng) { ing += m.monto; saldo += m.monto; } else if (esTarj) { tarj += m.monto; } else { egr += m.monto; saldo -= m.monto; }
+      const nombre = m.tipo === 'pago_tarjeta' ? (m.reembolso ? 'Reembolso ' : 'Pago ') + ((S().buscar('tarjetas', m.tarjetaId) || {}).nombre || 'tarjeta') : (m.desc || S().categoria(m.cat).nombre);
+      const catTxt = m.tipo === 'pago_tarjeta' ? (m.reembolso ? 'Baja tu deuda (no es ingreso)' : 'Baja tu deuda') : S().categoria(m.cat).nombre;
+      if (esIng) { ing += m.monto; saldo += m.monto; } else if (esTarj || (m.tipo === 'pago_tarjeta' && m.reembolso)) { if (esTarj) tarj += m.monto; } else { egr += m.monto; saldo -= m.monto; }
       const fechaTxt = U.deISO(m.fecha).getDate() + ' ' + U.MESES_CORTOS[U.deISO(m.fecha).getMonth()] + (est.periodo === 'anio' ? ' ' + m.fecha.slice(2, 4) : '');
       return h('tr', { onclick: () => C().editarMov(m), estilo: { cursor: 'pointer' } },
         h('td', { class: 'concepto' }, h('div', null, nombre), h('div', { class: 'texto-xs suave' }, fechaTxt + ' · ' + catTxt + (esTarj ? ' · con tarjeta' : '') + (esInnecesario(m) ? ' · innecesario' : ''))),
@@ -6834,7 +8137,7 @@
       return h('tr', { 'data-id': m.id },
         h('td', null, h('input', { type: 'date', value: m.fecha, max: U.sumarDias(hoy, 366), 'aria-label': 'Fecha', onchange: (e) => { if (e.target.value) aplicar({ fecha: e.target.value }); else e.target.value = m.fecha; } })),
         h('td', null, esPago ? h('span', { class: 'suave', estilo: { padding: '0 8px' } }, 'Pago tarjeta') : h('select', { 'aria-label': 'Tipo', onchange: (e) => { const t = e.target.value; aplicar({ tipo: t, cat: cats(t)[0].id, nec: null }); AF.app.redibujar(); } }, h('option', { value: 'gasto', selected: m.tipo === 'gasto' }, 'Gasto'), h('option', { value: 'ingreso', selected: m.tipo === 'ingreso' }, 'Ingreso'))),
-        h('td', { class: 'num' }, h('input', { inputmode: 'decimal', value: String(m.monto).replace('.', ','), 'aria-label': 'Monto', onchange: (e) => { const v = U.parseNumero(e.target.value); if (v > 0) aplicar({ monto: U.r2(v) }); else e.target.value = String(m.monto).replace('.', ','); } })),
+        h('td', { class: 'num' }, h('input', { inputmode: 'decimal', value: U.montoEditable(m.monto), 'aria-label': 'Monto', onchange: (e) => { const v = U.parseNumero(e.target.value); if (v > 0) aplicar({ monto: U.r2(v) }); else e.target.value = U.montoEditable(m.monto); } })),
         h('td', null, esPago ? h('span', { class: 'suave', estilo: { padding: '0 8px' } }, (S().buscar('tarjetas', m.tarjetaId) || {}).nombre || '') : h('select', { 'aria-label': 'Categoría', onchange: (e) => { const c = S().categoria(e.target.value); const p = { cat: c.id }; if (m.tipo === 'gasto' && (m.nec == null || m.nec === c0.nec)) p.nec = c.nec || null; aplicar(p); if (m.desc) S().aprender(m.desc, c.id); } }, opcionesCat(m.tipo, m.cat))),
         h('td', null, esPago ? null : h('input', { value: m.desc || '', maxlength: 80, 'aria-label': 'Nombre', onchange: (e) => aplicar({ desc: e.target.value.trim() }) })),
         h('td', null, m.tipo === 'gasto' ? h('select', { 'aria-label': 'Necesario o innecesario', onchange: (e) => aplicar({ nec: e.target.value === 'S' ? null : e.target.value }) }, h('option', { value: 'S', selected: m.nec == null }, '—'), h('option', { value: 'N', selected: m.nec === 'N' }, 'Necesario'), h('option', { value: 'G', selected: m.nec === 'G' }, 'Innecesario')) : null),
@@ -6859,9 +8162,17 @@
         h('button', { class: 'btn btn-borde btn-bloque', type: 'button', onclick: (e) => { e.currentTarget.closest('.hoja').previousSibling.click(); AF.app.abrir('Resumen', (c) => V.informesUI.resumen(c)); } }, 'Ver resumen y reportes en PDF'))) });
   }
 
+  /* ------------------------------------------- cómo te gusta verlos: se recuerda (U13, Luis 12 nov) */
+  // La vista (Lista/Categorías/Libro/Tabla) y el período (Día/Semana/Mes/Año) que eliges a mano quedan guardados en tus ajustes
+  // (sobreviven a cerrar la app y van en la copia de Drive). Los atajos («Ver todo», tocar una barra) solo los cambian un rato.
+  let cargado = false;
+  function preferida() { const a = S().d.ajustes || {}; return { vista: a.vistaMovs || 'lista', periodo: a.periodoMovs || 'mes' }; }
+  function volverAPreferida() { const pr = preferida(); est.vista = pr.vista; est.periodo = pr.periodo; est.temporal = false; }
+
   /* ----------------------------------------------------------------------- render */
   function render(cont) {
     const D = S().d, hoy = AF.app.hoy();
+    if (!cargado) { cargado = true; volverAPreferida(); }
     cabecera(cont, hoy);
     AF.app.noRefrescar = est.vista === 'tabla';
     if (est.vista === 'tabla') tabla(cont, D, hoy);
@@ -6872,14 +8183,15 @@
 
   // Al entrar desde otra pantalla con opciones ({ tipo: 'innecesarios' }, { cat }, { periodo, ref }) se aplican y se limpian las demás.
   function alEntrar(o) {
-    if (!o || !Object.keys(o).length) return;
+    if (!o || !Object.keys(o).length) { if (est.temporal) { volverAPreferida(); est.ref = AF.app.hoy(); } return; }   // por la barra de abajo: vuelve a TU vista
+    est.temporal = true;
     est.tipo = o.tipo || 'todos'; est.cat = o.cat || null; est.texto = ''; est.buscar = false; est.pagina = 1;
     if (o.periodo) est.periodo = o.periodo;
     est.ref = o.ref || AF.app.hoy();
-    if (o.vista) est.vista = o.vista; else if (est.vista === 'tabla') est.vista = 'lista';
+    if (o.vista) est.vista = o.vista; else est.vista = preferida().vista === 'tabla' ? 'lista' : preferida().vista;
   }
   // Abre la lista de movimientos en un mes (lo usa Resumen al tocar una barra o el botón «Ver movimientos»).
-  function irAMes(mesISO) { est.periodo = 'mes'; est.ref = U.inicioMes(mesISO); est.tipo = 'todos'; est.cat = null; est.texto = ''; est.buscar = false; est.pagina = 1; est.vista = 'lista'; AF.app.ir('movimientos'); }
+  function irAMes(mesISO) { est.periodo = 'mes'; est.ref = U.inicioMes(mesISO); est.tipo = 'todos'; est.cat = null; est.texto = ''; est.buscar = false; est.pagina = 1; est.vista = preferida().vista === 'tabla' ? 'lista' : preferida().vista; est.temporal = true; cargado = true; AF.app.ir('movimientos'); }
   V.movimientos = { render, estado: est, irAMes, alEntrar };
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
@@ -6943,13 +8255,16 @@
   }
 
   function plastico(t, e, hoy, grande) {
-    const venceTxt = e.proximoVence && e.aPagarProximo ? 'Vence ' + (e.diasParaVencer <= 0 ? 'hoy' : e.diasParaVencer === 1 ? 'mañana' : 'el ' + fechaLarga(e.proximoVence)) : 'Sin pagos pendientes';
+    // Si hay compras que aún no se pueden repartir (faltan el corte y el día de pago, los meses o la tasa), NUNCA se dice «Sin pagos pendientes»
+    const sinFecha = e.deudaSinFecha > 0;
+    const venceTxt = e.proximoVence && e.aPagarProximo ? 'Vence ' + (e.diasParaVencer <= 0 ? 'hoy' : e.diasParaVencer === 1 ? 'mañana' : 'el ' + fechaLarga(e.proximoVence))
+      : sinFecha ? (e.faltanDatos.includes('fechas') ? 'Falta el día de corte y de pago' : 'Faltan datos de una compra') : 'Sin pagos pendientes';
     const usado = t.cupo ? Math.min(1, e.cupoUsado / t.cupo) : null;
     const banco = t.bancoId ? B().buscar(t.bancoId) : null;
     return h('div', { class: 'plastico tarjeta-credito ' + acabado(t.nivel) },
       h('div', { class: 'plastico-cabeza' }, banco ? AF.ui.insigniaBanco(banco, 30) : h('span', { class: 'plastico-nombre' }, t.nombre), marcaRed(t.red)),
       h('div', { class: 'plastico-medio' }, chipTarjeta(),
-        h('div', { class: 'plastico-monto' }, h('div', { class: 'suave texto-xs' }, e.origen === 'estado' ? 'A pagar · según tu estado' : 'A pagar · estimado'), h('div', { class: 'plastico-cifra' }, $(e.aPagarProximo)))),
+        h('div', { class: 'plastico-monto' }, h('div', { class: 'suave texto-xs' }, sinFecha && !e.aPagarProximo ? 'Debes' : e.origen === 'estado' ? 'A pagar · según tu estado' : 'A pagar · estimado'), h('div', { class: 'plastico-cifra' }, $(sinFecha && !e.aPagarProximo ? e.deudaTotal : e.aPagarProximo)))),
       h('div', { class: 'plastico-numero' }, h('span', { class: 'plastico-digitos' }, t.ultimos4 ? '•••• •••• •••• ' + t.ultimos4 : t.nombre), t.nivel ? h('span', { class: 'suave plastico-nivel' }, nivelCorto(t.nivel)) : null),
       h('div', null, h('div', { class: 'plastico-pie' }, h('span', null, venceTxt), t.cupo ? h('span', { class: 'suave' }, 'Cupo libre ' + $(Math.max(0, t.cupo - e.cupoUsado))) : null),
         usado != null ? h('div', { class: 'cupo', role: 'img', 'aria-label': 'Cupo usado ' + Math.round(usado * 100) + ' por ciento' }, h('i', { estilo: { width: Math.round(usado * 100) + '%' } })) : null));
@@ -7131,10 +8446,13 @@
     return api;
   }
 
-  function formTarjeta(t) {
+  // despues(tarjeta): para volver a lo que se estaba haciendo (p. ej. el dictado que pedía la tarjeta)
+  function formTarjeta(t, despues) {
     asistente({ tarjeta: t, textoGuardar: t ? 'Guardar cambios' : 'Guardar tarjeta', alGuardar: (o) => {
-      if (t) S().editar('tarjetas', t.id, o, 'Edité ' + o.nombre); else S().agregar('tarjetas', o, 'Agregué ' + o.nombre);
+      let x;
+      if (t) { S().editar('tarjetas', t.id, o, 'Edité ' + o.nombre); x = S().buscar('tarjetas', t.id); } else x = S().agregar('tarjetas', o, 'Agregué ' + o.nombre);
       aviso('Tarjeta guardada');
+      if (despues) despues(x);
     } });
   }
 
@@ -7203,10 +8521,19 @@
   }
 
   /* ------------------------------------------------------------------ lo que viene: una fila por compra */
+  // Compras que aún no tienen calendario (faltan el corte y el día de pago, los meses o la tasa): son deuda igual y se dice qué falta.
+  function sinCalendario(cont, e) {
+    if (!e.sinCalendario || !e.sinCalendario.length) return;
+    const qué = (f) => (f.includes('fechas') ? 'falta el día de corte y de pago' : f.includes('meses') ? 'falta a cuántos meses' : f.includes('tasa') ? 'falta la tasa de interés' : 'faltan datos');
+    cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Deuda sin fecha de pago'), h('span', { class: 'texto-xs suave' }, $(e.deudaSinFecha))),
+      h('div', { class: 'lista' }, e.sinCalendario.map((q) => fila({ icono: S().categoria(q.cat).icono, titulo: q.desc || S().categoria(q.cat).nombre, sub: U.cap(qué(q.falta)) + ' · ' + U.fechaCorta(q.fecha, AF.app.hoy()), derecha: h('span', { class: 'monto' }, $(q.pendiente)) })))));
+  }
+
   // Cada compra en cuotas es UNA fila («PlayStation · 6 cuotas de $113 · vas en la 2») que se abre para ver sus cuotas.
   // Las compras corrientes (sin cuotas) se agrupan por fecha de pago.
   const abiertas = new Set();
   function loQueViene(cont, e, hoy) {
+    sinCalendario(cont, e);
     if (!e.cuotas.length) return;
     const porCompra = {};
     e.cuotas.forEach((q) => { const c = (porCompra[q.compraId] = porCompra[q.compraId] || { id: q.compraId, desc: q.desc, cat: q.cat, de: q.de, cuotas: [] }); c.cuotas.push(q); });
@@ -7228,12 +8555,14 @@
     const cuotaTxt = (q) => h('div', { class: 'compra-cuota' + (q.pendiente <= 0.004 ? ' pagada' : q.vence === e.proximoVence ? ' proxima' : '') },
       h('span', null, 'Cuota ' + q.n + ' de ' + q.de), h('span', { class: 'suave' }, q.pendiente <= 0.004 ? 'pagada' : (q.vence < hoy ? 'venció el ' : 'vence el ') + fechaLarga(q.vence)), h('span', { class: 'num' }, $(q.pendiente > 0.004 ? q.pendiente : q.monto)));
     const filaCompra = (c) => {
-      const abierta = abiertas.has(c.id);
+      // el detalle de cada cuota y sus intereses es de Pro; la deuda y la próxima cuota se ven siempre
+      const pro = AF.acceso.tiene('tarjetaDiferidoCuotas');
+      const abierta = pro && abiertas.has(c.id);
       const n = c.pagadas + 1;
       const cuotaBase = c.cuotas[0].monto;
       const iguales = c.cuotas.every((q) => Math.abs(q.monto - cuotaBase) < 0.02);
       const sub = (iguales ? c.de + ' cuotas de ' + $(cuotaBase) : c.de + ' cuotas') + ' · vas en la ' + Math.min(n, c.de) + ' · faltan ' + $(c.falta);
-      const cab = h('button', { class: 'compra-cab', type: 'button', 'aria-expanded': abierta ? 'true' : 'false', onclick: () => { if (abierta) abiertas.delete(c.id); else abiertas.add(c.id); AF.app.redibujar(); } },
+      const cab = h('button', { class: 'compra-cab', type: 'button', 'aria-expanded': abierta ? 'true' : 'false', onclick: () => { if (!pro) { C().pedirPro('tarjetaDiferidoCuotas'); return; } if (abierta) abiertas.delete(c.id); else abiertas.add(c.id); AF.app.redibujar(); } },
         h('div', { class: 'ico' }, iconoDe(c)),
         h('div', { class: 'fila-texto' }, h('div', { class: 'fila-titulo' }, nombreDe(c)), h('div', { class: 'fila-sub' }, sub)),
         h('div', { class: 'compra-der' }, h('span', { class: 'monto' }, $(c.proxima.pendiente)), h('span', { class: 'texto-xs suave' }, c.proxima.vence === e.proximoVence ? 'próximo pago' : fechaLarga(c.proxima.vence))),
@@ -7412,7 +8741,7 @@
     return h('div', { class: 'bloque' }, h('div', { class: 'bloque-fila' }, principal, o.accion || null),
       o.progreso != null ? progreso(o.progreso, o.nivel) : null, o.nota ? h('div', { class: 'bloque-nota' }, o.nota) : null);
   }
-  const entradaMonto = (valor, ph, etq) => h('input', { class: 'entrada grande', inputmode: 'decimal', placeholder: ph || '0', value: valor == null || valor === '' ? '' : String(valor).replace('.', ','), 'aria-label': etq || 'Monto' });
+  const entradaMonto = (valor, ph, etq) => h('input', { class: 'entrada grande', inputmode: 'decimal', placeholder: ph || '0', value: valor == null || valor === '' ? '' : U.montoEditable(valor), 'aria-label': etq || 'Monto' });
   const errorEl = () => h('div', { class: 'ayuda', role: 'alert', estilo: { color: 'var(--gasto)', minHeight: '18px', marginTop: '8px' } });
   const eliminar = async (col, id, titulo, texto, nota) => {
     if (!(await C().confirmar({ titulo, texto, si: 'Eliminar', peligro: true }))) return false;
@@ -7465,7 +8794,7 @@
   // Lo ahorrado = lo que aportaste + lo que se aparta solo (% del cobro y redondeo: AF.ahorro lo calcula de tus movimientos)
   const ahorrado = (m) => (AF.ahorro ? AF.ahorro.ahorrado(S().d, m) : U.r2((m.aportes || []).reduce((s, a) => s + a.monto, 0)));
   function ritmoMeta(m, hoy) {
-    const falta = U.r2(Math.max(0, m.objetivo - ahorrado(m)));
+    const falta = m.objetivo ? U.r2(Math.max(0, m.objetivo - ahorrado(m))) : null;
     if (falta === 0) return '¡Meta lograda!';
     if (m.aporteMensual > 0) { const n = Math.ceil(falta / m.aporteMensual), f = U.sumarMeses(hoy, n); return 'Con ' + $(m.aporteMensual) + ' al mes llegas en ' + plural(n, 'mes', 'meses') + ' (' + U.nombreMes(f) + ' de ' + f.slice(0, 4) + ').'; }
     if (m.fechaMeta && m.fechaMeta > hoy) {
@@ -7479,7 +8808,7 @@
     cont.appendChild(intro('Ahorra para algo concreto. Lo que apartas para tus metas se descuenta de «lo que te queda» en Inicio.'));
     if (!D.metas.length) cont.appendChild(vacio('Aún no tienes metas', 'Un viaje, una moto, un colchón para emergencias. Ponle nombre y monto.', 'Crear una meta', () => formMeta(null)));
     else cont.appendChild(h('div', { class: 'lista' }, D.metas.map((m) => { const a = ahorrado(m), pct = m.objetivo ? a / m.objetivo : 0;
-      return bloque({ icono: m.icono || '🏁', titulo: m.nombre, sub: $(a) + ' de ' + $(m.objetivo), derecha: h('span', { class: 'monto' }, Math.round(pct * 100) + ' %'), progreso: pct, nivel: pct >= 1 ? 'ok' : '',
+      return bloque({ icono: m.icono || '🏁', titulo: m.nombre, sub: m.objetivo ? $(a) + ' de ' + $(m.objetivo) : $(a) + ' ahorrados · ponle cuánto quieres juntar', derecha: h('span', { class: 'monto' }, Math.round(pct * 100) + ' %'), progreso: pct, nivel: pct >= 1 ? 'ok' : '',
         nota: ritmoMeta(m, hoy), onclick: () => AF.app.abrir(m.nombre, (c) => detalleMeta(c, m.id)) }); })));
     cont.appendChild(h('section', { class: 'seccion' }, h('div', { class: 'seccion-cabeza' }, h('h2', { class: 'h2' }, 'Ahorra más fácil')), h('div', { class: 'lista' }, [
       AF.ui.fila({ icono: '🪙', titulo: 'Ahorro automático', sub: 'Aparta solo un % de tu cobro o el redondeo', derecha: ico('derecha'), onclick: () => AF.app.abrir('Ahorro automático', (c) => V.ahorro.ahorroAutomatico(c)) }),
@@ -7494,7 +8823,7 @@
     cont.appendChild(h('div', { class: 'plastico' },
       h('div', { class: 'plastico-cabeza' }, h('span', null, (m.icono || '🏁') + ' ' + m.nombre), h('span', { class: 'suave' }, Math.round(pct * 100) + ' %')),
       h('div', null, h('div', { class: 'suave texto-sm' }, 'Llevas'), h('div', { class: 'plastico-cifra' }, $(a))),
-      h('div', null, h('div', { class: 'plastico-pie' }, h('span', null, 'Meta ' + $(m.objetivo)), h('span', { class: 'suave' }, 'Faltan ' + $(Math.max(0, m.objetivo - a)))), h('div', { class: 'cupo' }, h('i', { estilo: { width: pct * 100 + '%' } })))));
+      h('div', null, h('div', { class: 'plastico-pie' }, h('span', null, m.objetivo ? 'Meta ' + $(m.objetivo) : 'Sin monto meta'), h('span', { class: 'suave' }, m.objetivo ? 'Faltan ' + $(Math.max(0, m.objetivo - a)) : 'Toca editar para ponerlo')), h('div', { class: 'cupo' }, h('i', { estilo: { width: pct * 100 + '%' } })))));
     cont.appendChild(h('p', { class: 'suave', estilo: { margin: '14px 0 0' } }, ritmoMeta(m, hoy)));
     cont.appendChild(h('div', { estilo: { display: 'flex', gap: '10px', marginTop: '16px' } }, boton('Aportar o retirar', 'btn-voz', () => formAporte(m)), h('button', { class: 'btn btn-borde', type: 'button', 'aria-label': 'Editar meta', onclick: () => formMeta(m) }, ico('editar'))));
     const auto = AF.ahorro ? AF.ahorro.derivados(S().d).filter((x) => x.metaId === m.id) : [];
@@ -7517,19 +8846,21 @@
         const v = num(monto); if (!(v > 0)) { err.textContent = 'Escribe un monto mayor que cero.'; return false; }
         if (e.signo < 0 && v > ahorrado(m)) { err.textContent = 'Solo tienes ' + $(ahorrado(m)) + ' en esta meta.'; return false; }
         S().editar('metas', m.id, { aportes: (m.aportes || []).concat([{ id: U.uid(), fecha: fecha.value || hoy, monto: U.r2(v * e.signo) }]) }, e.signo > 0 ? 'Aporté a una meta' : 'Retiré de una meta');
-        const lograda = e.signo > 0 && ahorrado(m) < m.objetivo && ahorrado(S().buscar('metas', m.id)) >= m.objetivo;
+        const lograda = m.objetivo && e.signo > 0 && ahorrado(m) < m.objetivo && ahorrado(S().buscar('metas', m.id)) >= m.objetivo;
         aviso(lograda ? '🎉 ¡Meta lograda!' : e.signo > 0 ? 'Aporte guardado' : 'Retiro guardado', { texto: 'Deshacer', onclick: () => S().deshacer() });
         if (lograda) AF.ui.confeti();
       } }] });
     setTimeout(() => monto.focus(), 200);
   }
-  function formMeta(m) {
-    const D = S().d, edit = !!m;
+  // prefill: lo que ya se dijo al dictar («quiero una meta de 50 al mes»): { nombre, objetivo, aporteMensual }
+  function formMeta(m, prefill) {
+    const D = S().d, edit = !!(m && m.id); prefill = prefill || {};
     if (!edit && !AF.acceso.puedeAgregar('metas', D.metas.length)) return C().pedirLimite('metas', 'meta de ahorro', 'metas de ahorro');
     const e = { icono: edit ? m.icono || '🏁' : ICONOS_META[0] };
-    const nombre = h('input', { class: 'entrada', placeholder: 'Ej.: viaje a la playa', maxlength: 40, value: edit ? m.nombre : '', 'aria-label': 'Nombre de la meta' });
-    const objetivo = entradaMonto(edit ? m.objetivo : '', '0', 'Cuánto quieres juntar');
-    const aporte = h('input', { class: 'entrada', inputmode: 'decimal', placeholder: 'Opcional', value: edit && m.aporteMensual ? String(m.aporteMensual).replace('.', ',') : '', 'aria-label': 'Aporte al mes' });
+    const nombre = h('input', { class: 'entrada', placeholder: 'Ej.: viaje a la playa', maxlength: 40, value: edit ? m.nombre : (prefill.nombre || ''), 'aria-label': 'Nombre de la meta' });
+    const objetivo = entradaMonto(edit ? (m.objetivo || '') : (prefill.objetivo || ''), '0', 'Cuánto quieres juntar');
+    const aporteIni = edit ? m.aporteMensual : prefill.aporteMensual;
+    const aporte = h('input', { class: 'entrada', inputmode: 'decimal', placeholder: 'Opcional', value: aporteIni ? String(aporteIni).replace('.', ',') : '', 'aria-label': 'Aporte al mes' });
     const fechaMeta = h('input', { class: 'entrada', type: 'date', value: edit && m.fechaMeta ? m.fechaMeta : '', min: AF.app.hoy() });
     const err = errorEl(), zonaIcono = h('div');
     const pintar = () => { AF.ui.vaciar(zonaIcono); zonaIcono.appendChild(h('div', { class: 'opciones' }, ICONOS_META.map((i) => h('button', { type: 'button', class: 'opcion', 'aria-pressed': e.icono === i ? 'true' : 'false', 'aria-label': 'Icono ' + i, onclick: () => { e.icono = i; pintar(); } }, i)))); };
@@ -7930,8 +9261,8 @@
     const D = S().d, hoy = AF.app.hoy(), fe = A().fondoEmergencia(D, hoy), cfg = PLAN.ahorro.fondo;
     cont.appendChild(intro('Un colchón para imprevistos: de ' + cfg.mesesMin + ' a ' + cfg.mesesMax + ' meses de lo que de verdad necesitas gastar.'));
     if (fe.fondoMeta) {
-      const m = fe.fondoMeta, pct = m.objetivo ? Math.min(1, fe.ahorrado / m.objetivo) : 0;
-      cont.appendChild(h('div', { class: 'lista' }, bloque({ icono: m.icono || cfg.icono, titulo: m.nombre, sub: $(fe.ahorrado) + ' de ' + $(m.objetivo), derecha: h('span', { class: 'monto' }, Math.round(pct * 100) + ' %'), progreso: pct, nivel: pct >= 1 ? 'ok' : '',
+      const m = fe.fondoMeta, ah = Number(fe.ahorrado) || 0, pct = m.objetivo > 0 ? Math.max(0, Math.min(1, ah / m.objetivo)) : 0;
+      cont.appendChild(h('div', { class: 'lista' }, bloque({ icono: m.icono || cfg.icono, titulo: m.nombre, sub: m.objetivo ? $(ah) + ' de ' + $(m.objetivo) : $(ah) + ' ahorrados · ponle cuánto quieres juntar', derecha: h('span', { class: 'monto' }, Math.round(pct * 100) + ' %'), progreso: pct, nivel: pct >= 1 ? 'ok' : '',
         nota: fe.disponible && fe.mensual > 0 ? 'Con lo que llevas cubres ' + uno(fe.cobertura) + (fe.cobertura === 1 ? ' mes' : ' meses') + ' de tus gastos' + (fe.base === 'necesarios' ? ' necesarios.' : '.') : null, onclick: () => abrir(m.nombre, (c) => V.finanzas.detalleMeta(c, m.id)) })));
     }
     if (!fe.disponible) {
@@ -8161,7 +9492,7 @@
   // Leyenda: dice con palabras qué es cada color.
   const leyendaIG = () => h('div', { class: 'leyenda leyenda-grande' },
     h('span', null, h('i', { estilo: { background: 'var(--ingreso-vivo)' } }), h('b', null, 'Verde: '), 'ingresos (lo que entró)'),
-    h('span', null, h('i', { estilo: { background: 'var(--gasto-vivo)' } }), h('b', null, 'Rojo: '), 'gastos (lo que salió)'));
+    h('span', null, h('i', { estilo: { background: 'var(--gasto-vivo)' } }), h('b', null, 'Rojo: '), 'gastos (todo lo que compraste, también con tarjeta)'));
   function barrasCategorias(lista, n) {
     const mx = lista.length ? lista[0].total : 1;
     return h('div', null, lista.slice(0, n).map((x) => h('div', { class: 'barra-h' }, h('span', { class: 'barra-h-ico', 'aria-hidden': 'true' }, x.cat.icono),
@@ -8259,6 +9590,11 @@
       h('div', null, h('div', { class: 'dato-etiqueta suave' }, 'Ingresos'), h('div', { class: 'dato-valor', estilo: { color: 'var(--ingreso)' } }, $(t.ingresos))),
       h('div', null, h('div', { class: 'dato-etiqueta suave' }, 'Gastos'), h('div', { class: 'dato-valor', estilo: { color: 'var(--gasto)' } }, $(t.gastos)))));
     cont.appendChild(h('p', { class: 'texto-sm', estilo: { marginTop: '12px' } }, t.balance >= 0 ? 'Te sobraron ' : 'Gastaste ', h('strong', null, $(Math.abs(t.balance))), t.balance >= 0 ? (t.ingresos ? ' (' + Math.round((t.balance / t.ingresos) * 100) + ' % de lo que ganaste).' : '.') : ' más de lo que ganaste.'));
+    // C15: aquí cuenta TODO lo que compraste (también con tarjeta); Movimientos resta solo lo que salió del bolsillo. Se dice, para que no parezcan dos números distintos.
+    if (t.conTarjeta > 0) {
+      const rm = I().resumenMes(D, r.desde, r.hasta);
+      cont.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '4px' } }, 'Aquí cuento todo lo que compraste, también los ' + $(t.conTarjeta) + ' con tarjeta que se pagan después. En Movimientos el balance es ' + $(rm.balance) + ' porque solo resta lo que salió de tu bolsillo' + (t.pagosTarjeta ? ' (y los ' + $(t.pagosTarjeta) + ' que le pagaste a tus tarjetas)' : '') + '.'));
+    }
     // Tocar un mes en la gráfica abre el resumen de ese mes.
     const alTocarMes = (mes) => { est.modo = 'mes'; est.mes = mes + '-01'; AF.app.redibujar(); };
     const circulo = tipoGrafica() === 'circulo';
@@ -8998,11 +10334,14 @@
       esWeb ? f('🔄', 'Buscar actualización', 'Versión ' + PLAN.app.version + (N().version.compilada ? ' · compilación ' + N().version.compilacion : ' · desarrollo'), buscarActualizacion, h('span')) : null,
     ].filter(Boolean);
     if (filasApp.length) cuerpo.appendChild(grupo('Esta app', filasApp));
-    cuerpo.appendChild(grupo('Tu cuenta', [
+    const sinCuenta = V.cuenta && V.cuenta.esSinCuenta();
+    // U4: estando «sin cuenta», la forma de iniciar sesión se ve aquí (y lo que tienes pasa a tu cuenta)
+    const entrar = sinCuenta ? PLAN.sesion.proveedores.filter((p) => N().proveedorListo(p)).map((p) => f(p === 'google' ? '🔑' : '👤', 'Iniciar sesión con ' + (p === 'google' ? 'Google' : 'Facebook'), 'Lo que tienes pasa a tu cuenta' + (p === 'google' ? ' y se guarda en tu Drive' : ''), () => V.cuenta.iniciarDesdeSinCuenta(p))) : [];
+    cuerpo.appendChild(grupo('Tu cuenta', entrar.concat([
       f('⚙️', 'Ajustes', 'Cómo cobras, país, voz, PIN, apariencia', ir('Ajustes', (c) => ajustes(c))),
       f('☁️', 'Copia de seguridad', N().proveedorListo && AF.app.sesion && AF.app.sesion.proveedor === 'google' ? 'En tu Google Drive' : 'En un archivo', ir('Copia de seguridad', (c) => respaldo(c))),
-      f('🚪', 'Cerrar sesión', AF.app.sesion && AF.app.sesion.email ? AF.app.sesion.email : 'Vuelves a la primera pantalla', cerrarSesion, h('span')),
-    ]));
+      f('🚪', sinCuenta ? 'Salir' : 'Cerrar sesión', sinCuenta ? 'Estás sin cuenta: tus datos solo están en este teléfono' : AF.app.sesion && AF.app.sesion.email ? AF.app.sesion.email : 'Vuelves a la primera pantalla', cerrarSesion, h('span')),
+    ])));
     cuerpo.appendChild(h('p', { class: 'texto-xs suave', estilo: { marginTop: '28px', textAlign: 'center' } }, PLAN.app.nombre + ' ' + PLAN.app.version + ' · ' + PLAN.app.avisoLegal));
     cont.appendChild(cuerpo);
   }
@@ -9015,10 +10354,8 @@
     if (!r.hay) { aviso('Ya tienes la última versión'); return; }
     if (await C().confirmar({ titulo: 'Hay una versión nueva', texto: 'Se instala en unos segundos y la app se reabre sola. No pierdes ningún dato.', si: 'Actualizar' })) N().version.aplicar();
   }
-  async function cerrarSesion() {
-    const conPin = await Sg().tienePin(AF.app.ns);
-    if (await C().confirmar({ titulo: '¿Cerrar sesión?', texto: 'Tus datos siguen cifrados en este teléfono. Al volver a entrar con la misma cuenta los recuperas' + (conPin ? ' con tu PIN.' : '.'), si: 'Cerrar sesión' })) AF.app.cerrarSesion();
-  }
+  // U5: dos opciones (dejar los datos en el teléfono o borrarlos); está en vistas/cuenta.js
+  const cerrarSesion = () => V.cuenta.cerrarSesion();
 
   /* ------------------------------------------------------------------ ajustes */
   const editor = (titulo, valor, tipo, alGuardar, ayuda) => {
@@ -9063,7 +10400,8 @@
 
     cont.appendChild(sec('Voz'));
     cont.appendChild(h('div', null,
-      sw('Que la app me hable', 'Lee en voz alta lo que entendió y las respuestas. Útil si no ves bien la pantalla.', !!a.respuestaVoz, (v) => S().ajustar({ respuestaVoz: v }))));
+      sw('Que la app me hable', 'Lee en voz alta lo que entendió y las respuestas. Útil si no ves bien la pantalla.', !!a.respuestaVoz, (v) => S().ajustar({ respuestaVoz: v })),
+      h('div', { class: 'lista', estilo: { marginTop: '10px' } }, fila2('🎙️', 'Registro del micrófono', 'Qué pasó en tus últimas 3 escuchas (si el micrófono falla)', registroVoz))));
 
     cont.appendChild(sec('Seguridad'));
     const zonaSeg = h('div'); cont.appendChild(zonaSeg);
@@ -9093,6 +10431,13 @@
     let conPin = false;
     try { conPin = await Sg().tienePin(ns); } catch (e) { conPin = false; }
     AF.ui.vaciar(zona);
+    // Montos ocultos (U18): para que nadie vea tus cifras por encima del hombro
+    zona.appendChild(sw('Ocultar mis montos', 'Tus cifras salen como «$••••». Toca el ojito (en Inicio y Movimientos) para verlas un rato.', !!a.ocultarMontos, (v) => { AF.app.montosVisibles = false; S().ajustar({ ocultarMontos: v }); AF.app.refrescar(); AF.app.programarAvisos && AF.app.programarAvisos(); }));
+    if (a.ocultarMontos) zona.appendChild(h('div', { estilo: { marginTop: '10px' } }, sw('Pedir huella o PIN para verlos', conPin ? 'Al tocar el ojito te pido tu huella o tu PIN.' : 'Primero activa «Pedir PIN al abrir» (abajo): sin PIN no hay con qué confirmar que eres tú.', !!a.pedirParaVer && conPin, (v) => {
+      if (v && !conPin) { aviso('Activa primero el PIN'); return; }
+      S().ajustar({ pedirParaVer: v }); AF.app.refrescar();
+    })));
+    zona.appendChild(h('div', { estilo: { height: '10px' } }));
     zona.appendChild(sw('Pedir PIN al abrir', conPin ? 'Nadie entra sin tu PIN. Si lo olvidas, los datos no se recuperan.' : 'Apagado: la app se abre directo. Actívalo si otras personas usan tu teléfono.', conPin, async (v) => {
       if (v) {
         const pin = await pedirPinNuevo('Crea tu PIN', 'Activar PIN');
@@ -9111,11 +10456,12 @@
       fila({ icono: '🔑', titulo: 'Cambiar mi PIN', sub: 'Uno nuevo de ' + PLAN.sesion.pinMin + ' a ' + PLAN.sesion.pinMax + ' números', derecha: ico('derecha'), onclick: cambiarPin })));
     const zonaHuella = h('div'); zona.appendChild(zonaHuella);
     N().huellaDisponible().then(async (ok) => {
-      if (!ok) return;
+      // si este teléfono o navegador no deja usar la huella, se dice (antes se callaba y solo pedía el PIN — U17)
+      if (!ok) { zonaHuella.appendChild(h('p', { class: 'texto-sm suave', estilo: { marginTop: '10px' } }, 'La huella no está disponible aquí: ' + (N().esNativo() ? 'este teléfono no tiene una huella registrada o no deja usarla.' : 'este navegador no deja usar la huella del teléfono (prueba con Chrome actualizado y la pantalla de bloqueo con huella activa).') + ' Tu PIN sigue funcionando.')); return; }
       const on = await Sg().huellaActiva(ns);
       zonaHuella.appendChild(h('div', { estilo: { marginTop: '10px' } }, sw('Entrar con huella', 'El PIN sigue sirviendo siempre.', on, async (v) => {
         try { if (v) await Sg().activarHuella(ns, N().secretosHuella); else await Sg().desactivarHuella(ns, N().secretosHuella); aviso(v ? 'Huella activada' : 'Huella desactivada'); }
-        catch (e) { aviso('No pude cambiar la huella'); }
+        catch (e) { aviso(e && e.codigo === 'sin_prf' ? e.message : e && e.name === 'NotAllowedError' ? 'No se confirmó la huella. Inténtalo otra vez.' : 'No pude cambiar la huella'); }
         AF.app.refrescar();
       })));
     }).catch(() => {});
@@ -9157,6 +10503,28 @@
     await AF.app.reiniciarCuenta();
   }
 
+  /* ------------------------------------------------------- registro del micrófono (U15 d) */
+  // Solo eventos y tiempos (nunca lo que dijiste): sirve para saber por qué el micrófono no terminó o no oyó.
+  function registroVoz() {
+    const L = N().registroVoz ? N().registroVoz() : [];
+    const seg = (ms) => (ms / 1000).toFixed(1).replace('.', ',') + ' s';
+    const DIC = { inicio: () => 'Abrí el micrófono', empezo: () => 'El micrófono empezó a escuchar', oye: (d) => 'Oí algo (' + d + ' letras en total)',
+      error: (d) => d === 'no-speech' ? 'El micrófono no oyó voz' : d === 'aborted' ? 'El micrófono se canceló' : 'El micrófono avisó un error: ' + d,
+      se_corto: (d) => d === 'pedido' ? 'El micrófono se cerró (lo pedí yo)' : 'El micrófono se cortó solo', reinicio: () => 'Lo volví a abrir para seguir oyendo',
+      reinicio_fallo: (d) => 'No lo pude volver a abrir (' + d + ')', parar: () => 'Le pedí al micrófono que pare',
+      sin_aviso_del_navegador: () => 'El navegador no avisó que paró: cerré igual con lo oído', fin: (d) => 'Terminó la escucha (' + d + ')', error_fin: (d) => 'Terminó con error: ' + d,
+      estado: (d) => 'Estado del micrófono: ' + d,
+      app_termina: (d) => ({ silencio: 'Hubo ' + String(PLAN.voz.silencioSeg || 2.5).replace('.', ',') + ' s de silencio: termino', boton: 'Tocaste el micrófono para terminar', nadie_hablo: 'Nadie habló: termino', tiempo_maximo: 'Llegó al tiempo máximo: termino' })[d] || 'Termino (' + d + ')',
+      app_procesa: (d) => 'Pasé a «Esto entendí» (' + d + ' letras)', app_no_oyo: () => 'No se oyó nada: muestro «No te escuché»', app_ignora: (d) => 'No muestro nada (' + d + ')', app_error: (d) => 'Error: ' + d };
+    const texto = (e) => (DIC[e.ev] ? DIC[e.ev](e.dato) : e.ev + (e.dato != null ? ' (' + e.dato + ')' : ''));
+    const lineas = L.map((r) => new Date(r.fecha).toLocaleString('es') + ' · ' + (r.modo === 'app' ? 'app Android' : 'versión web') + '\n' + r.eventos.map((e) => '  ' + seg(e.ms) + '  ' + texto(e)).join('\n')).join('\n\n');
+    hoja({ titulo: 'Registro del micrófono', cuerpo: h('div', null,
+      h('p', { class: 'texto-sm suave', estilo: { margin: '6px 0 12px' } }, 'Solo guarda qué hizo el micrófono y cuándo, no lo que dijiste. Si el micrófono falla, copia esto y envíamelo.'),
+      L.length ? h('pre', { class: 'texto-xs', estilo: { whiteSpace: 'pre-wrap', background: 'var(--fondo-suave, rgba(0,0,0,.04))', padding: '12px', borderRadius: '12px', maxHeight: '50dvh', overflow: 'auto' } }, lineas)
+        : h('p', { class: 'suave' }, 'Todavía no has usado el micrófono.')),
+    acciones: L.length ? [{ texto: 'Copiar o enviar', clase: 'btn-primario', onclick: async () => { const r = await N().compartirTexto('Registro del micrófono', lineas); if (r === 'copiado') aviso('Copiado'); else if (!r) aviso('No pude copiarlo'); return false; } }] : [] });
+  }
+
   /* ------------------------------------------------------------------ respaldo */
   function respaldo(cont) {
     const D = S().d, esGoogle = AF.app.sesion && AF.app.sesion.proveedor === 'google';
@@ -9195,6 +10563,252 @@
   }
 
   V.mas = { render, ajustes, respaldo };
+})(typeof window !== 'undefined' ? window : globalThis);
+;
+
+/* ===== js/vistas/cuenta.js ===== */
+/* Tu cuenta: iniciar sesión estando «sin cuenta» (U4), pasar lo que tenías sin cuenta a tu cuenta (U3),
+   la casilla de Drive de Google (U2) y cerrar sesión con dos opciones: dejar los datos o borrarlos de este teléfono (U5).
+   Regla de oro: nada se borra sin que la persona lo elija, y antes de borrar se le dice si tiene copia y de cuándo. */
+(function (g) {
+  'use strict';
+  const AF = g.AF, PLAN = AF.PLAN, V = (AF.vistas = AF.vistas || {});
+  const { h, hoja, aviso } = AF.ui;
+  const S = () => AF.store, Sg = () => AF.seguridad, N = () => AF.nativo, C = () => V.comun;
+  const SIN_CUENTA = { proveedor: 'demo', id: 'local' };
+  const nsSinCuenta = () => Sg().espacioDe(SIN_CUENTA);
+  const esSinCuenta = () => !!(AF.app.sesion && AF.app.sesion.proveedor === 'demo');
+  const nombreProv = (p) => (p === 'google' ? 'Google' : p === 'facebook' ? 'Facebook' : 'tu cuenta');
+  const copiaDe = (o) => JSON.parse(JSON.stringify(o));
+  const fechaHora = (iso) => { const f = new Date(iso); return f.toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' }) + ' a las ' + f.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' }); };
+  const cuantos = (d) => (d && Array.isArray(d.movs) ? d.movs.length : 0);
+  const nMovs = (n) => (n === 1 ? '1 movimiento' : n + ' movimientos');
+  const recordarNo = (ns, v) => { try { if (v) g.localStorage.setItem('af_no_traer_' + ns, '1'); else g.localStorage.removeItem('af_no_traer_' + ns); } catch (e) { /* nada */ } };
+  const dijoNo = (ns) => { try { return g.localStorage.getItem('af_no_traer_' + ns) === '1'; } catch (e) { return false; } };
+
+  /* ------------------------------------------------------------ elegir entre varias opciones */
+  // opciones: [{ id, texto, sub, principal, peligro }] → Promise<id | null> (null = cerró sin elegir)
+  function elegir(o) {
+    return new Promise((res) => {
+      let listo = false, api = null;
+      const fin = (v) => { if (listo) return; listo = true; res(v); if (api) api.cerrar(); };
+      const botones = o.opciones.filter(Boolean).map((x) => h('button', { type: 'button', class: 'btn btn-bloque ' + (x.principal ? 'btn-primario' : x.peligro ? 'btn-borde btn-peligro' : 'btn-borde'), estilo: { flexDirection: 'column', height: 'auto', padding: '12px 16px', gap: '2px' }, onclick: () => fin(x.id) },
+        h('span', null, x.texto), x.sub ? h('span', { class: 'texto-xs', estilo: { fontWeight: '400', opacity: '.85', whiteSpace: 'normal' } }, x.sub) : null));
+      api = hoja({ titulo: o.titulo, cuerpo: h('div', null, o.texto ? h('p', { class: 'suave', estilo: { margin: '6px 0 0' } }, o.texto) : null,
+        h('div', { estilo: { display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '18px' } }, botones,
+          h('button', { type: 'button', class: 'btn-texto', onclick: () => fin(null) }, o.cancelar || 'Cancelar'))), alCerrar: () => fin(null) });
+    });
+  }
+
+  /* ------------------------------------------------------------ abrir los datos de un espacio */
+  // Sin PIN entra directo; con huella activa la pide; si no, pide el PIN de ESE espacio. Promise<boolean>
+  async function abrirEspacio(ns, titulo, sub) {
+    if (!(await Sg().existe(ns))) return false;
+    if (await Sg().abrirSinPin(ns)) return true;
+    const conHuella = (await Sg().huellaActiva(ns)) && (await N().huellaDisponible());
+    if (conHuella) { try { const r = await Sg().abrirConHuella(ns, N().secretosHuella); if (r.ok) return true; } catch (e) { /* sigue el PIN */ } }
+    const len = await Sg().longitudPin(ns);
+    return new Promise((res) => {
+      let api = null, listo = false;
+      const fin = (v) => { if (listo) return; listo = true; res(v); if (api) api.cerrar(); };
+      const vista = V.acceso.pantallaPin({ titulo, sub, len,
+        huella: conHuella ? async () => { try { const r = await Sg().abrirConHuella(ns, N().secretosHuella); if (r.ok) fin(true); } catch (e) { /* sigue el PIN */ } } : null,
+        alCompletar: async (pin) => {
+          const r = await Sg().abrirConPin(ns, pin);
+          if (r.ok) { setTimeout(() => fin(true), 60); return { ok: true }; }
+          if (r.motivo === 'espera') return { ok: false, mensaje: 'Demasiados intentos. Espera ' + r.espera + ' s.' };
+          return { ok: false, mensaje: 'PIN incorrecto. Te quedan ' + r.restantes + ' intentos.' };
+        } });
+      api = hoja({ cuerpo: vista.el, alCerrar: () => { if (!listo) { listo = true; res(false); } } });
+    });
+  }
+
+  /* ------------------------------------------------- iniciar sesión desde dentro de la app (U2 + U4) */
+  // Abre una hoja con el botón de Google (o Facebook). Si en la pantalla de Google no marca la casilla de Drive,
+  // no entra: se le explica qué casilla marcar y el botón pasa a «Volver a Google». Promise<sesion | null>
+  function entrarCon(prov) {
+    N().precargarWeb && N().precargarWeb();
+    return new Promise((res) => {
+      let listo = false, api = null, volver = false;
+      const fin = (v) => { if (listo) return; listo = true; res(v); if (api) api.cerrar(); };
+      const mensaje = h('p', { class: 'portada-error', role: 'alert', estilo: { marginTop: '12px' } });
+      const etiqueta = h('span', null, 'Continuar con ' + nombreProv(prov));
+      const boton = h('button', { class: 'btn btn-bloque ' + (prov === 'google' ? 'btn-google' : 'btn-primario'), type: 'button', onclick: async () => {
+        mensaje.textContent = ''; boton.disabled = true;
+        try { fin(await N().iniciarSesion(prov, { volver: prov === 'google' && volver })); }
+        catch (e) {
+          if (e.codigo === 'sin_permiso_drive') {
+            volver = true; etiqueta.textContent = 'Volver a Google';
+            mensaje.textContent = 'Falta marcar la casilla de Drive. En la pantalla de Google marca «Ver, crear y eliminar sus propios datos de configuración» y toca Continuar. Sin eso no puedo guardar tu copia.';
+          } else if (e.codigo !== 'cancelado') mensaje.textContent = e.codigo === 'sin_red' ? 'No hay internet. Revisa tu conexión e inténtalo otra vez.' : 'No pude entrar con ' + nombreProv(prov) + '. Inténtalo otra vez.';
+          boton.disabled = false;
+        }
+      } }, prov === 'google' ? AF.ui.logoGoogle() : null, etiqueta);
+      api = hoja({ titulo: 'Iniciar sesión', cuerpo: h('div', null,
+        h('p', { class: 'suave', estilo: { margin: '6px 0 0' } }, 'Lo que registraste sin cuenta pasa a tu cuenta de ' + nombreProv(prov) + (prov === 'google' ? ' y se guarda una copia cifrada en tu Drive.' : '.')),
+        prov === 'google' ? h('p', { class: 'texto-sm suave', estilo: { marginTop: '8px' } }, 'En la pantalla de Google marca la casilla de Drive: sin ella no puedo guardar tu copia.') : null,
+        h('div', { estilo: { marginTop: '18px' } }, boton), mensaje), alCerrar: () => fin(null) });
+    });
+  }
+
+  /* -------------------------------------------------------------- entrar ya con los datos listos */
+  async function entrarEn(s, ns, datos) {
+    const app = AF.app;
+    app.sesion = s; await Sg().guardarSesion(s);
+    app.ns = ns; Sg().usarEspacio(ns);
+    S().cargar(datos, { escribir: (dd) => Sg().guardarDatos(ns, dd) });
+    await S().guardarYa();
+    await app.entrar(true);
+    if (app.pedirRespaldo) app.pedirRespaldo();
+  }
+  // Entrar a la cuenta como siempre (pantalla de PIN si tiene) sin tocar lo de sin cuenta.
+  async function entrarNormal(s) {
+    const app = AF.app;
+    Sg().bloquear(); S().cargar(null); app.abierta = false;
+    app.sesion = s; await Sg().guardarSesion(s);
+    app.ns = Sg().espacioDe(s);
+    return V.acceso.bloqueo();
+  }
+
+  /* ------------------------------------------- pasar lo de «sin cuenta» a la cuenta (U3) */
+  // La bóveda de «sin cuenta» tiene que estar ABIERTA y `datosSin` leídos. Devuelve 'hecho' | 'aparte' | 'cancelado'.
+  async function llevarSinCuentaA(s, datosSin) {
+    const ns = Sg().espacioDe(s), nsSin = nsSinCuenta(), prov = nombreProv(s.proveedor);
+    const huellaSin = await Sg().huellaActiva(nsSin), pinSin = await Sg().tienePin(nsSin);
+    // lo que se pierde al juntar o pasar (la huella está atada al espacio; el PIN que manda es el de la cuenta): se dice, no se calla
+    const avisoHuella = async () => {
+      const sinPinAhora = pinSin && !(await Sg().tienePin(ns));
+      const t = [huellaSin ? 'Vuelve a activar tu huella en Más → Ajustes.' : '', sinPinAhora ? 'Tu cuenta no tiene PIN: ponlo en Más → Ajustes si lo quieres.' : ''].filter(Boolean).join(' ');
+      if (t) setTimeout(() => aviso(t), 2600);
+    };
+    // 1. Esta cuenta ya se usó en este teléfono
+    if (await Sg().existe(ns)) {
+      const op = await elegir({ titulo: 'Tu cuenta ya tiene datos en este teléfono', texto: 'Tienes ' + nMovs(cuantos(datosSin)) + ' registrados sin cuenta. ¿Qué hago con ' + (cuantos(datosSin) === 1 ? 'él' : 'ellos') + '?',
+        opciones: [{ id: 'juntar', texto: 'Juntarlos con mi cuenta', sub: 'Se suman a lo de tu cuenta. Lo que ya está no se repite.', principal: true },
+          { id: 'aparte', texto: 'Usar solo lo de mi cuenta', sub: 'Lo de sin cuenta se queda guardado aparte en este teléfono.' }] });
+      if (!op) return 'cancelado';
+      if (op === 'aparte') { recordarNo(ns, true); await entrarNormal(s); return 'aparte'; }
+      if (!(await abrirEspacio(ns, 'Tu cuenta de ' + prov, 'Escribe el PIN de tu cuenta para juntar todo.'))) return 'cancelado';
+      const base = (await Sg().leerDatos(ns)) || S().vacio();
+      const j = S().juntarDatos(base, datosSin);
+      await Sg().guardarDatos(ns, j.datos);
+      await Sg().borrarEspacio(nsSin, N().secretosHuella);
+      await entrarEn(s, ns, j.datos);
+      aviso('Listo: junté ' + nMovs(j.cuenta.movs || 0) + ' con tu cuenta'); avisoHuella();
+      return 'hecho';
+    }
+    // 2. No hay nada en este teléfono, pero puede haber una copia en su Drive
+    let info = null;
+    if (s.proveedor === 'google') { try { info = await N().respaldoInfo({ soloSiHayPermiso: true }); } catch (e) { info = null; } }
+    let op = 'ahora';
+    if (info) {
+      op = await elegir({ titulo: 'Encontré una copia tuya en Drive', texto: 'Es del ' + fechaHora(info.fecha) + '. Además tienes ' + nMovs(cuantos(datosSin)) + ' registrados sin cuenta en este teléfono.',
+        opciones: [{ id: 'juntar', texto: 'Juntar la copia con lo de ahora', sub: 'Te pediré el PIN que usabas cuando se hizo la copia (si tenía).', principal: true },
+          { id: 'drive', texto: 'Usar solo mi copia de Drive', sub: 'Lo de sin cuenta se queda guardado aparte en este teléfono.' },
+          { id: 'ahora', texto: 'Usar solo lo de ahora', sub: 'Tu copia de Drive se reemplazará con esto en la próxima copia.' }] });
+      if (!op) return 'cancelado';
+    }
+    if (op === 'drive' || op === 'juntar') {
+      const p = await N().respaldoBajar();
+      if (!p) { aviso('No pude bajar la copia de Drive. Revisa tu internet'); return 'cancelado'; }
+      await Sg().restaurarPaquete(ns, p);                       // escribe la copia en este teléfono (la bóveda queda cerrada)
+      if (op === 'drive') { recordarNo(ns, true); await entrarNormal(s); return 'aparte'; }
+      if (!(await abrirEspacio(ns, 'Tu copia de Drive', 'Escribe el PIN que usabas cuando hiciste la copia.'))) {
+        // no la pudo abrir: se deja todo como estaba (lo de sin cuenta sigue intacto)
+        await Sg().borrarCuenta(ns, null);
+        if (!(await abrirEspacio(nsSin, 'Tus datos sin cuenta', 'Escribe tu PIN para seguir donde estabas.'))) { AF.app.abierta = false; S().cargar(null); return V.acceso.portada(); }
+        return 'cancelado';
+      }
+      const base = (await Sg().leerDatos(ns)) || S().vacio();
+      const j = S().juntarDatos(base, datosSin);
+      await Sg().guardarDatos(ns, j.datos);
+      await Sg().borrarEspacio(nsSin, N().secretosHuella);
+      await entrarEn(s, ns, j.datos);
+      aviso('Listo: junté tu copia con lo de ahora'); avisoHuella();
+      return 'hecho';
+    }
+    // 3. Cuenta nueva (o eligió «lo de ahora»): lo de sin cuenta pasa tal cual (mismo PIN), se comprueba y se borra el original
+    await S().guardarYa();
+    await Sg().copiarEspacio(nsSin, ns);
+    Sg().usarEspacio(ns);
+    const leido = await Sg().leerDatos(ns);
+    if (!leido || cuantos(leido) !== cuantos(datosSin)) { await Sg().borrarEspacio(ns, null); Sg().usarEspacio(nsSin); aviso('No pude pasar tus datos. No se tocó nada'); return 'cancelado'; }
+    await Sg().borrarEspacio(nsSin, N().secretosHuella);
+    await entrarEn(s, ns, leido);
+    aviso('Listo: lo que tenías sin cuenta ya está en tu cuenta de ' + prov); avisoHuella();
+    return 'hecho';
+  }
+
+  // Desde Más (o el aviso de Inicio), estando «sin cuenta» y con la app abierta.
+  async function iniciarDesdeSinCuenta(prov) {
+    if (!esSinCuenta()) return;
+    const s = await entrarCon(prov || 'google');
+    if (!s) return;
+    await S().guardarYa();
+    recordarNo(Sg().espacioDe(s), false);
+    await llevarSinCuentaA(s, copiaDe(S().d));
+  }
+
+  // Desde la portada: la persona cerró la sesión «sin cuenta» y entró con Google. Si en el teléfono quedaron datos sin cuenta,
+  // ofrece pasarlos. Devuelve true si ya se encargó de entrar (o de mostrar la pantalla que toca).
+  async function ofrecerTraerSinCuenta(s) {
+    const nsSin = nsSinCuenta(), ns = Sg().espacioDe(s);
+    if (!s || s.proveedor === 'demo' || !(await Sg().existe(nsSin)) || dijoNo(ns)) return false;
+    const si = await C().confirmar({ titulo: 'Tienes datos sin cuenta en este teléfono', texto: '¿Los paso a tu cuenta de ' + nombreProv(s.proveedor) + '? Así quedan guardados también en tu copia.', si: 'Sí, pasarlos', no: 'No, dejarlos aparte' });
+    if (!si) { recordarNo(ns, true); return false; }
+    if (!(await abrirEspacio(nsSin, 'Tus datos sin cuenta', 'Escribe el PIN que usabas sin cuenta.'))) return false;
+    const datosSin = await Sg().leerDatos(nsSin);
+    if (!datosSin) { Sg().bloquear(); return false; }
+    const r = await llevarSinCuentaA(s, datosSin);
+    if (r === 'cancelado') { Sg().bloquear(); return false; }
+    return true;
+  }
+
+  /* ------------------------------------------------------------------- cerrar sesión (U5) */
+  async function cerrarSesion() {
+    const app = AF.app, conPin = await Sg().tienePin(app.ns), sin = esSinCuenta();
+    const op = await elegir({ titulo: sin ? '¿Salir?' : '¿Cerrar sesión?', opciones: [
+      { id: 'cerrar', texto: sin ? 'Salir' : 'Cerrar sesión', sub: 'Tus datos se quedan cifrados en este teléfono. ' + (sin ? 'Los vuelves a ver con «Usar sin cuenta».' : 'Los vuelves a ver al entrar con la misma cuenta' + (conPin ? ' y tu PIN.' : '.')), principal: true },
+      { id: 'borrar', texto: (sin ? 'Salir' : 'Cerrar sesión') + ' y borrar mis datos de este teléfono', sub: 'El teléfono queda como recién instalado.', peligro: true }] });
+    if (op === 'cerrar') return app.cerrarSesion();
+    if (op === 'borrar') return cerrarYBorrar();
+  }
+  async function cerrarYBorrar() {
+    const app = AF.app, esG = app.sesion && app.sesion.proveedor === 'google', sin = esSinCuenta();
+    await S().guardarYa();
+    let info = null, conDrive = false;
+    if (esG) { try { info = await N().respaldoInfo({ soloSiHayPermiso: true }); conDrive = !!N().drivePermisoAMano(); } catch (e) { info = null; } }
+    let texto, opciones;
+    if (esG && conDrive) {
+      texto = info ? 'Tu última copia en Drive es del ' + fechaHora(info.fecha) + '. Lo que hayas registrado después no está en esa copia.' : 'Aún no tienes ninguna copia en Drive.';
+      opciones = [{ id: 'copiar', texto: 'Hacer una copia ahora y borrar', sub: 'Luego entras con Google en cualquier teléfono y recuperas todo.', principal: true },
+        { id: 'borrar', texto: info ? 'Borrar sin hacer copia nueva' : 'Borrar sin copia', sub: info ? 'Lo que registraste después de esa copia se pierde.' : 'Se pierde todo lo que registraste.', peligro: true }];
+    } else {
+      texto = (sin ? 'Estás sin cuenta: tus datos solo están en este teléfono. ' : esG ? 'No tengo permiso de tu Drive ahora mismo, así que no sé si tienes copia. ' : 'No tienes copia en Drive. ') + 'Si borras sin copia, todo lo que registraste se pierde para siempre.';
+      opciones = [{ id: 'archivo', texto: 'Guardar una copia en un archivo primero', sub: 'La guardas donde quieras (correo, WhatsApp, tu computadora).', principal: true },
+        esG ? { id: 'copiar', texto: 'Conectar mi Drive, hacer la copia y borrar', sub: 'Google te pedirá permiso.' } : null,
+        { id: 'borrar', texto: 'Borrar todo sin copia', sub: 'No se puede deshacer.', peligro: true }];
+    }
+    const op = await elegir({ titulo: 'Antes de borrar', texto, opciones });
+    if (!op) return;
+    let conCopia = false;
+    if (op === 'copiar') {
+      try { aviso('Guardando la copia…'); await N().respaldoSubir(await Sg().paqueteRespaldo(app.ns)); S().ajustar({ ultimaCopia: Date.now() }); await S().guardarYa(); conCopia = true; }
+      catch (e) { aviso('No pude guardar la copia. No borré nada'); return; }
+    }
+    if (op === 'archivo') {
+      try { await N().entregarArchivo('asistente-financiero-' + app.hoy() + '.copia', JSON.stringify(await Sg().paqueteRespaldo(app.ns)), 'application/json'); }
+      catch (e) { aviso('No pude crear el archivo. No borré nada'); return; }
+      if (!(await C().confirmar({ titulo: '¿Ya guardaste el archivo?', texto: 'Con ese archivo recuperas todo desde Más → Copia de seguridad → Restaurar desde un archivo (y tu PIN, si tenías).', si: 'Sí, ya lo guardé', no: 'Todavía no' }))) return;
+      conCopia = true;
+    }
+    const ok = await C().confirmar({ titulo: 'Última confirmación', texto: 'Se borran tus datos de este teléfono y se cierra la sesión. No se puede deshacer.' + (conCopia ? (op === 'copiar' ? ' Tu copia está en tu Drive: entra con Google para recuperarla.' : ' Tu copia está en el archivo que guardaste.') : ' No hay copia: se pierde todo.'), si: 'Borrar y ' + (sin ? 'salir' : 'cerrar sesión'), peligro: true });
+    if (!ok) return;
+    await app.cerrarSesion({ borrar: true });
+    aviso('Listo: tus datos se borraron de este teléfono');
+  }
+
+  V.cuenta = { elegir, abrirEspacio, entrarCon, iniciarDesdeSinCuenta, ofrecerTraerSinCuenta, llevarSinCuentaA, cerrarSesion, esSinCuenta, nsSinCuenta };
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
 
@@ -9282,13 +10896,32 @@
     const a = S().d.ajustes;
     AF.estado = { moneda: a.moneda };
     AF.tema.aplicar(a.tema || 'auto', a.colorApp);
+    U.ponerPrivado(!!a.ocultarMontos && !app.montosVisibles);
   }
+  /* ------------------------------------------------- montos ocultos (U18): el ojito */
+  // Con «Ocultar montos» activo las cifras salen «$••••». El ojito las muestra un rato (60 s o hasta salir de la app);
+  // si además está «Pedir huella o PIN para verlos», primero confirma que eres tú.
+  let ocultarT = 0;
+  app.montosVisibles = false;
+  app.alternarMontos = async () => {
+    const a = S().d.ajustes;
+    if (!a.ocultarMontos) { S().ajustar({ ocultarMontos: true }); app.montosVisibles = false; aplicarAjustes(); app.refrescar(); programarAvisos(); return; }
+    if (app.montosVisibles) { app.montosVisibles = false; clearTimeout(ocultarT); aplicarAjustes(); app.refrescar(); return; }
+    if (a.pedirParaVer && V().acceso.confirmarIdentidad && !(await V().acceso.confirmarIdentidad('Para ver tus montos.'))) return;
+    app.montosVisibles = true; aplicarAjustes(); app.refrescar();
+    clearTimeout(ocultarT); ocultarT = setTimeout(() => { app.montosVisibles = false; aplicarAjustes(); app.refrescar(); }, (PLAN.privacidad && PLAN.privacidad.segundosVisibles || 60) * 1000);
+  };
+  // El botón del ojito (lo usan Inicio y Movimientos)
+  app.botonOjo = () => { const visibles = !U.esPrivado(); const a = S().d.ajustes; return h('button', { class: 'boton-redondo boton-ojo', type: 'button', 'aria-label': visibles ? 'Ocultar montos' : 'Ver montos', 'aria-pressed': visibles && a.ocultarMontos ? 'true' : 'false', onclick: app.alternarMontos }, ico(visibles ? 'ojo' : 'ojo_no')); };
   AF.bus.on('cambio', () => app.refrescar());
   AF.bus.on('ajustes', () => { if (app.abierta) { aplicarAjustes(); app.refrescar(); } });
   AF.bus.on('plan', () => app.refrescar());
 
   /* --------------------------------------------------------------------- sesión */
   async function despuesDeSesion() {
+    app.ns = Sg().espacioDe(app.sesion);
+    // U3: si en este teléfono quedaron datos «sin cuenta», ofrece pasarlos a la cuenta con la que acaba de entrar
+    if (V().cuenta && (await V().cuenta.ofrecerTraerSinCuenta(app.sesion))) return;
     app.ns = Sg().espacioDe(app.sesion);
     if (await Sg().existe(app.ns)) return V().acceso.bloqueo();
     if (await ofrecerRecuperar()) return V().acceso.bloqueo();
@@ -9300,7 +10933,7 @@
       if (!app.sesion || app.sesion.proveedor !== 'google') return false;
       const info = await N().respaldoInfo({ soloSiHayPermiso: true });
       if (!info) return false;
-      const si = await V().comun.confirmar({ titulo: 'Encontré una copia tuya en Drive', texto: 'Es del ' + new Date(info.fecha).toLocaleDateString('es') + '. ¿La recupero? Vas a necesitar el PIN que usabas entonces.', si: 'Recuperar mi copia', no: 'Empezar de cero' });
+      const si = await V().comun.confirmar({ titulo: 'Encontré una copia tuya en Drive', texto: 'Es del ' + new Date(info.fecha).toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' }) + ' a las ' + new Date(info.fecha).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' }) + '. ¿La recupero? Vas a necesitar el PIN que usabas entonces.', si: 'Recuperar mi copia', no: 'Empezar de cero' });
       if (!si) return false;
       const p = await N().respaldoBajar(); if (!p) return false;
       await Sg().restaurarPaquete(app.ns, p);
@@ -9345,6 +10978,7 @@
   function programarRespaldo() { respaldoPendiente = true; clearTimeout(respaldoT); respaldoT = setTimeout(respaldarAhora, 20000); }
   AF.bus.on('cambio', programarRespaldo);
   app.respaldarAhora = respaldarAhora;
+  app.pedirRespaldo = () => { respaldoPendiente = true; return respaldarAhora(); };   // copia ya (si hay permiso de Drive a mano)
 
   app.entrar = async (yaCargado) => {
     if (!yaCargado) {
@@ -9373,11 +11007,13 @@
     return V().acceso.bloqueo();
   };
 
-  app.cerrarSesion = async () => {
+  // opc.borrar: además borra los datos de esta cuenta en este teléfono (la persona lo eligió en «Cerrar sesión», U5)
+  app.cerrarSesion = async (opc) => {
     try { await S().guardarYa(); } catch (e) { /* nada */ }
     const prov = app.sesion && app.sesion.proveedor;
     app.abierta = false;
-    if (PLAN.sesion.cerrarSesionBorraDatos && app.ns) await Sg().borrarCuenta(app.ns, N().secretosHuella);
+    clearTimeout(respaldoT); respaldoPendiente = false;
+    if ((PLAN.sesion.cerrarSesionBorraDatos || (opc && opc.borrar)) && app.ns) await Sg().borrarCuenta(app.ns, N().secretosHuella);
     await N().cerrarSesionSocial(prov);
     await Sg().cerrarSesion();
     S().cargar(null);
@@ -9399,17 +11035,20 @@
     if (!N().esNativo()) return;
     const hoy = app.hoy(), D = S().d, lista = [];
     const a9 = (iso) => { const f = U.deISO(iso); f.setHours(9, 0, 0, 0); return f; };
+    // Con «Ocultar mis montos» las notificaciones (que se ven con el teléfono bloqueado) tampoco llevan cifras.
+    const oculto = !!D.ajustes.ocultarMontos;
+    const $n = (n) => oculto ? 'Abre la app para ver el monto.' : U.dinero(n, { siempre: true });
     D.tarjetas.forEach((t) => {
       const e = AF.tarjetas.estado(t, D.movs, hoy);
       if (!e.proximoVence || !e.aPagarProximo) return;
-      PLAN.alertas.diasAntesVencimiento.forEach((n) => lista.push({ titulo: t.nombre + ' vence ' + (n === 1 ? 'mañana' : 'en ' + n + ' días'), cuerpo: 'A pagar: ' + U.dinero(e.aPagarProximo) + ' (estimado)', cuando: a9(U.sumarDias(e.proximoVence, -n)) }));
+      PLAN.alertas.diasAntesVencimiento.forEach((n) => lista.push({ titulo: t.nombre + ' vence ' + (n === 1 ? 'mañana' : 'en ' + n + ' días'), cuerpo: oculto ? $n(0) : 'A pagar: ' + $n(e.aPagarProximo) + ' (estimado)', cuando: a9(U.sumarDias(e.proximoVence, -n)) }));
     });
     D.pagosFijos.forEach((p) => {
       if (p.activo === false) return;
       const v = U.proximoDia(hoy, p.dia);
-      lista.push({ titulo: p.nombre + ' vence mañana', cuerpo: U.dinero(p.monto), cuando: a9(U.sumarDias(v, -1)) });
+      lista.push({ titulo: p.nombre + ' vence mañana', cuerpo: $n(p.monto), cuando: a9(U.sumarDias(v, -1)) });
     });
-    D.prestamos.forEach((p) => { if (p.pagado || !p.fechaLimite) return; lista.push({ titulo: 'Recordatorio: ' + p.persona, cuerpo: (p.direccion === 'me_deben' ? 'Te debe ' : 'Le debes ') + U.dinero(p.monto), cuando: a9(p.fechaLimite) }); });
+    D.prestamos.forEach((p) => { if (p.pagado || !p.fechaLimite) return; lista.push({ titulo: 'Recordatorio: ' + p.persona, cuerpo: oculto ? (p.direccion === 'me_deben' ? 'Te debe dinero. ' : 'Le debes dinero. ') + $n(0) : (p.direccion === 'me_deben' ? 'Te debe ' : 'Le debes ') + $n(p.monto), cuando: a9(p.fechaLimite) }); });
     N().programarAvisos(lista);
   }
   app.programarAvisos = programarAvisos;
@@ -9436,7 +11075,7 @@
     N().prepararWeb();                                                        // versión web: copia para abrir sin internet + datos que el navegador no borra
     N().version.alHaberNueva(avisoVersionNueva);                              // versión web: si GitHub tiene una versión más nueva, lo avisa con un botón
 
-    N().alVolverAPrimerPlano(() => { if (app.abierta && !app.exento) { Sg().marcarSalida(); respaldarAhora(); } }, () => {
+    N().alVolverAPrimerPlano(() => { if (app.montosVisibles) { app.montosVisibles = false; if (app.abierta) aplicarAjustes(); } if (app.abierta && !app.exento) { Sg().marcarSalida(); respaldarAhora(); } }, () => {
       if (!app.abierta) return;
       if (app.exento) { Sg().marcarEntrada(); return; }
       // Sin PIN nunca se bloquea. Con PIN, solo según lo elegido en Ajustes (por defecto: nunca al minimizar, solo al abrir de nuevo).

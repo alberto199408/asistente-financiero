@@ -241,6 +241,14 @@ h1, h2, h3, p { margin: 0; }
 .duda-caja { margin-top: 12px; padding: 14px 16px; border-radius: var(--radio-chico); background: var(--aviso-suave); }
 .duda-caja p { font-size: var(--t-sm); font-weight: 700; margin-bottom: 10px; }
 .duda-caja .opciones .opcion { background: var(--hoja); }
+/* Lo que falta saber antes de guardar (precio, corriente/diferido, cuál meta…): resalta y el botón espera */
+.duda-caja.pendiente { border: 2px solid var(--aviso, #C98A2E); }
+.entendido-item.pendiente .monto { color: var(--aviso, #C98A2E); }
+.btn.btn-espera { opacity: .55; }
+.duda-caja.sacudir { animation: sacudir .35s ease; }
+@keyframes sacudir { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+@media (prefers-reduced-motion: reduce) { .duda-caja.sacudir { animation: none; } }
+.respuesta-caja { margin-top: 14px; padding: 12px 14px; border-radius: var(--radio-chico); background: var(--fondo-suave, rgba(0,0,0,.04)); text-align: left; width: 100%; }
 .voz-respuesta { margin-top: 12px; font-size: var(--t-md); line-height: 1.5; font-weight: 600; }
 .voz-extra { margin-top: 8px; font-size: var(--t-sm); color: var(--tinta2); line-height: 1.45; }
 
@@ -300,18 +308,18 @@ h1, h2, h3, p { margin: 0; }
 .hero-card::before { content: ''; position: absolute; right: -80px; top: -110px; width: 290px; height: 290px; border-radius: 50%; background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0) 64%); pointer-events: none; }
 .hero-card::after { content: ''; position: absolute; right: -86px; top: 78px; width: 176px; height: 176px; border-radius: 50%; border: 1.5px solid transparent; border-top-color: var(--hero-trazo); border-right-color: var(--hero-trazo); opacity: 0.6; transform: rotate(18deg); pointer-events: none; }
 .hero-card > * { position: relative; z-index: 1; }
-.hero-fila { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.hero-fila { display: flex; align-items: center; justify-content: space-between; gap: 8px 10px; flex-wrap: wrap; }
 .hero-etiqueta { font-size: var(--t-sm); color: var(--sobre-hero2); font-weight: 650; }
 .hero-pildora { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; font-size: var(--t-xs); font-weight: 700; background: rgba(255, 255, 255, 0.14); color: var(--sobre-hero); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16); white-space: nowrap; }
 .hero-pildora .ico-svg { width: 14px; height: 14px; }
-.hero-cifra { margin-top: 6px; font-size: 48px; line-height: 1.04; font-weight: 800; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+.hero-cifra { margin-top: 6px; font-size: min(48px, calc((min(100vw, 480px) - 2 * var(--margen, 16px) - 40px) / (var(--n, 8) * 0.56))); white-space: nowrap; line-height: 1.04; font-weight: 800; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
 .hero-cifra .centavos { font-size: 0.5em; font-weight: 700; letter-spacing: -0.01em; opacity: 0.85; }
 .hero-cifra.pasado { color: #FFB4A8; }
 .hero-meta { margin-top: 8px; font-size: var(--t-sm); color: var(--sobre-hero2); font-weight: 550; }
 .hero-barra { margin-top: 14px; height: 7px; border-radius: 4px; background: rgba(255, 255, 255, 0.16); overflow: hidden; }
 .hero-barra > i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, #F6D77F, var(--hero-trazo)); transition: width 600ms var(--ease); }
 .hero-barra.alerta > i { background: linear-gradient(90deg, #FFC9A8, #FF8F7A); }
-.hero-datos { display: grid; grid-template-columns: repeat(var(--cols, 3), 1fr); gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.16); }
+.hero-datos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--min, 90px)), 1fr)); gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.16); }
 .hero-dato { min-width: 0; display: flex; align-items: center; gap: 8px; }
 .hero-dato-ico { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex: none; background: rgba(255, 255, 255, 0.14); }
 .hero-dato-ico .ico-svg { width: 15px; height: 15px; stroke-width: 2.3; }
@@ -707,3 +715,58 @@ h1, h2, h3, p { margin: 0; }
 
 /* Teléfonos angostos: los planes se apilan (el Pro primero) para que las listas no se partan en 4 renglones. */
 @media (max-width: 370px) { .planes { grid-template-columns: 1fr; gap: 22px; } .plan.destacado { order: -1; } .plan-sub { min-height: 0; } }
+
+/* Deslizar para cerrar: la rayita y la cabecera se pueden arrastrar con el dedo (sin que el navegador lo tome como desplazamiento) */
+.hoja-asa, .hoja-titulo, .voz-cabeza { touch-action: none; }
+.hoja-asa { position: relative; }
+.hoja-asa::after { content: ''; position: absolute; left: -60px; right: -60px; top: -14px; bottom: -14px; }
+/* El ojito de los montos ocultos */
+.hero .boton-ojo { width: 32px; height: 32px; min-width: 32px; background: rgba(255,255,255,.14); color: inherit; border: 0; }
+.hero .boton-ojo .ico-svg { width: 18px; height: 18px; }
+
+/* ---------------------------------------------------------------- Inicio en dos columnas (U1, como las maquetas) */
+.tablero .tablero-fila + .tablero-fila { margin-top: 12px; }
+.tablero .dos-columnas .mini-tarjeta { min-height: 168px; }
+.tablero .mini-tarjeta .h3 { font-size: 13.5px; white-space: nowrap; }
+.tablero .mini-tarjeta .h3 .ico, .tablero .mini-tarjeta .h3 svg { color: var(--tinta3, var(--tinta2)); }
+.mini-cifra.chica { font-size: 19px; }
+.mini-de { font-size: var(--t-xs); font-weight: 600; color: var(--tinta2); letter-spacing: 0; }
+.mini-titulo { font-size: var(--t-sm); font-weight: 700; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.mini-anillo { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.anillo-mini { flex: none; }
+.mini-leyenda { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.mini-leyenda li { display: flex; align-items: flex-start; gap: 6px; font-size: 11.5px; font-weight: 600; line-height: 1.2; min-width: 0; }
+.mini-leyenda li i { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-top: 3px; }
+.mini-leyenda li span { flex: 1; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.mini-leyenda li span b { white-space: nowrap; font-size: 10.5px; }
+.mini-leyenda li b { font-weight: 700; color: var(--tinta2); font-variant-numeric: tabular-nums; }
+.mini-mov-nombre small { display: block; font-size: 10.5px; font-weight: 500; color: var(--tinta2); margin-top: 1px; }
+.fila-sub.envuelve { white-space: normal; overflow: visible; text-overflow: clip; }
+.mini-progreso { display: flex; align-items: center; gap: 8px; margin-top: auto; }
+.mini-progreso .progreso { flex: 1; height: 8px; }
+.mini-progreso b { font-size: var(--t-xs); font-weight: 800; font-variant-numeric: tabular-nums; }
+.mini-cabeza { display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; text-align: left; background: none; border: 0; padding: 0; color: inherit; font: inherit; font-weight: 700; cursor: pointer; }
+.mini-cabeza .enlace { font-size: var(--t-xs); }
+.mini-movs { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; }
+.mini-movs li + li { border-top: 1px solid var(--linea); }
+.mini-movs button { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 8px 0; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; min-height: 36px; }
+.mini-mov-nombre { font-size: var(--t-xs); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini-mov-monto { font-size: var(--t-xs); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mini-mov-monto.gasto { color: var(--gasto); }
+.mini-mov-monto.ingreso { color: var(--ingreso); }
+.mini-barras { display: flex; align-items: flex-end; justify-content: space-around; gap: 6px; height: 64px; margin-top: 4px; }
+.mini-barras .col-mes { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; height: 100%; min-width: 0; }
+.mini-barras .par { display: flex; align-items: flex-end; justify-content: center; gap: 3px; width: 100%; flex: 1; }
+.mini-barras .par i { display: block; width: 38%; max-width: 12px; border-radius: 4px 4px 2px 2px; min-height: 3px; }
+.mini-barras .par i.i { background: linear-gradient(180deg, var(--ingreso-vivo), var(--ingreso)); }
+.mini-barras .par i.g { background: linear-gradient(180deg, var(--gasto-vivo), var(--gasto)); }
+.mini-barras .par i.cero { visibility: hidden; min-height: 0; height: 0; }
+.mini-barras small { font-size: 10px; color: var(--tinta2); }
+.punto { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
+.punto.i { background: var(--ingreso); }
+.punto.g { background: var(--gasto); }
+/* «↓ 12 % menos que el mes pasado a esta fecha» en la tarjeta principal */
+.hero-comparar { display: inline-flex; align-items: center; margin-top: 8px; padding: 4px 10px; border-radius: 999px; font-size: var(--t-xs); font-weight: 700; background: rgba(255, 255, 255, 0.12); color: var(--sobre-hero); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
+.hero-comparar.bien { color: #9BF0C4; }
+.hero-comparar.mal { color: #FFB4A8; }
+@media (max-width: 345px) { .tablero .dos-columnas { grid-template-columns: 1fr; } .tablero .mini-tarjeta { min-height: 0; } }
